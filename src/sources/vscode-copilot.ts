@@ -28,12 +28,16 @@ export class VSCodeCopilotAdapter implements SourceAdapter {
       const wsPath = readWorkspacePath(join(wsDir, "workspace.json"));
 
       // Legacy format (pre-2026-04): workspaceStorage/<hash>/chatSessions/<id>.json
+      // Newer append-log format (2026-03+): workspaceStorage/<hash>/chatSessions/<id>.jsonl
       const chatDir = join(wsDir, "chatSessions");
       if (existsSync(chatDir)) {
         let files: Dirent[] = [];
         try { files = readdirSync(chatDir, { withFileTypes: true }); } catch { files = []; }
         for (const f of files) {
-          if (!f.isFile() || !f.name.endsWith(".json")) continue;
+          if (!f.isFile()) continue;
+          const isJson = f.name.endsWith(".json");
+          const isJsonl = f.name.endsWith(".jsonl");
+          if (!isJson && !isJsonl) continue;
           const p = join(chatDir, f.name);
           const st = statSync(p);
           if (st.size === 0) continue;
@@ -43,7 +47,9 @@ export class VSCodeCopilotAdapter implements SourceAdapter {
             sourcePath: p,
             sourceMtimeMs: st.mtimeMs,
             sourceSha256: sha,
-            load: async () => parseCopilotJson(p, buf.toString("utf8"), wsPath),
+            load: async () => isJsonl
+              ? parseCopilotChatSessionsJsonl(p, buf.toString("utf8"), wsPath)
+              : parseCopilotJson(p, buf.toString("utf8"), wsPath),
           };
         }
       }
@@ -86,12 +92,59 @@ function parseCopilotJson(sourcePath: string, content: string, workspacePath: st
   const obj = JSON.parse(content);
   const fileBase = basename(sourcePath, ".json");
   const sessionId = fileBase;
+  const requests = Array.isArray(obj.requests) ? obj.requests : [];
+  return buildSessionFromRequests(sourcePath, sessionId, requests, workspacePath);
+}
+
+function parseCopilotChatSessionsJsonl(sourcePath: string, content: string, workspacePath: string): NormalizedSession {
+  const fileBase = basename(sourcePath, ".jsonl");
+  let sessionId = fileBase;
+  let requests: any[] = [];
+  const lines = content.split("\n");
+  for (const line of lines) {
+    const s = line.trim();
+    if (!s) continue;
+    let obj: any;
+    try { obj = JSON.parse(s); } catch { continue; }
+    if (obj?.kind === 0 && obj?.v) {
+      if (typeof obj.v.sessionId === "string" && obj.v.sessionId) sessionId = obj.v.sessionId;
+      if (Array.isArray(obj.v.requests)) requests = obj.v.requests;
+    } else if (obj?.kind === 2 && Array.isArray(obj.k) && obj.k[0] === "requests" && obj.k.length === 1 && Array.isArray(obj.v)) {
+      // Full requests snapshot
+      requests = obj.v;
+    } else if (obj?.kind === 2 && Array.isArray(obj.k) && obj.k[0] === "requests" && obj.k.length >= 2 && typeof obj.k[1] === "number") {
+      // Targeted append/update: k = ["requests", index, ...path]
+      const idx = obj.k[1] as number;
+      if (obj.k.length === 2) {
+        requests[idx] = obj.v;
+      } else {
+        // Path into an existing request; best-effort deep set.
+        let cur: any = requests[idx];
+        if (cur === undefined) { cur = {}; requests[idx] = cur; }
+        for (let i = 2; i < obj.k.length - 1; i++) {
+          const seg = obj.k[i];
+          if (cur[seg] === undefined) cur[seg] = typeof obj.k[i + 1] === "number" ? [] : {};
+          cur = cur[seg];
+        }
+        cur[obj.k[obj.k.length - 1]] = obj.v;
+      }
+    }
+  }
+  return buildSessionFromRequests(sourcePath, sessionId, requests, workspacePath);
+}
+
+function buildSessionFromRequests(
+  sourcePath: string,
+  sessionId: string,
+  requests: any[],
+  workspacePath: string,
+): NormalizedSession {
   const messages: SessionMessage[] = [];
   let startedAt = "";
   let endedAt = "";
 
-  const requests = Array.isArray(obj.requests) ? obj.requests : [];
   for (const r of requests) {
+    if (!r) continue;
     const ts = typeof r.timestamp === "number" ? new Date(r.timestamp).toISOString() : undefined;
     if (ts) { if (!startedAt) startedAt = ts; endedAt = ts; }
     const userText = r?.message?.text;
