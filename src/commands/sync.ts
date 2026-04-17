@@ -47,7 +47,13 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
 
   for (const adapter of adapters) {
     for await (const d of adapter.discover()) {
-      const s = await d.load();
+      let s;
+      try {
+        s = await d.load();
+      } catch (err) {
+        console.log(chalk.yellow(`! skip ${d.sourcePath}: ${(err as Error).message}`));
+        continue;
+      }
       if (hasUnchanged(idx, s.tool, s.sessionId, d.sourceMtimeMs, d.sourceSha256)) {
         skippedCount++;
         continue;
