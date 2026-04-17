@@ -11,6 +11,7 @@ import { writeSession } from "../writer.js";
 import { deriveKey, encrypt } from "../crypto.js";
 import { readConfig, getPassphrase } from "../config.js";
 import { ensureRepo, commitAndPush, ensureDeviceBranch } from "../git-ops.js";
+import { migrateLegacyMainToDevice } from "../migrate.js";
 
 export interface SyncOptions {
   repoPath: string;
@@ -102,6 +103,10 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
   if (opts.push && opts.repoUrl && opts.deviceBranch) {
     console.log(chalk.gray(`\nOpening repo at ${opts.repoPath}...`));
     const git = await ensureRepo(opts.repoPath, opts.repoUrl);
+    const mig = await migrateLegacyMainToDevice(opts.repoPath, opts.deviceBranch);
+    if (mig.migrated) {
+      console.log(chalk.cyan(`Migrated legacy 'main' branch to '${opts.deviceBranch}'. 'main' is now unborn locally.`));
+    }
     try { await git.fetch(); } catch { /* remote may be empty / offline */ }
     console.log(chalk.gray(`Ensuring branch '${opts.deviceBranch}' is checked out...`));
     await ensureDeviceBranch(git, opts.deviceBranch);
