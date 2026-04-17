@@ -9,10 +9,13 @@ import { hostname } from "node:os";
 export function sanitizeBranchName(raw: string): string {
   let s = raw.replace(/[^A-Za-z0-9._-]/g, "-");
   s = s.replace(/-+/g, "-");
+  s = s.replace(/\.+/g, ".");
   s = s.replace(/^[-.]+|[-.]+$/g, "");
   if (s.length === 0) return "device";
-  if (s.length > 60) s = s.slice(0, 60).replace(/[-.]+$/g, "");
-  return s || "device";
+  if (s.length > 60) s = s.slice(0, 60).replace(/[-.]+$/, "");
+  if (s.endsWith(".lock")) s = s.slice(0, -5).replace(/[-.]+$/, "");
+  if (s.length === 0) return "device";
+  return s;
 }
 
 export function deviceBranchFromHostname(): string {

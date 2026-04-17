@@ -21,6 +21,15 @@ describe("sanitizeBranchName", () => {
     const long = "a".repeat(100);
     expect(sanitizeBranchName(long).length).toBe(60);
   });
+  it("collapses consecutive dots (git rejects ..)", () => {
+    expect(sanitizeBranchName("foo..bar")).toBe("foo.bar");
+  });
+  it("strips trailing .lock (git rejects refs ending in .lock)", () => {
+    expect(sanitizeBranchName("my.lock")).toBe("my");
+  });
+  it("preserves underscores", () => {
+    expect(sanitizeBranchName("my_host_01")).toBe("my_host_01");
+  });
 });
 
 describe("deviceBranchFromHostname", () => {
