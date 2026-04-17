@@ -1,0 +1,23 @@
+{
+  "version": 3,
+  "requesterUsername": "user",
+  "responderUsername": "GitHub Copilot",
+  "requests": [
+    {
+      "requestId": "r1",
+      "message": { "text": "Add MCP server and list active PRs" },
+      "response": [
+        { "kind": "markdownContent", "content": { "value": "Sure, I'll add it." } }
+      ],
+      "timestamp": 1744000000000
+    },
+    {
+      "requestId": "r2",
+      "message": { "text": "Thanks" },
+      "response": [
+        { "kind": "markdownContent", "content": { "value": "You're welcome." } }
+      ],
+      "timestamp": 1744001000000
+    }
+  ]
+}
