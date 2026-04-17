@@ -8,9 +8,10 @@ export async function run(argv: string[]) {
     .description("Initialize memvc with a private repo")
     .option("--local-path <path>", "local checkout path (default ~/memvc-repo)")
     .option("--encrypt", "encrypt raw files before commit")
-    .action(async (repoUrl: string, opts: { localPath?: string; encrypt?: boolean }) => {
+    .option("--device <name>", "device branch name (default: sanitized os.hostname())")
+    .action(async (repoUrl: string, opts: { localPath?: string; encrypt?: boolean; device?: string }) => {
       const { initCmd } = await import("./commands/init.js");
-      await initCmd({ repoUrl, localPath: opts.localPath, encrypt: opts.encrypt });
+      await initCmd({ repoUrl, localPath: opts.localPath, encrypt: opts.encrypt, device: opts.device });
     });
   program
     .command("sync")
