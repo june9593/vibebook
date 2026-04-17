@@ -34,6 +34,7 @@ export class VSCodeCopilotAdapter implements SourceAdapter {
         if (!f.isFile() || !f.name.endsWith(".json")) continue;
         const p = join(chatDir, f.name);
         const st = statSync(p);
+        if (st.size === 0) continue;
         const buf = readFileSync(p);
         const sha = createHash("sha256").update(buf).digest("hex");
         yield {
