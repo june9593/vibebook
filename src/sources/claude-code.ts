@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import type { SourceAdapter, DiscoveredSession } from "./base.js";
 import type { NormalizedSession, SessionMessage } from "../types.js";
 import { deriveSlug, projectSlugFromPath } from "../slug.js";
@@ -66,11 +66,13 @@ function parseClaudeJsonl(sourcePath: string, content: string): NormalizedSessio
 
   const firstUser = messages.find((m) => m.role === "user")?.text ?? "";
   const { slug, display } = deriveSlug(firstUser);
-  const shortId = (sessionId || "unknown").slice(0, 8);
+  const fallbackId = basename(sourcePath, ".jsonl");
+  const finalId = sessionId || fallbackId;
+  const shortId = finalId.slice(0, 8);
 
   return {
     tool: "claude",
-    sessionId: sessionId || "unknown",
+    sessionId: finalId,
     shortId,
     project: projectSlugFromPath(cwd),
     projectRaw: cwd,
