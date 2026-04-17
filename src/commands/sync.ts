@@ -103,7 +103,12 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     const git = await ensureRepo(opts.repoPath, opts.repoUrl);
     const all = [...pathsWritten, indexPath];
     console.log(chalk.gray(`Staging ${all.length} paths and committing...`));
-    const r = await commitAndPush(git, `memvc sync: +${newCount} sessions`, all);
+    const r = await commitAndPush(
+      git,
+      `memvc sync: +${newCount} sessions`,
+      all,
+      (stage) => console.log(chalk.gray(`  ${stage}`)),
+    );
     committed = r.committed; pushed = r.pushed;
     if (committed && !pushed) console.log(chalk.yellow("Commit done, push failed or skipped."));
   }

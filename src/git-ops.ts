@@ -20,12 +20,16 @@ export async function commitAndPush(
   git: SimpleGit,
   message: string,
   paths: string[],
+  onProgress?: (stage: string) => void,
 ): Promise<{ committed: boolean; pushed: boolean }> {
   if (paths.length === 0) return { committed: false, pushed: false };
+  onProgress?.(`git add (${paths.length} paths)...`);
   await git.add(paths);
   const status = await git.status();
   if (status.staged.length === 0) return { committed: false, pushed: false };
+  onProgress?.(`git commit (${status.staged.length} staged)...`);
   await git.commit(message);
+  onProgress?.(`git push to origin (uploading to remote — do not close)...`);
   try {
     await git.push("origin", "HEAD");
     return { committed: true, pushed: true };
