@@ -10,7 +10,7 @@ import type { IndexEntry } from "../types.js";
 import { writeSession } from "../writer.js";
 import { deriveKey, encrypt } from "../crypto.js";
 import { readConfig, getPassphrase } from "../config.js";
-import { ensureRepo, commitAndPush } from "../git-ops.js";
+import { ensureRepo, commitAndPush, ensureDeviceBranch } from "../git-ops.js";
 
 export interface SyncOptions {
   repoPath: string;
@@ -21,6 +21,7 @@ export interface SyncOptions {
   saltB64?: string;
   push?: boolean;
   repoUrl?: string;
+  deviceBranch?: string;
 }
 
 export interface SyncResult {
@@ -98,15 +99,19 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
   const indexPath = ".memvc/index.json";
 
   let committed = false, pushed = false;
-  if (opts.push && opts.repoUrl) {
+  if (opts.push && opts.repoUrl && opts.deviceBranch) {
     console.log(chalk.gray(`\nOpening repo at ${opts.repoPath}...`));
     const git = await ensureRepo(opts.repoPath, opts.repoUrl);
+    try { await git.fetch(); } catch { /* remote may be empty / offline */ }
+    console.log(chalk.gray(`Ensuring branch '${opts.deviceBranch}' is checked out...`));
+    await ensureDeviceBranch(git, opts.deviceBranch);
     const all = [...pathsWritten, indexPath];
     console.log(chalk.gray(`Staging ${all.length} paths and committing...`));
     const r = await commitAndPush(
       git,
       `memvc sync: +${newCount} sessions`,
       all,
+      opts.deviceBranch,
       (stage) => console.log(chalk.gray(`  ${stage}`)),
     );
     committed = r.committed; pushed = r.pushed;
@@ -126,6 +131,7 @@ export async function syncCmd(): Promise<void> {
     saltB64: cfg.salt,
     push: true,
     repoUrl: cfg.repoUrl,
+    deviceBranch: cfg.deviceBranch,
   });
   console.log(chalk.bold(`\nSynced: +${r.newCount} new, ${r.skippedCount} unchanged`));
   if (r.committed) console.log(chalk.cyan(r.pushed ? "Pushed." : "Committed (push failed)."));
