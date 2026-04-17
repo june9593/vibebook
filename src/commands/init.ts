@@ -21,6 +21,7 @@ export async function initCmd(opts: InitOptions): Promise<void> {
     repoUrl: opts.repoUrl,
     encrypt: !!opts.encrypt,
     salt: freshSaltBase64(),
+    deviceBranch: "",
   };
   writeConfig(cfg);
   console.log(chalk.green(`memvc initialized:`));

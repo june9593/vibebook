@@ -12,6 +12,7 @@ const Schema = z.object({
   repoUrl: z.string(),
   encrypt: z.boolean().default(false),
   salt: z.string(),          // base64 per-repo salt for scrypt
+  deviceBranch: z.string().default(""),
 });
 export type Config = z.infer<typeof Schema>;
 
