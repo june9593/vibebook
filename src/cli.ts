@@ -19,9 +19,15 @@ export async function run(argv: string[]) {
       const { syncCmd } = await import("./commands/sync.js");
       await syncCmd();
     });
-  program.command("list").description("List synced sessions").action(async () => {
-    throw new Error("not implemented");
-  });
+  program
+    .command("list")
+    .description("List synced sessions")
+    .option("--tool <name>", "filter by claude|copilot")
+    .option("--project <name>", "filter by project")
+    .action(async (opts: { tool?: "claude"|"copilot"; project?: string }) => {
+      const { listCmd } = await import("./commands/list.js");
+      await listCmd(opts);
+    });
   program.command("show <ref>").description("Show a session by slug or id").action(async () => {
     throw new Error("not implemented");
   });
