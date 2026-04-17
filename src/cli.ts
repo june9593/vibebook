@@ -12,9 +12,13 @@ export async function run(argv: string[]) {
       const { initCmd } = await import("./commands/init.js");
       await initCmd({ repoUrl, localPath: opts.localPath, encrypt: opts.encrypt });
     });
-  program.command("sync").description("Extract, commit, and push new sessions").action(async () => {
-    throw new Error("not implemented");
-  });
+  program
+    .command("sync")
+    .description("Extract, commit, and push new sessions")
+    .action(async () => {
+      const { syncCmd } = await import("./commands/sync.js");
+      await syncCmd();
+    });
   program.command("list").description("List synced sessions").action(async () => {
     throw new Error("not implemented");
   });
