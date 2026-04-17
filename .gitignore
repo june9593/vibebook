@@ -1,0 +1,5 @@
+node_modules
+dist
+.memvc-local
+*.log
+.DS_Store
