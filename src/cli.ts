@@ -28,8 +28,12 @@ export async function run(argv: string[]) {
       const { listCmd } = await import("./commands/list.js");
       await listCmd(opts);
     });
-  program.command("show <ref>").description("Show a session by slug or id").action(async () => {
-    throw new Error("not implemented");
-  });
+  program
+    .command("show <ref>")
+    .description("Show a session by sessionId, shortId, slug, or display name")
+    .action(async (ref: string) => {
+      const { showCmd } = await import("./commands/show.js");
+      await showCmd(ref);
+    });
   await program.parseAsync(argv);
 }
