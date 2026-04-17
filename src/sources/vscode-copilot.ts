@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, existsSync, Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { join, basename } from "node:path";
 import type { SourceAdapter, DiscoveredSession } from "./base.js";
@@ -25,24 +25,48 @@ export class VSCodeCopilotAdapter implements SourceAdapter {
     for (const w of workspaces) {
       if (!w.isDirectory()) continue;
       const wsDir = join(this.root, w.name);
-      const chatDir = join(wsDir, "chatSessions");
-      if (!existsSync(chatDir)) continue;
       const wsPath = readWorkspacePath(join(wsDir, "workspace.json"));
-      let files;
-      try { files = readdirSync(chatDir, { withFileTypes: true }); } catch { continue; }
-      for (const f of files) {
-        if (!f.isFile() || !f.name.endsWith(".json")) continue;
-        const p = join(chatDir, f.name);
-        const st = statSync(p);
-        if (st.size === 0) continue;
-        const buf = readFileSync(p);
-        const sha = createHash("sha256").update(buf).digest("hex");
-        yield {
-          sourcePath: p,
-          sourceMtimeMs: st.mtimeMs,
-          sourceSha256: sha,
-          load: async () => parseCopilotJson(p, buf.toString("utf8"), wsPath),
-        };
+
+      // Legacy format (pre-2026-04): workspaceStorage/<hash>/chatSessions/<id>.json
+      const chatDir = join(wsDir, "chatSessions");
+      if (existsSync(chatDir)) {
+        let files: Dirent[] = [];
+        try { files = readdirSync(chatDir, { withFileTypes: true }); } catch { files = []; }
+        for (const f of files) {
+          if (!f.isFile() || !f.name.endsWith(".json")) continue;
+          const p = join(chatDir, f.name);
+          const st = statSync(p);
+          if (st.size === 0) continue;
+          const buf = readFileSync(p);
+          const sha = createHash("sha256").update(buf).digest("hex");
+          yield {
+            sourcePath: p,
+            sourceMtimeMs: st.mtimeMs,
+            sourceSha256: sha,
+            load: async () => parseCopilotJson(p, buf.toString("utf8"), wsPath),
+          };
+        }
+      }
+
+      // New format (2026-04+): workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/<id>.jsonl
+      const transcriptsDir = join(wsDir, "GitHub.copilot-chat", "transcripts");
+      if (existsSync(transcriptsDir)) {
+        let tfiles: Dirent[] = [];
+        try { tfiles = readdirSync(transcriptsDir, { withFileTypes: true }); } catch { tfiles = []; }
+        for (const f of tfiles) {
+          if (!f.isFile() || !f.name.endsWith(".jsonl")) continue;
+          const p = join(transcriptsDir, f.name);
+          const st = statSync(p);
+          if (st.size === 0) continue;
+          const buf = readFileSync(p);
+          const sha = createHash("sha256").update(buf).digest("hex");
+          yield {
+            sourcePath: p,
+            sourceMtimeMs: st.mtimeMs,
+            sourceSha256: sha,
+            load: async () => parseCopilotTranscript(p, buf.toString("utf8"), wsPath),
+          };
+        }
       }
     }
   }
@@ -86,6 +110,69 @@ function parseCopilotJson(sourcePath: string, content: string, workspacePath: st
       .join("\n");
     if (assistantText) {
       messages.push({ role: "assistant", text: assistantText, timestamp: ts, raw: respParts });
+    }
+  }
+
+  const firstUser = messages.find((m) => m.role === "user")?.text ?? "";
+  const { slug, display } = deriveSlug(firstUser);
+  const shortId = sessionId.slice(0, 8);
+
+  return {
+    tool: "copilot",
+    sessionId,
+    shortId,
+    project: projectSlugFromPath(workspacePath),
+    projectRaw: workspacePath,
+    startedAt: startedAt || new Date(0).toISOString(),
+    endedAt: endedAt || new Date(0).toISOString(),
+    nameSlug: slug,
+    displayName: display,
+    messages,
+    sourcePath,
+  };
+}
+
+function parseCopilotTranscript(sourcePath: string, content: string, workspacePath: string): NormalizedSession {
+  const fileBase = basename(sourcePath, ".jsonl");
+  let sessionId = fileBase;
+  const messages: SessionMessage[] = [];
+  let startedAt = "";
+  let endedAt = "";
+
+  const lines = content.split("\n");
+  for (const line of lines) {
+    const s = line.trim();
+    if (!s) continue;
+    let obj: any;
+    try { obj = JSON.parse(s); } catch { continue; }
+    const t = obj?.type;
+    const ts = typeof obj?.timestamp === "string" ? obj.timestamp : undefined;
+    if (ts) { if (!startedAt) startedAt = ts; endedAt = ts; }
+
+    if (t === "session.start") {
+      const sid = obj?.data?.sessionId;
+      if (typeof sid === "string" && sid) sessionId = sid;
+      continue;
+    }
+    if (t === "user.message") {
+      const text = typeof obj?.data?.content === "string" ? obj.data.content : "";
+      if (text) messages.push({ role: "user", text, timestamp: ts, raw: obj });
+      continue;
+    }
+    if (t === "assistant.message") {
+      const text = typeof obj?.data?.content === "string" ? obj.data.content : "";
+      const reasoning = typeof obj?.data?.reasoningText === "string" ? obj.data.reasoningText : "";
+      const toolReqs = Array.isArray(obj?.data?.toolRequests) ? obj.data.toolRequests : [];
+      const toolSummary = toolReqs
+        .map((r: any) => `[tool:${r?.name ?? "?"} ${typeof r?.arguments === "string" ? r.arguments : JSON.stringify(r?.arguments ?? "")}]`)
+        .join("\n");
+      const combined = [reasoning, text, toolSummary].filter(Boolean).join("\n");
+      if (combined) messages.push({ role: "assistant", text: combined, timestamp: ts, raw: obj });
+      continue;
+    }
+    if (t === "tool.execution_start" || t === "tool.execution_complete") {
+      messages.push({ role: "tool", text: JSON.stringify(obj?.data ?? {}), timestamp: ts, raw: obj });
+      continue;
     }
   }
 
