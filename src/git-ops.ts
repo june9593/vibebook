@@ -1,0 +1,35 @@
+import { simpleGit, SimpleGit } from "simple-git";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+
+export async function ensureRepo(localPath: string, repoUrl: string): Promise<SimpleGit> {
+  if (!existsSync(localPath)) {
+    mkdirSync(localPath, { recursive: true });
+    const git = simpleGit();
+    await git.clone(repoUrl, localPath);
+  }
+  const git = simpleGit(localPath);
+  if (!existsSync(join(localPath, ".git"))) {
+    await git.init();
+    await git.addRemote("origin", repoUrl).catch(() => { /* exists */ });
+  }
+  return git;
+}
+
+export async function commitAndPush(
+  git: SimpleGit,
+  message: string,
+  paths: string[],
+): Promise<{ committed: boolean; pushed: boolean }> {
+  if (paths.length === 0) return { committed: false, pushed: false };
+  await git.add(paths);
+  const status = await git.status();
+  if (status.staged.length === 0) return { committed: false, pushed: false };
+  await git.commit(message);
+  try {
+    await git.push("origin", "HEAD");
+    return { committed: true, pushed: true };
+  } catch {
+    return { committed: true, pushed: false };
+  }
+}
