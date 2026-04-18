@@ -23,6 +23,7 @@
 - ✅ **Sprint 2.5**：Article 生成（单 thread，text-mode runner，SKIP 哨兵，失败隔离）
 - ✅ **Sprint 2.6**：Chapter 全量重写（latestArticleHash 触发，CHAPTER_VERSION 触发，失败保留旧版）
 - ✅ **Sprint 2.7**：TOC 机械生成（front page + 全局 timeline + 每章 timeline，markdown 转义）
+- ✅ **Sprint 2.8**：sync 接入 digest pipeline（runDigest orchestrator；--no-digest flag；book 分支二次 commit）
 
 ## 总体路线（鸟瞰）
 
@@ -81,7 +82,7 @@ Sprint 7  打磨：增量 chapter、judge-merge、tag 维度
   - `src/digest/toc.ts`：`book/index.md`、`book/_meta/timeline.md`、每章 `timeline.md`
   - 纯字符串拼接，不调 LLM
   - 测试：fixture → snapshot
-- **2.8 sync 接入 pipeline**
+- **2.8 sync 接入 pipeline** ✓
   - `src/commands/sync.ts`：extract 之后跑阶段 3-7（plan/thread/article/chapter/toc），最后一次 push
   - 加 `--no-digest` flag 走旧路径
   - 整合测试：fixture 仓库 + mock runner，跑完 `memvc sync`，断言 `book/` 内容
