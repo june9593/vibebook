@@ -124,16 +124,44 @@ describe("runSync — digest integration", () => {
     }
   });
 
-  it("with encrypt=true: digest is skipped with status skipped-encrypted", async () => {
-    const r = await runSync({
-      repoPath: repo, claudeRoot, vscodeRoot,
-      encrypt: true,
-      passphrase: "test-pass",
-      saltB64: Buffer.from("0123456789abcdef").toString("base64"),
-      runnerConfig: { runner: "claude-cli", runnerModel: "" },
-    });
-    expect(r.digestStatus).toBe("skipped-encrypted");
-    expect(existsSync(join(repo, "book"))).toBe(false);
+  it("with encrypt=true + valid passphrase: digest runs end-to-end against encrypted raw", async () => {
+    // Stage the same canned LLM responses as the happy-path test.
+    const queue: RunResult[] = [
+      { ok: true, durationMs: 1, text: JSON.stringify([
+        { threadId: "t-enc", title: "加密", sessionIds: [extractedSessionId(repo, claudeRoot)] },
+      ])},
+      { ok: true, durationMs: 1, text: "# 加密\n\n文章。" },
+      { ok: true, durationMs: 1, text: "# edge-memvc\n\n章。" },
+    ];
+    const fakeRunner: LlmRunner = {
+      async run() {
+        const n = queue.shift();
+        if (!n) throw new Error("exhausted");
+        return n;
+      },
+    };
+    const runnerMod = await import("../../src/digest/runner.js");
+    const spy = vi.spyOn(runnerMod, "createRunner").mockReturnValue(fakeRunner);
+    try {
+      const r = await runSync({
+        repoPath: repo, claudeRoot, vscodeRoot,
+        encrypt: true,
+        passphrase: "test-pass",
+        saltB64: Buffer.from("0123456789abcdef").toString("base64"),
+        runnerConfig: { runner: "claude-cli", runnerModel: "" },
+      });
+      expect(r.digestStatus).toBe("ok");
+      expect(r.digestReport!.articlesOk).toBe(1);
+      expect(r.digestReport!.chaptersRewritten).toEqual(["edge-memvc"]);
+      // Article + chapter are plaintext on disk.
+      expect(existsSync(join(repo, "book/edge-memvc/chapter.md"))).toBe(true);
+      // Raw session is encrypted on disk.
+      const idxFile = loadIndex(repo);
+      const entry = Object.values(idxFile.entries)[0]!;
+      expect(entry.relativePath).toMatch(/\.enc$/);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("with noDigest=false + fake runner returning failed thread: digestStatus=failed, no book commit", async () => {
