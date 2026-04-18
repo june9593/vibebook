@@ -15,8 +15,8 @@ const __dirname = dirname(__filename);
 
 /**
  * Bump when the chapter prompt or output format changes in a way that should
- * force regeneration of every chapter.md. (Currently unused by chapterNeedsRewrite —
- * version drift is reflected via latestArticleHash through articleVersion.)
+ * force regeneration of every chapter.md. A bump forces regeneration via
+ * chapterNeedsRewrite (existing entries with an older chapterVersion are stale).
  */
 export const CHAPTER_VERSION = 1;
 
@@ -86,10 +86,13 @@ export function chapterNeedsRewrite(bookIndex: BookIndex, project: string): bool
   const articles = publishableArticlesFor(bookIndex, project);
   const existing = bookIndex.chapters[project];
   if (articles.length === 0) {
-    // Nothing to write and no prior chapter — leave it alone.
-    return existing !== undefined ? false : false;
+    // No publishable articles: preserve any prior chapter.md and ChapterEntry
+    // unchanged (don't tear down a chapter just because every thread became
+    // skip/failed). A future spec change can revisit this.
+    return false;
   }
   if (!existing) return true;
+  if (existing.chapterVersion !== CHAPTER_VERSION) return true;
   const currentHash = computeChapterArticleHash(articles.map(summaryFor));
   return currentHash !== existing.latestArticleHash;
 }

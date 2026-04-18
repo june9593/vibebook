@@ -128,11 +128,23 @@ describe("chapterNeedsRewrite", () => {
       threads: {
         ok: entry({ project: "p", threadId: "ok", latestSourceSha: "x" }),
         sk: entry({ project: "p", threadId: "sk", skip: true, articlePath: "" }),
-        fa: entry({ project: "p", threadId: "fa", articleStatus: "failed", articlePath: "" }),
+        fa: entry({ project: "p", threadId: "fa", articleStatus: "failed", articlePath: "book/p/articles/fa.md" }),
       },
       chapters: { p: chapter({ latestArticleHash: okOnly }) },
     };
     expect(chapterNeedsRewrite(idx, "p")).toBe(false);
+  });
+
+  it("returns true when existing ChapterEntry's chapterVersion is older than CHAPTER_VERSION", () => {
+    // Simulate a stored entry written under an older prompt version.
+    const summaries = [{ threadId: "t1", articleVersion: 1, latestSourceSha: "deadbeef" }];
+    const hash = computeChapterArticleHash(summaries);
+    const idx: BookIndex = {
+      version: 1,
+      threads: { t1: entry({ project: "p", threadId: "t1" }) },
+      chapters: { p: chapter({ chapterVersion: CHAPTER_VERSION - 1, latestArticleHash: hash }) },
+    };
+    expect(chapterNeedsRewrite(idx, "p")).toBe(true);
   });
 });
 
