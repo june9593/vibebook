@@ -1,23 +1,9 @@
-import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { LlmRunner } from "./runner.js";
 import type { ThreadCandidate, SessionForBatching } from "./types.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-/** Resolve repo-rooted assets/prompts/thread.md from this module's compiled location. */
-function loadThreadPrompt(): string {
-  // src/digest/threading.ts → ../../assets/prompts/thread.md when running ts-node;
-  // dist/digest/threading.js → ../../assets/prompts/thread.md when built.
-  // Both layouts produce the same relative path.
-  const p = join(__dirname, "..", "..", "assets", "prompts", "thread.md");
-  return readFileSync(p, "utf8");
-}
+import { loadPromptAsset } from "./prompt-loader.js";
 
 /** Cache the prompt at module load — file is static for the process lifetime. */
-const THREAD_PROMPT = loadThreadPrompt();
+const THREAD_PROMPT = loadPromptAsset(import.meta.url, "thread");
 
 /**
  * Normalize a thread slug for cross-batch identity comparison.

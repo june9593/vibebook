@@ -1,6 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import type { LlmRunner } from "./runner.js";
 import {
@@ -9,9 +8,7 @@ import {
   type ChapterEntry,
   upsertChapter,
 } from "./book-index.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { loadPromptAsset } from "./prompt-loader.js";
 
 /**
  * Bump when the chapter prompt or output format changes in a way that should
@@ -20,13 +17,7 @@ const __dirname = dirname(__filename);
  */
 export const CHAPTER_VERSION = 1;
 
-function loadChapterPrompt(): string {
-  // src/digest/chapter.ts → ../../assets/prompts/chapter.md (and same from dist/)
-  const p = join(__dirname, "..", "..", "assets", "prompts", "chapter.md");
-  return readFileSync(p, "utf8");
-}
-
-const CHAPTER_PROMPT = loadChapterPrompt();
+const CHAPTER_PROMPT = loadPromptAsset(import.meta.url, "chapter");
 
 export interface ChapterArticleSummary {
   threadId: string;

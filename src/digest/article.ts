@@ -1,7 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { readFileSync } from "node:fs";
 import type { LlmRunner } from "./runner.js";
 import {
   type BookIndex,
@@ -9,9 +7,7 @@ import {
   upsertThread,
   latestSourceShaFor,
 } from "./book-index.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { loadPromptAsset } from "./prompt-loader.js";
 
 /**
  * Bump this when the article prompt or output format changes in a way that
@@ -20,13 +16,7 @@ const __dirname = dirname(__filename);
  */
 export const ARTICLE_VERSION = 1;
 
-function loadArticlePrompt(): string {
-  // src/digest/article.ts → ../../assets/prompts/article.md  (and same from dist/)
-  const p = join(__dirname, "..", "..", "assets", "prompts", "article.md");
-  return readFileSync(p, "utf8");
-}
-
-const ARTICLE_PROMPT = loadArticlePrompt();
+const ARTICLE_PROMPT = loadPromptAsset(import.meta.url, "article");
 
 export interface ArticleInput {
   /** Stable thread id (slug, lowercase-hyphenated). Used as BookIndex key + filename. */
