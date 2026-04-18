@@ -24,6 +24,8 @@ export async function initCmd(opts: InitOptions): Promise<void> {
     encrypt: !!opts.encrypt,
     salt: freshSaltBase64(),
     deviceBranch: opts.device ?? deviceBranchFromHostname(),
+    runner: "claude-cli",
+    runnerModel: "",
   };
   writeConfig(cfg);
   console.log(chalk.green(`memvc initialized:`));

@@ -13,6 +13,8 @@ const Schema = z.object({
   encrypt: z.boolean().default(false),
   salt: z.string(),          // base64 per-repo salt for scrypt
   deviceBranch: z.string().default(""),
+  runner: z.enum(["claude-cli", "anthropic-api", "github-models"]).default("claude-cli"),
+  runnerModel: z.string().default(""),
 });
 export type Config = z.infer<typeof Schema>;
 
