@@ -91,7 +91,7 @@ export async function generateArticle(
   } catch (e) {
     // Defensive: a well-behaved runner returns ok:false rather than throwing,
     // but we treat a thrown error the same way to preserve isolation.
-    const error = (e as Error).message;
+    const error = e instanceof Error ? e.message : String(e);
     upsertThread(bookIndex, failedEntry(input, sourceSha, nowIso, error));
     return { status: "failed", error };
   }
@@ -127,7 +127,7 @@ export async function generateArticle(
     mkdirSync(dirname(abs), { recursive: true });
     writeFileSync(abs, res.text);
   } catch (e) {
-    const error = (e as Error).message;
+    const error = e instanceof Error ? e.message : String(e);
     upsertThread(bookIndex, failedEntry(input, sourceSha, nowIso, error));
     return { status: "failed", error };
   }
