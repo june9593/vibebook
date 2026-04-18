@@ -147,7 +147,11 @@ interface BookIndex {
 src/
   digest/
     types.ts              BookEntry / ThreadCandidate / ArticleDraft 等类型
-    runner.ts             runClaude(promptFile, vars, opts) — spawn `claude -p` 子进程
+    runner.ts             LlmRunner 接口 + createRunner(config) 工厂
+    runners/
+      claude-cli.ts       spawn `claude -p` 子进程
+      anthropic-api.ts    @anthropic-ai/sdk（Sprint 3 stub）
+      github-models.ts    GitHub Models（Sprint 3 stub）
     batcher.ts            按 token 预算把 session 切 batch
     threading.ts          fan-out subagents + 全局 merge
     article.ts            一个 thread → 一篇 article
@@ -173,21 +177,40 @@ tests/
     book-index.test.ts
 ```
 
-### `runClaude` 签名
+### LLM Runner 抽象
 
-```ts
-export type ClaudeRunResult =
-  | { ok: true;  text: string; stderr: string; durationMs: number }
-  | { ok: false; error: string; stderr: string; durationMs: number };
+Config 新增字段：
 
-export async function runClaude(
-  promptFile: string,                       // .memvc/prompts/thread.md 等
-  variables: Record<string, string>,        // {{sessionMd}}、{{sessionList}} 等占位符
-  opts?: { timeoutMs?: number; outputFormat?: "json" | "text" },
-): Promise<ClaudeRunResult>;
+```json
+{
+  "runner": "claude-cli",
+  "runnerModel": ""
+}
 ```
 
-执行 `claude -p --output-format json` 子进程，stdout 解析 JSON。默认超时 180s。
+`runner` 取值：`"claude-cli"` | `"anthropic-api"` | `"github-models"`。
+MVP 只实现 `claude-cli`；其余两个留接口，Sprint 3 补全。
+API key 从环境变量读（`ANTHROPIC_API_KEY` / `GITHUB_TOKEN`），不存 config。
+
+```ts
+// src/digest/runner.ts
+export type RunResult =
+  | { ok: true;  text: string; durationMs: number }
+  | { ok: false; error: string; durationMs: number };
+
+export interface LlmRunner {
+  run(prompt: string, vars: Record<string, string>, opts?: {
+    timeoutMs?: number;
+    outputFormat?: "json" | "text";
+  }): Promise<RunResult>;
+}
+
+// src/digest/runners/claude-cli.ts  — spawn `claude -p`
+// src/digest/runners/anthropic-api.ts  — @anthropic-ai/sdk（stub）
+// src/digest/runners/github-models.ts  — GitHub Models endpoint（stub）
+```
+
+`claude-cli` 实现：执行 `claude -p --output-format json` 子进程，stdout 解析 JSON。默认超时 180s。`runnerModel` 非空时传 `--model`。
 
 ### `threading.merge` 算法（纯代码，确定性）
 
