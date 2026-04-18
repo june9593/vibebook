@@ -70,6 +70,10 @@ export function buildBatchingInput(
 /**
  * Persist skip:true BookEntries for each skip candidate so future syncs
  * don't reconsider them. Returns the list of skipped threadIds.
+ *
+ * If a candidate has no sessionIds, or its first sessionId isn't found in
+ * indexFile, the entry is still recorded with project="unknown" and a
+ * console.warn is emitted (don't drop — we still want the skip persisted).
  */
 export function recordSkippedThreadCandidates(
   bookIndex: BookIndex,
@@ -83,6 +87,11 @@ export function recordSkippedThreadCandidates(
     if (!c.skip) continue;
     const firstSid = c.sessionIds[0];
     const ie = firstSid ? sessionLookup.get(firstSid) : undefined;
+    if (firstSid === undefined || ie === undefined) {
+      console.warn(
+        `pipeline.ts: skip candidate ${c.threadId} has no resolvable session — recording with project="unknown"`,
+      );
+    }
     const project = ie?.project ?? "unknown";
     const entry: BookEntry = {
       threadId: c.threadId,

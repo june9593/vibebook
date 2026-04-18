@@ -209,6 +209,20 @@ describe("recordSkippedThreadCandidates", () => {
     );
     expect(book.threads["t"]!.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
+
+  it("warns and falls back to project=unknown when the first sessionId is not in indexFile", () => {
+    const idx = makeIndex([]);
+    const book: BookIndex = { version: 1, threads: {}, chapters: {} };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    recordSkippedThreadCandidates(
+      book,
+      [{ threadId: "ghost", title: "", sessionIds: ["nope"], skip: true, reason: "x" }],
+      idx,
+    );
+    expect(book.threads["ghost"]!.project).toBe("unknown");
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/ghost/));
+    warn.mockRestore();
+  });
 });
 
 // =====================================================================
@@ -271,16 +285,19 @@ describe("buildArticleInputs", () => {
     expect(() => buildArticleInputs(cands, idx, repoRoot)).toThrow(/multiple projects/);
   });
 
-  it("warns and drops candidates whose sessionIds aren't all in indexFile", () => {
-    const e = ie({ sessionId: "real", relativePath: "raw_sessions/c/p/x/r.md" });
-    writeSessionMd(e.relativePath, "x");
-    const idx = makeIndex([e]);
+  it("warns and drops only the bad candidate, keeping siblings", () => {
+    const eReal = ie({ sessionId: "real", relativePath: "raw_sessions/c/p/x/r.md", sourceSha256: "shaR" });
+    const eOk = ie({ sessionId: "ok", relativePath: "raw_sessions/c/p/x/o.md", sourceSha256: "shaO" });
+    writeSessionMd(eReal.relativePath, "x");
+    writeSessionMd(eOk.relativePath, "y");
+    const idx = makeIndex([eReal, eOk]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const cands: ThreadCandidate[] = [
       { threadId: "ghost", title: "", sessionIds: ["real", "missing-from-index"] },
+      { threadId: "good", title: "ok", sessionIds: ["ok"] },
     ];
     const got = buildArticleInputs(cands, idx, repoRoot);
-    expect(got).toEqual([]);
+    expect(got.map((x) => x.threadId)).toEqual(["good"]);
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/ghost/));
     warn.mockRestore();
   });
