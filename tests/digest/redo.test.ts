@@ -123,6 +123,40 @@ describe("runDigestRedo — recovers a previously-failed thread", () => {
 });
 
 // =====================================================================
+describe("runDigestRedo — failed thread whose retry returns SKIP", () => {
+  it("counts as threadsNewlySkipped, BookEntry becomes skip:true", async () => {
+    const e = ie({ sessionId: "s1", shortId: "s1" });
+    writeSessionMd(e.relativePath, "trivial body");
+    const idx = makeIndex([e]);
+    const book: BookIndex = {
+      version: 1,
+      threads: {
+        "t-fail": {
+          threadId: "t-fail", project: "proj-a", title: "T",
+          sessionIds: ["s1"],
+          articlePath: "",
+          articleVersion: ARTICLE_VERSION,
+          latestSourceSha: "shaA",
+          articleStatus: "failed",
+          updatedAt: "2026-04-10T00:00:00Z",
+        },
+      },
+      chapters: {},
+    };
+    const { runner } = makeRunner([
+      { ok: true, durationMs: 1, text: "SKIP: 内容太短" },
+    ]);
+    const r = await runDigestRedo(runner, repoRoot, idx, book);
+    expect(r.threadsAttempted).toBe(1);
+    expect(r.threadsRecovered).toBe(0);
+    expect(r.threadsStillFailed).toBe(0);
+    expect(r.threadsNewlySkipped).toBe(1);
+    expect(book.threads["t-fail"]!.skip).toBe(true);
+    expect(book.threads["t-fail"]!.articleStatus).toBe("ok");
+  });
+});
+
+// =====================================================================
 describe("runDigestRedo — failed thread that fails again stays failed", () => {
   it("articleStatus stays failed; chapter still attempted but no-articles for that project", async () => {
     const e = ie({ sessionId: "s1", shortId: "s1" });

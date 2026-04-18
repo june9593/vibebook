@@ -10,6 +10,8 @@ export interface RedoReport {
   threadsAttempted: number;
   threadsRecovered: number;
   threadsStillFailed: number;
+  /** Threads whose retry returned a SKIP sentinel (now skip:true in BookIndex). */
+  threadsNewlySkipped: number;
   threadsUnresolvable: number;
   chaptersRewritten: string[];
   chaptersFailed: { project: string; error: string }[];
@@ -41,6 +43,7 @@ export async function runDigestRedo(
     threadsAttempted: 0,
     threadsRecovered: 0,
     threadsStillFailed: 0,
+    threadsNewlySkipped: 0,
     threadsUnresolvable: 0,
     chaptersRewritten: [],
     chaptersFailed: [],
@@ -70,17 +73,16 @@ export async function runDigestRedo(
     const res = await generateArticle(runner, repoRoot, input, bookIndex);
     if (res.status === "ok") {
       report.threadsRecovered++;
+    } else if (res.status === "skipped") {
+      report.threadsNewlySkipped++;
     } else {
-      // Both "failed" and "skipped" outcomes are non-recoveries here.
-      // (A SKIP from a previously-failed thread is unusual but possible if
-      // the LLM now decides the content isn't worth keeping.)
       report.threadsStillFailed++;
     }
   }
 
   // ----------------------------------- Phase 2: force-rewrite ALL chapters
   const projects = collectProjectsWithArticles(bookIndex);
-  for (const project of [...projects].sort()) {
+  for (const project of Array.from(projects).sort()) {
     const res = await generateChapter(runner, repoRoot, project, bookIndex);
     if (res.status === "ok") report.chaptersRewritten.push(project);
     else if (res.status === "failed") report.chaptersFailed.push({ project, error: res.error });
@@ -98,10 +100,6 @@ export async function runDigestRedo(
  * Projects appearing in any non-skip, non-failed BookEntry. Each gets
  * force-rewritten. (Failed-and-still-failed projects with no other articles
  * yield "no-articles" from generateChapter, which is silently skipped.)
- *
- * We include projects whose ONLY threads are still failed, on the chance the
- * project also has a chapters[] entry (legacy). generateChapter handles the
- * empty case cleanly.
  */
 function collectProjectsWithArticles(bookIndex: BookIndex): Set<string> {
   const out = new Set<string>();
@@ -110,10 +108,5 @@ function collectProjectsWithArticles(bookIndex: BookIndex): Set<string> {
     if (be.articleStatus === "failed") continue;
     out.add(be.project);
   }
-  // Also include any project that already has a chapter entry (so a chapter
-  // for a project that just became all-failed doesn't get orphaned by the
-  // "no publishable articles" filter — generateChapter will then no-op,
-  // which is the right outcome).
-  for (const p of Object.keys(bookIndex.chapters)) out.add(p);
   return out;
 }

@@ -40,7 +40,7 @@ export async function digestCmd(opts: DigestOptions): Promise<void> {
     runnerConfig: { runner: cfg.runner, runnerModel: cfg.runnerModel },
   });
   console.log(chalk.bold(
-    `\n--redo: ${report.threadsRecovered} recovered / ${report.threadsStillFailed} still failed / ${report.threadsUnresolvable} unresolvable; ${report.chaptersRewritten.length} chapters rewritten`,
+    `\n--redo: ${report.threadsRecovered} recovered / ${report.threadsNewlySkipped} newly-skipped / ${report.threadsStillFailed} still failed / ${report.threadsUnresolvable} unresolvable; ${report.chaptersRewritten.length} chapters rewritten`,
   ));
   if (report.chaptersFailed.length > 0) {
     for (const f of report.chaptersFailed) {
