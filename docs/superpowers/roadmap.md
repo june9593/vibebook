@@ -20,6 +20,7 @@
 - ✅ Spec：可配置 LLM Runner（`claude-cli` / `anthropic-api` / `github-models`）
 - ✅ **Sprint 2.1 + 2.2**：LlmRunner 抽象 + BookIndex 读写
 - ✅ **Sprint 2.3 + 2.4**：Batcher（greedy pack） + Threading（runner per batch + cross-batch slug merge）
+- ✅ **Sprint 2.5**：Article 生成（单 thread，text-mode runner，SKIP 哨兵，失败隔离）
 
 ## 总体路线（鸟瞰）
 
