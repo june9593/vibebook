@@ -2,12 +2,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Buffer } from "node:buffer";
 import {
   findNewSessionEntries,
   buildBatchingInput,
   recordSkippedThreadCandidates,
   buildArticleInputs,
 } from "../../src/digest/pipeline.js";
+import { encrypt as encryptBuf, deriveKey } from "../../src/crypto.js";
 import type { IndexFile, IndexEntry, Tool } from "../../src/types.js";
 import type { BookIndex, BookEntry } from "../../src/digest/book-index.js";
 import type { ThreadCandidate } from "../../src/digest/types.js";
@@ -150,9 +152,32 @@ describe("buildBatchingInput", () => {
     expect(got.map((x) => x.sessionId)).toEqual(["s1", "s2"]);
   });
 
-  it("throws when relativePath ends with .enc (encryption is out of scope for 2.8.1)", () => {
+  it("decrypts .enc paths when a key is provided", () => {
+    const key = deriveKey("test-pass", Buffer.from("0123456789abcdef"));
     const e = ie({ relativePath: "raw_sessions/c/p/2026-04-15/secret.md.enc" });
-    expect(() => buildBatchingInput([e], repoRoot)).toThrow(/encrypted/);
+    const ciphertext = encryptBuf(Buffer.from("x".repeat(35)), key);
+    const abs = join(repoRoot, e.relativePath);
+    mkdirSync(join(abs, ".."), { recursive: true });
+    writeFileSync(abs, ciphertext);
+    const got = buildBatchingInput([e], repoRoot, key);
+    expect(got[0]!.tokenEstimate).toBe(10);
+  });
+
+  it("throws when relativePath ends with .enc but no key is provided", () => {
+    const e = ie({ relativePath: "raw_sessions/c/p/2026-04-15/secret.md.enc" });
+    writeSessionMd(e.relativePath, "some bytes");
+    expect(() => buildBatchingInput([e], repoRoot, null)).toThrow(/encrypted session/);
+  });
+
+  it("throws clearly when decryption fails (wrong key)", () => {
+    const right = deriveKey("right-pass", Buffer.from("0123456789abcdef"));
+    const wrong = deriveKey("wrong-pass", Buffer.from("0123456789abcdef"));
+    const e = ie({ relativePath: "raw_sessions/c/p/2026-04-15/secret.md.enc" });
+    const ciphertext = encryptBuf(Buffer.from("body"), right);
+    const abs = join(repoRoot, e.relativePath);
+    mkdirSync(join(abs, ".."), { recursive: true });
+    writeFileSync(abs, ciphertext);
+    expect(() => buildBatchingInput([e], repoRoot, wrong)).toThrow(/decrypt/);
   });
 
   it("throws clearly when a session's .md is missing on disk", () => {
@@ -300,5 +325,21 @@ describe("buildArticleInputs", () => {
     expect(got.map((x) => x.threadId)).toEqual(["good"]);
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/ghost/));
     warn.mockRestore();
+  });
+
+  it("decrypts .enc session bodies when a key is provided", () => {
+    const key = deriveKey("test-pass", Buffer.from("0123456789abcdef"));
+    const e = ie({ relativePath: "raw_sessions/c/p/2026-04-15/secret.md.enc" });
+    const ciphertext = encryptBuf(Buffer.from("PLAINTEXT BODY"), key);
+    const abs = join(repoRoot, e.relativePath);
+    mkdirSync(join(abs, ".."), { recursive: true });
+    writeFileSync(abs, ciphertext);
+    const idx = makeIndex([e]);
+    const cands: ThreadCandidate[] = [
+      { threadId: "t", title: "T", sessionIds: ["sid-1"] },
+    ];
+    const got = buildArticleInputs(cands, idx, repoRoot, key);
+    expect(got).toHaveLength(1);
+    expect(got[0]!.sessionsMd).toContain("PLAINTEXT BODY");
   });
 });
