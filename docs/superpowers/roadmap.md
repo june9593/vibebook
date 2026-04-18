@@ -24,6 +24,7 @@
 - ✅ **Sprint 2.6**：Chapter 全量重写（latestArticleHash 触发，CHAPTER_VERSION 触发，失败保留旧版）
 - ✅ **Sprint 2.7**：TOC 机械生成（front page + 全局 timeline + 每章 timeline，markdown 转义）
 - ✅ **Sprint 2.8**：sync 接入 digest pipeline（runDigest orchestrator；--no-digest flag；book 分支二次 commit）
+- ✅ **Sprint 2.9**：`memvc digest --redo` 命令（重跑 failed thread；强制重写所有 chapter）
 
 ## 总体路线（鸟瞰）
 
@@ -86,7 +87,7 @@ Sprint 7  打磨：增量 chapter、judge-merge、tag 维度
   - `src/commands/sync.ts`：extract 之后跑阶段 3-7（plan/thread/article/chapter/toc），最后一次 push
   - 加 `--no-digest` flag 走旧路径
   - 整合测试：fixture 仓库 + mock runner，跑完 `memvc sync`，断言 `book/` 内容
-- **2.9 `memvc digest --redo` 命令**
+- **2.9 `memvc digest --redo` 命令** ✓
   - `src/commands/digest.ts`：把所有 `articleStatus="failed"` 重跑；强制重写所有 chapter
   - 测试：fixture，先制造 failed，再 redo
 
