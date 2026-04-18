@@ -36,6 +36,12 @@ export function loadBookIndex(repoRoot: string): BookIndex {
   if (!existsSync(p)) return { version: 1, threads: {}, chapters: {} };
   const parsed = JSON.parse(readFileSync(p, "utf8")) as BookIndex;
   if (parsed.version !== 1) throw new Error(`unsupported book index version: ${parsed.version}`);
+  if (!parsed.threads || typeof parsed.threads !== "object") {
+    throw new Error("index.book.json malformed: missing or invalid 'threads'");
+  }
+  if (!parsed.chapters || typeof parsed.chapters !== "object") {
+    throw new Error("index.book.json malformed: missing or invalid 'chapters'");
+  }
   return parsed;
 }
 

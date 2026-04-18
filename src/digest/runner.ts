@@ -1,6 +1,7 @@
 import { runClaudeCli } from "./runners/claude-cli.js";
 import { runAnthropicApi } from "./runners/anthropic-api.js";
 import { runGithubModels } from "./runners/github-models.js";
+import type { Config } from "../config.js";
 
 export type RunResult =
   | { ok: true; text: string; durationMs: number }
@@ -15,10 +16,7 @@ export interface LlmRunner {
   run(prompt: string, vars: Record<string, string>, opts?: RunOptions): Promise<RunResult>;
 }
 
-export interface RunnerConfig {
-  runner: "claude-cli" | "anthropic-api" | "github-models";
-  runnerModel: string;
-}
+export type RunnerConfig = Pick<Config, "runner" | "runnerModel">;
 
 /**
  * Substitute `{{key}}` placeholders in `prompt` with values from `vars`.

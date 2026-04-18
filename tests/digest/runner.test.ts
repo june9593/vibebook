@@ -140,4 +140,13 @@ describe("claude-cli runner", () => {
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toMatch(/failed to spawn claude/);
   });
+
+  it("returns ok:true with raw stdout when outputFormat is 'text'", async () => {
+    fakeSpawn("just plain text\n", 0);
+    const { createRunner } = await import("../../src/digest/runner.js");
+    const r = createRunner({ runner: "claude-cli", runnerModel: "" });
+    const res = await r.run("x", {}, { outputFormat: "text" });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.text).toBe("just plain text\n");
+  });
 });

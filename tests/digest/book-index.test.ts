@@ -65,6 +65,16 @@ describe("loadBookIndex", () => {
     writeFileSync(path, JSON.stringify(raw));
     expect(() => loadBookIndex(repo)).toThrow(/version/);
   });
+
+  it("throws when threads key is missing", () => {
+    const repo = tmpRepo();
+    saveBookIndex(repo, { version: 1, threads: {}, chapters: {} });
+    const path = join(repo, ".memvc/index.book.json");
+    const raw = JSON.parse(readFileSync(path, "utf8"));
+    delete raw.threads;
+    writeFileSync(path, JSON.stringify(raw));
+    expect(() => loadBookIndex(repo)).toThrow(/malformed/);
+  });
 });
 
 describe("upsertThread", () => {

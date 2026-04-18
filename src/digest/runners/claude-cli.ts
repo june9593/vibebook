@@ -70,6 +70,12 @@ export async function runClaudeCli(
         });
         return;
       }
+      // Text mode: return stdout as-is.
+      if ((opts.outputFormat ?? "json") === "text") {
+        settle({ ok: true, text: stdout, durationMs });
+        return;
+      }
+      // JSON mode (default): parse and extract result.
       try {
         const parsed = JSON.parse(stdout) as { result?: unknown; is_error?: boolean };
         if (parsed.is_error) {
