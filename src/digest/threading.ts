@@ -16,6 +16,9 @@ function loadThreadPrompt(): string {
   return readFileSync(p, "utf8");
 }
 
+/** Cache the prompt at module load — file is static for the process lifetime. */
+const THREAD_PROMPT = loadThreadPrompt();
+
 /**
  * Normalize a thread slug for cross-batch identity comparison.
  * Rules (spec §threading.merge):
@@ -143,12 +146,17 @@ export function mergeCandidates(perBatch: ThreadCandidate[][]): ThreadCandidate[
   return out;
 }
 
-/** Two raw slugs are equivalent if their normalized forms are equal OR one is a prefix of the other. */
+/**
+ * Two raw slugs are equivalent if their normalized forms are equal OR one is
+ * a hyphen-segment prefix of the other. The "+ '-'" guard prevents
+ * `"fix"` from matching `"fixture"` (raw startsWith would say true; segment
+ * prefix says false).
+ */
 function areEquivalent(a: string, b: string): boolean {
   const na = normalizeSlug(a);
   const nb = normalizeSlug(b);
   if (na === nb) return true;
-  if (na.length > 0 && nb.length > 0 && (na.startsWith(nb) || nb.startsWith(na))) return true;
+  if (na.length > 0 && nb.length > 0 && (na.startsWith(nb + "-") || nb.startsWith(na + "-"))) return true;
   return false;
 }
 
@@ -190,12 +198,10 @@ export async function runThreading(
   runner: LlmRunner,
   batches: SessionForBatching[][],
 ): Promise<ThreadCandidate[]> {
-  const prompt = loadThreadPrompt();
-
   const results = await Promise.all(
     batches.map((batch) =>
       runner.run(
-        prompt,
+        THREAD_PROMPT,
         { sessionList: JSON.stringify(batch.map((s) => ({
           sessionId: s.sessionId,
           project: s.project,

@@ -61,8 +61,8 @@ describe("makeBatches", () => {
     ];
     const batches = makeBatches(sessions, { maxTokens: 100 });
     // All four fit in one batch but ordering must be: proj1 sessions first
-    // (by endedAt), then proj2 sessions (by endedAt). Project order is the
-    // order of first appearance in the input.
+    // (by endedAt), then proj2 sessions (by endedAt). Project order is
+    // alphabetical (proj1 < proj2).
     expect(batches.length).toBe(1);
     expect(batches[0].map((x) => x.sessionId)).toEqual([
       "p1-a", "p1-b", "p2-a", "p2-b",

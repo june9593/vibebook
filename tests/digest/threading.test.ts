@@ -104,6 +104,20 @@ describe("mergeCandidates", () => {
     expect(merged.length).toBe(2);
     expect(merged.map((c) => c.threadId).sort()).toEqual(["add-feature", "fix-bug"]);
   });
+
+  it("does NOT collapse slugs whose normalized forms share only a non-segment prefix", () => {
+    // "fix" is a raw-string prefix of "fixture", but not a hyphen-segment
+    // prefix. They are unrelated threads and must stay distinct.
+    const batchA: ThreadCandidate[] = [
+      { threadId: "fix", title: "fix", sessionIds: ["s1"] },
+    ];
+    const batchB: ThreadCandidate[] = [
+      { threadId: "fixture", title: "fixture", sessionIds: ["s2"] },
+    ];
+    const merged = mergeCandidates([batchA, batchB]);
+    expect(merged.length).toBe(2);
+    expect(merged.map((c) => c.threadId).sort()).toEqual(["fix", "fixture"]);
+  });
 });
 
 describe("runThreading", () => {
