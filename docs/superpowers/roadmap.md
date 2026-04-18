@@ -18,6 +18,8 @@
   —— commit `b130177`, `00b8b42`
 - ✅ Spec：`docs/superpowers/specs/2026-04-17-layered-knowledge-base-design.md`
 - ✅ Spec：可配置 LLM Runner（`claude-cli` / `anthropic-api` / `github-models`）
+- ✅ **Sprint 2.1 + 2.2**：LlmRunner 抽象 + BookIndex 读写
+- ✅ **Sprint 2.3 + 2.4**：Batcher（greedy pack） + Threading（runner per batch + cross-batch slug merge）
 
 ## 总体路线（鸟瞰）
 
