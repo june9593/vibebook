@@ -21,6 +21,7 @@
 - ✅ **Sprint 2.1 + 2.2**：LlmRunner 抽象 + BookIndex 读写
 - ✅ **Sprint 2.3 + 2.4**：Batcher（greedy pack） + Threading（runner per batch + cross-batch slug merge）
 - ✅ **Sprint 2.5**：Article 生成（单 thread，text-mode runner，SKIP 哨兵，失败隔离）
+- ✅ **Sprint 2.6**：Chapter 全量重写（latestArticleHash 触发，CHAPTER_VERSION 触发，失败保留旧版）
 - ✅ **Sprint 2.7**：TOC 机械生成（front page + 全局 timeline + 每章 timeline，markdown 转义）
 
 ## 总体路线（鸟瞰）
@@ -72,7 +73,7 @@ Sprint 7  打磨：增量 chapter、judge-merge、tag 维度
   - prompt：`assets/prompts/article.md`
   - 失败：写 `articleStatus="failed" + articleError`，不阻塞其它
   - 测试：mock runner，写出文件、index 更新
-- **2.6 Chapter 全量重写**
+- **2.6 Chapter 全量重写** ✓
   - `src/digest/chapter.ts`：每个 articles 实际变过的 project 全量重写 `chapter.md`
   - prompt：`assets/prompts/chapter.md`
   - 测试：mock runner、`latestArticleHash` 触发条件
