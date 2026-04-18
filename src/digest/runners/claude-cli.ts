@@ -16,6 +16,7 @@ export async function runClaudeCli(
 
   return new Promise<RunResult>((resolve) => {
     let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const settle = (r: RunResult) => {
       if (settled) return;
       settled = true;
@@ -36,7 +37,7 @@ export async function runClaudeCli(
     }
 
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       proc.kill?.("SIGTERM");
       settle({
         ok: false,

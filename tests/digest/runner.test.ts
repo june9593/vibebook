@@ -70,7 +70,7 @@ function fakeSpawn(stdout: string, exitCode: number, opts: { delayMs?: number } 
 }
 
 describe("claude-cli runner", () => {
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => vi.resetAllMocks());
 
   it("returns ok:true with parsed result text on exit code 0", async () => {
     fakeSpawn(JSON.stringify({ result: "hello world", is_error: false }), 0);
@@ -128,5 +128,16 @@ describe("claude-cli runner", () => {
     const res = await r.run("x", {}, { timeoutMs: 5 });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toMatch(/timeout/i);
+  });
+
+  it("returns ok:false when spawn throws synchronously (no TDZ on timer)", async () => {
+    vi.mocked(childProcess.spawn).mockImplementation(() => {
+      throw new Error("EACCES");
+    });
+    const { createRunner } = await import("../../src/digest/runner.js");
+    const r = createRunner({ runner: "claude-cli", runnerModel: "" });
+    const res = await r.run("x", {});
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/failed to spawn claude/);
   });
 });
