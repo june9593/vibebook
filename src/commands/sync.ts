@@ -32,7 +32,7 @@ export interface SyncOptions {
   runnerConfig?: Pick<Config, "runner" | "runnerModel">;
 }
 
-export type DigestStatus = "ok" | "skipped-encrypted" | "skipped-flag" | "failed" | "not-attempted";
+export type DigestStatus = "ok" | "skipped-encrypted" | "skipped-flag" | "skipped-no-runner" | "failed" | "not-attempted";
 
 export interface SyncResult {
   newCount: number;
@@ -153,7 +153,8 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
       "Digest pipeline skipped: encrypted raw is not yet supported (book/ unchanged).",
     ));
   } else if (!opts.runnerConfig) {
-    digestStatus = "skipped-flag";
+    digestStatus = "skipped-no-runner";
+    console.log(chalk.yellow("Digest pipeline skipped: no runnerConfig provided."));
   } else {
     console.log(chalk.gray("\nRunning digest pipeline (phases 3-7)..."));
     const bookIndex = loadBookIndex(opts.repoPath);
@@ -168,7 +169,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     } catch (e) {
       digestStatus = "failed";
       digestError = e instanceof Error ? e.message : String(e);
-      console.log(chalk.yellow(`! digest failed: ${digestError}`));
+      console.log(chalk.red(`! digest failed: ${digestError}`));
     }
 
     // -------------------- Phase 8 (book push) --------------------
@@ -177,19 +178,17 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
       // We're already on opts.deviceBranch from the raw commit above. Stage all
       // book paths the digest touched + the BookIndex, and commit if dirty.
       const bookPaths = collectDigestPaths(digestReport, opts.repoPath);
-      if (bookPaths.length > 0) {
-        const r = await commitAndPush(
-          git,
-          `memvc digest: +${digestReport.articlesOk} articles, ${digestReport.chaptersRewritten.length} chapters`,
-          bookPaths,
-          opts.deviceBranch,
-          (stage) => console.log(chalk.gray(`  ${stage}`)),
-        );
-        digestCommitted = r.committed;
-        digestPushed = r.pushed;
-        if (digestCommitted && !digestPushed) {
-          console.log(chalk.yellow("Digest commit done, push failed or skipped."));
-        }
+      const r = await commitAndPush(
+        git,
+        `memvc digest: +${digestReport.articlesOk} articles, ${digestReport.chaptersRewritten.length} chapters`,
+        bookPaths,
+        opts.deviceBranch,
+        (stage) => console.log(chalk.gray(`  ${stage}`)),
+      );
+      digestCommitted = r.committed;
+      digestPushed = r.pushed;
+      if (digestCommitted && !digestPushed) {
+        console.log(chalk.yellow("Digest commit done, push failed or skipped."));
       }
     }
   }
@@ -259,10 +258,12 @@ export async function syncCmd(opts: { noDigest?: boolean } = {}): Promise<void> 
         : "Digest produced no changes to commit.",
     ));
   } else if (r.digestStatus === "failed") {
-    console.log(chalk.yellow(`Digest failed: ${r.digestError}`));
+    console.log(chalk.red(`Digest failed: ${r.digestError}`));
   } else if (r.digestStatus === "skipped-encrypted") {
     console.log(chalk.yellow("Digest skipped (encrypted mode)."));
   } else if (r.digestStatus === "skipped-flag") {
     console.log(chalk.gray("Digest skipped (--no-digest)."));
+  } else if (r.digestStatus === "skipped-no-runner") {
+    console.log(chalk.yellow("Digest skipped (no runner configured)."));
   }
 }

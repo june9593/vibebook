@@ -74,12 +74,12 @@ describe("runSync — digest integration", () => {
     expect(existsSync(join(repo, ".memvc/index.book.json"))).toBe(false);
   });
 
-  it("with noDigest=false but no runnerConfig: digest is skipped (no crash)", async () => {
+  it("with noDigest=false but no runnerConfig: digest is skipped with skipped-no-runner status", async () => {
     const r = await runSync({
       repoPath: repo, claudeRoot, vscodeRoot, encrypt: false,
     });
     // No runnerConfig provided → digest skipped silently (treated like --no-digest).
-    expect(r.digestStatus).toBe("skipped-flag");
+    expect(r.digestStatus).toBe("skipped-no-runner");
     expect(existsSync(join(repo, "book"))).toBe(false);
   });
 
