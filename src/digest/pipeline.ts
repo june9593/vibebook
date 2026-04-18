@@ -126,61 +126,13 @@ export function buildArticleInputs(
   indexFile: IndexFile,
   repoRoot: string,
 ): ArticleInput[] {
-  const sessionLookup = sessionLookupBySid(indexFile);
   const out: ArticleInput[] = [];
   for (const c of candidates) {
     if (c.skip) continue;
-    const entries: IndexEntry[] = [];
-    let missing = false;
-    for (const sid of c.sessionIds) {
-      const ie = sessionLookup.get(sid);
-      if (!ie) {
-        console.warn(
-          `pipeline.ts: candidate ${c.threadId} references unknown sessionId ${sid} — dropping candidate`,
-        );
-        missing = true;
-        break;
-      }
-      entries.push(ie);
-    }
-    if (missing) continue;
-
-    const projects = new Set(entries.map((e) => e.project));
-    if (projects.size > 1) {
-      throw new Error(
-        `pipeline.ts: candidate ${c.threadId} spans multiple projects (${[...projects].join(", ")})`,
-      );
-    }
-    const project = entries[0]!.project;
-
-    entries.sort((a, b) => (a.endedAt < b.endedAt ? -1 : a.endedAt > b.endedAt ? 1 : 0));
-
-    const bodies: string[] = [];
-    for (const e of entries) {
-      if (e.relativePath.endsWith(".enc")) {
-        throw new Error(
-          `pipeline.ts: encrypted sessions not supported in digest pipeline (got ${e.relativePath})`,
-        );
-      }
-      let body: string;
-      try {
-        body = readFileSync(join(repoRoot, e.relativePath), "utf8");
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        throw new Error(`pipeline.ts: cannot read session ${e.relativePath}: ${msg}`);
-      }
-      bodies.push(`--- SESSION ${e.shortId} (${e.endedAt}) ---\n\n${body}`);
-    }
-
-    out.push({
-      threadId: c.threadId,
-      project,
-      title: c.title,
-      sessionIds: entries.map((e) => e.sessionId),
-      sessionShas: entries.map((e) => e.sourceSha256),
-      sessionsMd: bodies.join("\n\n"),
-      endedAt: entries[entries.length - 1]!.endedAt,
-    });
+    const input = buildArticleInputForThread(
+      c.threadId, c.title, c.sessionIds, indexFile, repoRoot, "pipeline.ts",
+    );
+    if (input !== null) out.push(input);
   }
   return out;
 }
@@ -192,4 +144,72 @@ function sessionLookupBySid(indexFile: IndexFile): Map<string, IndexEntry> {
   const m = new Map<string, IndexEntry>();
   for (const e of Object.values(indexFile.entries)) m.set(e.sessionId, e);
   return m;
+}
+
+/**
+ * Materialize one ArticleInput from a thread's recorded sessionIds. Returns
+ * null when any sessionId can't be resolved in indexFile (with console.warn);
+ * throws on `.enc` paths or IO failure.
+ *
+ * Used by both `buildArticleInputs` (fresh threading candidates) and the
+ * orchestrator's stale-thread regeneration path. Keeps the separator format,
+ * endedAt-ASC ordering, and encryption policy in ONE place.
+ */
+export function buildArticleInputForThread(
+  threadId: string,
+  title: string,
+  sessionIds: string[],
+  indexFile: IndexFile,
+  repoRoot: string,
+  contextLabel: string,
+): ArticleInput | null {
+  const lookup = sessionLookupBySid(indexFile);
+  const entries: IndexEntry[] = [];
+  for (const sid of sessionIds) {
+    const ie = lookup.get(sid);
+    if (!ie) {
+      console.warn(
+        `${contextLabel}: thread ${threadId} references unknown sessionId ${sid} — skipping`,
+      );
+      return null;
+    }
+    entries.push(ie);
+  }
+
+  const projects = new Set(entries.map((e) => e.project));
+  if (projects.size > 1) {
+    throw new Error(
+      `${contextLabel}: thread ${threadId} spans multiple projects (${[...projects].join(", ")})`,
+    );
+  }
+  const project = entries[0]!.project;
+
+  entries.sort((a, b) => (a.endedAt < b.endedAt ? -1 : a.endedAt > b.endedAt ? 1 : 0));
+
+  const bodies: string[] = [];
+  for (const e of entries) {
+    if (e.relativePath.endsWith(".enc")) {
+      throw new Error(
+        `${contextLabel}: encrypted sessions not supported in digest pipeline (got ${e.relativePath})`,
+      );
+    }
+    let body: string;
+    try {
+      body = readFileSync(join(repoRoot, e.relativePath), "utf8");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`${contextLabel}: cannot read session ${e.relativePath}: ${msg}`);
+    }
+    bodies.push(`--- SESSION ${e.shortId} (${e.endedAt}) ---\n\n${body}`);
+  }
+
+  return {
+    threadId,
+    project,
+    title,
+    sessionIds: entries.map((e) => e.sessionId),
+    sessionShas: entries.map((e) => e.sourceSha256),
+    sessionsMd: bodies.join("\n\n"),
+    endedAt: entries[entries.length - 1]!.endedAt,
+  };
 }

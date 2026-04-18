@@ -1,12 +1,6 @@
-import { join } from "node:path";
-import { readFileSync } from "node:fs";
 import type { LlmRunner } from "./runner.js";
-import type { IndexFile, IndexEntry } from "../types.js";
-import {
-  type BookIndex,
-  type BookEntry,
-  loadBookIndex as _unused1, // import side-effect-free anchor; actual load is caller's job
-} from "./book-index.js";
+import type { IndexFile } from "../types.js";
+import { type BookIndex } from "./book-index.js";
 import { makeBatches } from "./batcher.js";
 import { runThreading } from "./threading.js";
 import {
@@ -24,10 +18,8 @@ import {
   buildBatchingInput,
   recordSkippedThreadCandidates,
   buildArticleInputs,
+  buildArticleInputForThread,
 } from "./pipeline.js";
-
-// Marker so the unused import doesn't get tree-shaken or linted away.
-void _unused1;
 
 export interface DigestReport {
   newSessions: number;
@@ -84,8 +76,10 @@ export async function runDigest(
   // ------------------------------ stale-thread re-generation (article-version drift)
   // Spec line 99: BookEntries whose articleVersion is below current need rewrite.
   // We don't include failed (those are 2.9 --redo) or skip threads.
-  const staleInputs = buildStaleArticleInputs(bookIndex, indexFile, repoRoot);
-  const allArticleInputs = articleInputs.concat(staleInputs);
+  const freshThreadIds = new Set(articleInputs.map((i) => i.threadId));
+  const staleInputs = buildStaleArticleInputs(bookIndex, indexFile, repoRoot)
+    .filter((i) => !freshThreadIds.has(i.threadId));
+  const allArticleInputs = [...articleInputs, ...staleInputs];
 
   // Track which projects had any article touched, so chapter phase only
   // considers them (in addition to chapterNeedsRewrite's own gate).
@@ -135,47 +129,14 @@ function buildStaleArticleInputs(
   repoRoot: string,
 ): ArticleInput[] {
   const out: ArticleInput[] = [];
-  const lookup = new Map<string, IndexEntry>();
-  for (const e of Object.values(indexFile.entries)) lookup.set(e.sessionId, e);
-
   for (const be of Object.values(bookIndex.threads)) {
     if (be.skip) continue;
     if (be.articleStatus === "failed") continue;
     if (be.articleVersion === ARTICLE_VERSION) continue;
-
-    const entries: IndexEntry[] = [];
-    let missing = false;
-    for (const sid of be.sessionIds) {
-      const ie = lookup.get(sid);
-      if (!ie) {
-        console.warn(`orchestrator.ts: stale thread ${be.threadId} references unknown sessionId ${sid} — skipping rewrite`);
-        missing = true;
-        break;
-      }
-      entries.push(ie);
-    }
-    if (missing) continue;
-
-    entries.sort((a, b) => (a.endedAt < b.endedAt ? -1 : a.endedAt > b.endedAt ? 1 : 0));
-
-    const bodies: string[] = [];
-    for (const e of entries) {
-      if (e.relativePath.endsWith(".enc")) {
-        throw new Error(`orchestrator.ts: encrypted sessions not supported (got ${e.relativePath})`);
-      }
-      const body = readFileSync(join(repoRoot, e.relativePath), "utf8");
-      bodies.push(`--- SESSION ${e.shortId} (${e.endedAt}) ---\n\n${body}`);
-    }
-
-    out.push({
-      threadId: be.threadId,
-      project: be.project,
-      title: be.title,
-      sessionIds: entries.map((e) => e.sessionId),
-      sessionShas: entries.map((e) => e.sourceSha256),
-      sessionsMd: bodies.join("\n\n"),
-      endedAt: entries[entries.length - 1]!.endedAt,
-    });
+    const input = buildArticleInputForThread(
+      be.threadId, be.title, be.sessionIds, indexFile, repoRoot, "orchestrator.ts",
+    );
+    if (input !== null) out.push(input);
   }
   return out;
 }
