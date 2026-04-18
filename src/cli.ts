@@ -15,10 +15,12 @@ export async function run(argv: string[]) {
     });
   program
     .command("sync")
-    .description("Extract, commit, and push new sessions")
-    .action(async () => {
+    .description("Extract, commit, push raw sessions; then run digest pipeline (phases 3-7) and push book branch")
+    .option("--no-digest", "skip digest pipeline (only runs extract + raw push)")
+    .action(async (opts: { digest?: boolean }) => {
       const { syncCmd } = await import("./commands/sync.js");
-      await syncCmd();
+      // commander's --no-X sets opts.X = false when the flag is present, true otherwise.
+      await syncCmd({ noDigest: opts.digest === false });
     });
   program
     .command("list")

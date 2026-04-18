@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { Buffer } from "node:buffer";
 import chalk from "chalk";
@@ -9,9 +9,12 @@ import { loadIndex, saveIndex, hasUnchanged, upsertEntry } from "../index-store.
 import type { IndexEntry } from "../types.js";
 import { writeSession } from "../writer.js";
 import { deriveKey, encrypt } from "../crypto.js";
-import { readConfig, getPassphrase } from "../config.js";
+import { readConfig, getPassphrase, type Config } from "../config.js";
 import { ensureRepo, commitAndPush, ensureDeviceBranch } from "../git-ops.js";
 import { migrateLegacyMainToDevice } from "../migrate.js";
+import { loadBookIndex, saveBookIndex } from "../digest/book-index.js";
+import { createRunner } from "../digest/runner.js";
+import { runDigest, type DigestReport } from "../digest/orchestrator.js";
 
 export interface SyncOptions {
   repoPath: string;
@@ -23,7 +26,13 @@ export interface SyncOptions {
   push?: boolean;
   repoUrl?: string;
   deviceBranch?: string;
+  /** When true, skip phases 3-7 (digest). Default false. */
+  noDigest?: boolean;
+  /** Runner config — required when noDigest is false and encrypt is false. */
+  runnerConfig?: Pick<Config, "runner" | "runnerModel">;
 }
+
+export type DigestStatus = "ok" | "skipped-encrypted" | "skipped-flag" | "failed" | "not-attempted";
 
 export interface SyncResult {
   newCount: number;
@@ -31,6 +40,13 @@ export interface SyncResult {
   pathsWritten: string[];
   committed: boolean;
   pushed: boolean;
+  digestStatus: DigestStatus;
+  digestError?: string;
+  digestReport?: DigestReport;
+  /** True iff a second commit (book branch update) was created. */
+  digestCommitted: boolean;
+  /** True iff the book commit was pushed (only meaningful when digestCommitted is true). */
+  digestPushed: boolean;
 }
 
 export async function runSync(opts: SyncOptions): Promise<SyncResult> {
@@ -123,10 +139,104 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     if (committed && !pushed) console.log(chalk.yellow("Commit done, push failed or skipped."));
   }
 
-  return { newCount, skippedCount, pathsWritten, committed, pushed };
+  // -------------------- Phases 3-7 (digest) + phase 8 (book push) --------------------
+  let digestStatus: DigestStatus = "not-attempted";
+  let digestError: string | undefined;
+  let digestReport: DigestReport | undefined;
+  let digestCommitted = false, digestPushed = false;
+
+  if (opts.noDigest) {
+    digestStatus = "skipped-flag";
+  } else if (opts.encrypt) {
+    digestStatus = "skipped-encrypted";
+    console.log(chalk.yellow(
+      "Digest pipeline skipped: encrypted raw is not yet supported (book/ unchanged).",
+    ));
+  } else if (!opts.runnerConfig) {
+    digestStatus = "skipped-flag";
+  } else {
+    console.log(chalk.gray("\nRunning digest pipeline (phases 3-7)..."));
+    const bookIndex = loadBookIndex(opts.repoPath);
+    const runner = createRunner(opts.runnerConfig);
+    try {
+      digestReport = await runDigest(runner, opts.repoPath, idx, bookIndex);
+      saveBookIndex(opts.repoPath, bookIndex);
+      digestStatus = "ok";
+      console.log(chalk.gray(
+        `  digest: +${digestReport.articlesOk} articles, ${digestReport.threadsSkipped} skip, ${digestReport.articlesFailed} fail; chapters [${digestReport.chaptersRewritten.join(", ")}]`,
+      ));
+    } catch (e) {
+      digestStatus = "failed";
+      digestError = e instanceof Error ? e.message : String(e);
+      console.log(chalk.yellow(`! digest failed: ${digestError}`));
+    }
+
+    // -------------------- Phase 8 (book push) --------------------
+    if (digestStatus === "ok" && opts.push && opts.repoUrl && opts.deviceBranch && digestReport) {
+      const git = await ensureRepo(opts.repoPath, opts.repoUrl);
+      // We're already on opts.deviceBranch from the raw commit above. Stage all
+      // book paths the digest touched + the BookIndex, and commit if dirty.
+      const bookPaths = collectDigestPaths(digestReport, opts.repoPath);
+      if (bookPaths.length > 0) {
+        const r = await commitAndPush(
+          git,
+          `memvc digest: +${digestReport.articlesOk} articles, ${digestReport.chaptersRewritten.length} chapters`,
+          bookPaths,
+          opts.deviceBranch,
+          (stage) => console.log(chalk.gray(`  ${stage}`)),
+        );
+        digestCommitted = r.committed;
+        digestPushed = r.pushed;
+        if (digestCommitted && !digestPushed) {
+          console.log(chalk.yellow("Digest commit done, push failed or skipped."));
+        }
+      }
+    }
+  }
+
+  return {
+    newCount, skippedCount, pathsWritten,
+    committed, pushed,
+    digestStatus, digestError, digestReport,
+    digestCommitted, digestPushed,
+  };
 }
 
-export async function syncCmd(): Promise<void> {
+/**
+ * Collect repo-rooted paths the digest produced or might have produced:
+ *   - .memvc/index.book.json
+ *   - every entry in digestReport.tocFilesWritten
+ *   - book/<project>/articles/* for articles touched (we glob the project dirs)
+ *   - book/<project>/chapter.md for each rewritten chapter
+ *
+ * commitAndPush handles missing files gracefully (git add of a non-existent
+ * path is a no-op when the path was previously committed; otherwise git just
+ * stages what's there). We avoid a recursive walk to keep this fast.
+ */
+function collectDigestPaths(report: DigestReport, repoRoot: string): string[] {
+  const out = new Set<string>();
+  out.add(".memvc/index.book.json");
+  for (const p of report.tocFilesWritten) out.add(p);
+  for (const project of report.chaptersRewritten) out.add(`book/${project}/chapter.md`);
+  // Articles: rather than enumerate per-thread, stage the whole articles dir
+  // for any project we touched. git add accepts directory paths and stages
+  // every file under them.
+  const projectsTouched = new Set<string>();
+  for (const project of report.chaptersRewritten) projectsTouched.add(project);
+  // tocFilesWritten includes book/<project>/timeline.md for non-empty projects;
+  // pull project names from those.
+  for (const path of report.tocFilesWritten) {
+    const m = path.match(/^book\/([^/]+)\/timeline\.md$/);
+    if (m && m[1]) projectsTouched.add(m[1]);
+  }
+  for (const project of projectsTouched) {
+    const dir = `book/${project}/articles`;
+    if (existsSync(join(repoRoot, dir))) out.add(dir);
+  }
+  return [...out];
+}
+
+export async function syncCmd(opts: { noDigest?: boolean } = {}): Promise<void> {
   const cfg = readConfig();
   const passphrase = cfg.encrypt ? getPassphrase() : undefined;
   const r = await runSync({
@@ -137,7 +247,22 @@ export async function syncCmd(): Promise<void> {
     push: true,
     repoUrl: cfg.repoUrl,
     deviceBranch: cfg.deviceBranch,
+    noDigest: opts.noDigest,
+    runnerConfig: { runner: cfg.runner, runnerModel: cfg.runnerModel },
   });
   console.log(chalk.bold(`\nSynced: +${r.newCount} new, ${r.skippedCount} unchanged`));
-  if (r.committed) console.log(chalk.cyan(r.pushed ? "Pushed." : "Committed (push failed)."));
+  if (r.committed) console.log(chalk.cyan(r.pushed ? "Pushed (raw)." : "Committed raw (push failed)."));
+  if (r.digestStatus === "ok") {
+    console.log(chalk.cyan(
+      r.digestCommitted
+        ? (r.digestPushed ? "Pushed (book)." : "Committed book (push failed).")
+        : "Digest produced no changes to commit.",
+    ));
+  } else if (r.digestStatus === "failed") {
+    console.log(chalk.yellow(`Digest failed: ${r.digestError}`));
+  } else if (r.digestStatus === "skipped-encrypted") {
+    console.log(chalk.yellow("Digest skipped (encrypted mode)."));
+  } else if (r.digestStatus === "skipped-flag") {
+    console.log(chalk.gray("Digest skipped (--no-digest)."));
+  }
 }
