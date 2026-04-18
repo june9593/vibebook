@@ -37,6 +37,7 @@ export function generateToc(repoRoot: string, bookIndex: BookIndex): GenerateToc
       continue;
     }
     if (e.skip) continue;
+    if (e.articleStatus === "ok" && e.articlePath === "") continue;
     okEntriesByProject.get(e.project)!.push(e);
     totalOk += 1;
   }
@@ -115,7 +116,8 @@ function renderGlobalTimeline(entries: BookEntry[], timelinePath: string): strin
   lines.push("|---|---|---|---|");
   for (const e of sorted) {
     const link = relPosix(dirname(timelinePath), e.articlePath);
-    lines.push(`| ${e.updatedAt} | ${e.project} | ${e.title} | [link](${link}) |`);
+    const linkSafe = /[|\n\r]/.test(link) ? mdCell(link) : link;
+    lines.push(`| ${e.updatedAt} | ${e.project} | ${mdCell(e.title)} | [link](${linkSafe}) |`);
   }
   lines.push("");
   return lines.join("\n");
@@ -129,7 +131,8 @@ function renderChapterTimeline(project: string, entries: BookEntry[], timelinePa
   lines.push("|---|---|---|");
   for (const e of sorted) {
     const link = relPosix(dirname(timelinePath), e.articlePath);
-    lines.push(`| ${e.updatedAt} | ${e.title} | [link](${link}) |`);
+    const linkSafe = /[|\n\r]/.test(link) ? mdCell(link) : link;
+    lines.push(`| ${e.updatedAt} | ${mdCell(e.title)} | [link](${linkSafe}) |`);
   }
   lines.push("");
   return lines.join("\n");
@@ -144,6 +147,10 @@ function timelineSort(a: BookEntry, b: BookEntry): number {
 /** path.relative with POSIX separators forced — links in markdown must use '/'. */
 function relPosix(from: string, to: string): string {
   return relative(from, to).split(sep).join("/");
+}
+
+function mdCell(s: string): string {
+  return s.replace(/\r?\n/g, " ").replace(/\|/g, "\\|");
 }
 
 function writeFile(repoRoot: string, relPath: string, content: string): void {

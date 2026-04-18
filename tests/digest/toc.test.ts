@@ -217,3 +217,48 @@ describe("generateToc — sort determinism on tie", () => {
     expect(global.indexOf("| A |")).toBeLessThan(global.indexOf("| Z |"));
   });
 });
+
+describe("generateToc — renders titles with markdown-hostile characters safely", () => {
+  it("escapes pipe and newline in title and preserves column count", () => {
+    const idx: BookIndex = {
+      version: 1,
+      threads: {
+        t1: entry({
+          threadId: "t1", project: "proj-a", title: "foo | bar\nbaz",
+          articlePath: "book/proj-a/articles/2026-04-15__t1__t1.md",
+          updatedAt: "2026-04-15T10:00:00Z",
+        }),
+      },
+      chapters: { "proj-a": chapter() },
+    };
+    generateToc(repoRoot, idx);
+    const global = readFileSync(join(repoRoot, "book/_meta/timeline.md"), "utf8");
+    expect(global).toContain("foo \\| bar baz");
+    const dataRow = global.split("\n").find((l) => l.includes("foo \\| bar baz"))!;
+    expect(dataRow).toBeDefined();
+    // Global timeline has 4 columns => 5 unescaped pipes (leading, 3 inter-column, trailing).
+    const unescapedPipes = (dataRow.match(/(?<!\\)\|/g) ?? []).length;
+    expect(unescapedPipes).toBe(5);
+  });
+});
+
+describe("generateToc — defensive filter for ok entries with empty articlePath", () => {
+  it("skips ok entries with empty articlePath", () => {
+    const idx: BookIndex = {
+      version: 1,
+      threads: {
+        bad: entry({
+          threadId: "bad", project: "p", title: "无路径",
+          articlePath: "", articleStatus: "ok",
+          updatedAt: "2026-04-15T10:00:00Z",
+        }),
+      },
+      chapters: { p: chapter() },
+    };
+    generateToc(repoRoot, idx);
+    const global = readFileSync(join(repoRoot, "book/_meta/timeline.md"), "utf8");
+    expect(global).not.toContain("无路径");
+    const front = readFileSync(join(repoRoot, "book/index.md"), "utf8");
+    expect(front).toContain("[p](p/) — 0 篇文章");
+  });
+});
