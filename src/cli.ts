@@ -23,6 +23,14 @@ export async function run(argv: string[]) {
       await syncCmd({ noDigest: opts.digest === false });
     });
   program
+    .command("digest")
+    .description("Run digest pipeline operations (currently only --redo is supported)")
+    .option("--redo", "retry all failed threads and force-rewrite every chapter")
+    .action(async (opts: { redo?: boolean }) => {
+      const { digestCmd } = await import("./commands/digest.js");
+      await digestCmd({ redo: opts.redo });
+    });
+  program
     .command("list")
     .description("List synced sessions")
     .option("--tool <name>", "filter by claude|copilot")
