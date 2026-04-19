@@ -68,7 +68,7 @@ describe("runDigestRedo — empty BookIndex", () => {
     const idx: IndexFile = { version: 1, entries: {} };
     const book: BookIndex = { version: 1, threads: {}, chapters: {} };
     const { runner, calls } = makeRunner([]);
-    const r = await runDigestRedo(runner, repoRoot, idx, book);
+    const r = await runDigestRedo(runner, repoRoot, idx, book, null);
     expect(calls).toHaveLength(0);
     expect(r.threadsAttempted).toBe(0);
     expect(r.threadsRecovered).toBe(0);
@@ -107,7 +107,7 @@ describe("runDigestRedo — recovers a previously-failed thread", () => {
       { ok: true, durationMs: 1, text: "# proj-a\n\n章。" },
     ]);
 
-    const r = await runDigestRedo(runner, repoRoot, idx, book);
+    const r = await runDigestRedo(runner, repoRoot, idx, book, null);
 
     expect(calls).toHaveLength(2);
     expect(r.threadsAttempted).toBe(1);
@@ -146,7 +146,7 @@ describe("runDigestRedo — failed thread whose retry returns SKIP", () => {
     const { runner } = makeRunner([
       { ok: true, durationMs: 1, text: "SKIP: 内容太短" },
     ]);
-    const r = await runDigestRedo(runner, repoRoot, idx, book);
+    const r = await runDigestRedo(runner, repoRoot, idx, book, null);
     expect(r.threadsAttempted).toBe(1);
     expect(r.threadsRecovered).toBe(0);
     expect(r.threadsStillFailed).toBe(0);
@@ -184,7 +184,7 @@ describe("runDigestRedo — failed thread that fails again stays failed", () => 
       // No chapter call expected (no publishable articles for proj-a after retry fail).
     ]);
 
-    const r = await runDigestRedo(runner, repoRoot, idx, book);
+    const r = await runDigestRedo(runner, repoRoot, idx, book, null);
 
     expect(calls).toHaveLength(1);
     expect(r.threadsAttempted).toBe(1);
@@ -230,7 +230,7 @@ describe("runDigestRedo — force-rewrites ALL chapters, even unchanged ones", (
       { ok: true, durationMs: 1, text: "# proj-a\n\n新章。" },
     ]);
 
-    const r = await runDigestRedo(runner, repoRoot, idx, book);
+    const r = await runDigestRedo(runner, repoRoot, idx, book, null);
 
     expect(calls).toHaveLength(1);
     expect(r.threadsAttempted).toBe(0);
@@ -261,7 +261,7 @@ describe("runDigestRedo — failed thread whose sessions vanished from indexFile
       chapters: {},
     };
     const { runner, calls } = makeRunner([]);
-    const r = await runDigestRedo(runner, repoRoot, idx, book);
+    const r = await runDigestRedo(runner, repoRoot, idx, book, null);
     expect(calls).toHaveLength(0);
     expect(r.threadsAttempted).toBe(0);
     expect(r.threadsUnresolvable).toBe(1);
@@ -300,7 +300,7 @@ describe("runDigestRedo — chapter rewrite failure is isolated", () => {
       { ok: false, durationMs: 1, error: "chapter exploded" },
     ]);
 
-    const r = await runDigestRedo(runner, repoRoot, idx, book);
+    const r = await runDigestRedo(runner, repoRoot, idx, book, null);
 
     expect(r.chaptersRewritten).toEqual([]);
     expect(r.chaptersFailed).toEqual([{ project: "proj-a", error: "chapter exploded" }]);
@@ -330,7 +330,7 @@ describe("runDigestRedo — skip threads are not retried", () => {
       chapters: {},
     };
     const { runner, calls } = makeRunner([]);
-    const r = await runDigestRedo(runner, repoRoot, idx, book);
+    const r = await runDigestRedo(runner, repoRoot, idx, book, null);
     expect(calls).toHaveLength(0);
     expect(r.threadsAttempted).toBe(0);
     expect(book.threads["t-skip"]!.skip).toBe(true);

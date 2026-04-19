@@ -60,6 +60,7 @@ describe("runDigestRedoFromRepo (integration)", () => {
       repoPath: repo,
       runnerConfig: { runner: "claude-cli", runnerModel: "" },
       runner: fakeRunner, // injection point used only by tests
+      key: null,
     });
 
     expect(report.threadsRecovered).toBe(1);
@@ -82,6 +83,7 @@ describe("runDigestRedoFromRepo (integration)", () => {
       repoPath: repo,
       runnerConfig: { runner: "claude-cli", runnerModel: "" },
       runner: fakeRunner,
+      key: null,
     });
     expect(report.threadsAttempted).toBe(0);
     expect(report.tocFilesWritten).toContain("book/index.md");

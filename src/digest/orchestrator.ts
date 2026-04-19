@@ -48,7 +48,7 @@ export async function runDigest(
   repoRoot: string,
   indexFile: IndexFile,
   bookIndex: BookIndex,
-  key: Buffer | null = null,
+  key: Buffer | null,
 ): Promise<DigestReport> {
   // -------------------------------------------------------------- plan
   const newEntries = findNewSessionEntries(indexFile, bookIndex);

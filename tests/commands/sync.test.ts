@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, cpSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, cpSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Buffer } from "node:buffer";
@@ -84,10 +84,11 @@ describe("runSync — digest integration", () => {
   });
 
   it("with noDigest=false + fake runner: writes book/ files and saves BookIndex", async () => {
+    const sessionId = await discoverSessionId(claudeRoot, vscodeRoot);
     // Stage canned LLM responses for: 1 thread, 1 article, 1 chapter.
     const canned: RunResult[] = [
       { ok: true, durationMs: 1, text: JSON.stringify([
-        { threadId: "t-int", title: "集成", sessionIds: [extractedSessionId(repo, claudeRoot)] },
+        { threadId: "t-int", title: "集成", sessionIds: [sessionId] },
       ])},
       { ok: true, durationMs: 1, text: "# 集成\n\n文章。" },
       { ok: true, durationMs: 1, text: "# edge-memvc\n\n章。" },
@@ -125,10 +126,11 @@ describe("runSync — digest integration", () => {
   });
 
   it("with encrypt=true + valid passphrase: digest runs end-to-end against encrypted raw", async () => {
+    const sessionId = await discoverSessionId(claudeRoot, vscodeRoot);
     // Stage the same canned LLM responses as the happy-path test.
     const queue: RunResult[] = [
       { ok: true, durationMs: 1, text: JSON.stringify([
-        { threadId: "t-enc", title: "加密", sessionIds: [extractedSessionId(repo, claudeRoot)] },
+        { threadId: "t-enc", title: "加密", sessionIds: [sessionId] },
       ])},
       { ok: true, durationMs: 1, text: "# 加密\n\n文章。" },
       { ok: true, durationMs: 1, text: "# edge-memvc\n\n章。" },
@@ -193,16 +195,24 @@ describe("runSync — digest integration", () => {
 });
 
 /**
- * Helper: parse the fixture's first JSONL line (a meta header containing
- * `sessionId`) and return that uuid. Verified: the fixture's first line is
- * `{"type":"permission-mode",...,"sessionId":"abc12345-..."}` — stable.
+ * Discover the sessionId by running a one-shot no-digest sync into a temp
+ * directory, then reading it from the resulting IndexFile. Decoupled from
+ * fixture format — survives any change to the JSONL shape that the adapter
+ * still understands.
  */
-function extractedSessionId(_repo: string, _claudeRoot: string): string {
-  const fixture = readFileSync(join(fixturesDir, "claude-session.jsonl"), "utf8");
-  const firstLine = fixture.split("\n", 1)[0]!;
-  const obj = JSON.parse(firstLine) as { sessionId?: string };
-  if (!obj.sessionId) {
-    throw new Error("fixture has no sessionId on its first line — adjust extractedSessionId helper");
+async function discoverSessionId(claudeRoot: string, vscodeRoot: string): Promise<string> {
+  const probeRepo = mkdtempSync(join(tmpdir(), "memvc-probe-"));
+  try {
+    await runSync({
+      repoPath: probeRepo, claudeRoot, vscodeRoot, encrypt: false, noDigest: true,
+    });
+    const idx = loadIndex(probeRepo);
+    const ids = Object.values(idx.entries).map((e) => e.sessionId);
+    if (ids.length !== 1) {
+      throw new Error(`discoverSessionId expected exactly 1 entry, got ${ids.length}`);
+    }
+    return ids[0]!;
+  } finally {
+    rmSync(probeRepo, { recursive: true, force: true });
   }
-  return obj.sessionId;
 }

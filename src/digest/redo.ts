@@ -39,7 +39,7 @@ export async function runDigestRedo(
   repoRoot: string,
   indexFile: IndexFile,
   bookIndex: BookIndex,
-  key: Buffer | null = null,
+  key: Buffer | null,
 ): Promise<RedoReport> {
   const report: RedoReport = {
     threadsAttempted: 0,

@@ -72,7 +72,7 @@ describe("runDigest — empty input", () => {
     const idx: IndexFile = { version: 1, entries: {} };
     const book: BookIndex = { version: 1, threads: {}, chapters: {} };
     const { runner, calls } = makeRunner([]);
-    const r = await runDigest(runner, repoRoot, idx, book);
+    const r = await runDigest(runner, repoRoot, idx, book, null);
     expect(calls).toHaveLength(0);
     expect(r).toMatchObject({
       newSessions: 0,
@@ -107,7 +107,7 @@ describe("runDigest — happy path: one new session → one thread → one artic
       { ok: true, durationMs: 1, text: "# proj-a\n\n章前言。" },
     ]);
 
-    const r = await runDigest(runner, repoRoot, idx, book);
+    const r = await runDigest(runner, repoRoot, idx, book, null);
 
     // Three LLM calls in order: thread, article, chapter.
     expect(calls).toHaveLength(3);
@@ -154,7 +154,7 @@ describe("runDigest — skip candidate: persists skip BookEntry, no article/chap
       // No more replies — if anything is called the fake throws.
     ]);
 
-    const r = await runDigest(runner, repoRoot, idx, book);
+    const r = await runDigest(runner, repoRoot, idx, book, null);
 
     expect(calls).toHaveLength(1); // threading only
     expect(r.threadsSkipped).toBe(1);
@@ -199,7 +199,7 @@ describe("runDigest — article phase failure isolation", () => {
       { ok: true, durationMs: 1, text: "# proj-a\n\n章。" },
     ]);
 
-    const r = await runDigest(runner, repoRoot, idx, book);
+    const r = await runDigest(runner, repoRoot, idx, book, null);
 
     expect(r.articlesOk).toBe(1);
     expect(r.articlesFailed).toBe(1);
@@ -221,7 +221,7 @@ describe("runDigest — threading failure aborts phases 4-7", () => {
     const { runner } = makeRunner([
       { ok: false, durationMs: 1, error: "thread runner exploded" },
     ]);
-    await expect(runDigest(runner, repoRoot, idx, book)).rejects.toThrow(/thread/);
+    await expect(runDigest(runner, repoRoot, idx, book, null)).rejects.toThrow(/thread/);
     expect(existsSync(join(repoRoot, "book/index.md"))).toBe(false);
   });
 });
@@ -246,7 +246,7 @@ describe("runDigest — chapter phase failure is isolated", () => {
       { ok: false, durationMs: 1, error: "chapter runner timeout" }, // chapter fails
     ]);
 
-    const r = await runDigest(runner, repoRoot, idx, book);
+    const r = await runDigest(runner, repoRoot, idx, book, null);
 
     expect(r.articlesOk).toBe(1);
     expect(r.chaptersRewritten).toEqual([]);
@@ -314,7 +314,7 @@ describe("runDigest — chapter rewrite gate", () => {
       { ok: true, durationMs: 1, text: "# proj-a\n\n章。" },
     ]);
 
-    const r = await runDigest(runner, repoRoot, idx, book);
+    const r = await runDigest(runner, repoRoot, idx, book, null);
 
     expect(r.chaptersRewritten).toEqual(["proj-a"]);
     expect(book.chapters["proj-b"]!.lastFullRewrite).toBe("2026-04-10T00:00:00Z"); // untouched
@@ -354,7 +354,7 @@ describe("runDigest — stale article version forces regeneration", () => {
       { ok: true, durationMs: 1, text: "# proj-a\n\n章。" },
     ]);
 
-    const r = await runDigest(runner, repoRoot, idx, book);
+    const r = await runDigest(runner, repoRoot, idx, book, null);
 
     // No threading call — only article + chapter.
     expect(calls).toHaveLength(2);

@@ -87,13 +87,13 @@ export async function runDigestRedoFromRepo(args: {
   runnerConfig: Pick<Config, "runner" | "runnerModel">;
   /** Test-only override for createRunner. */
   runner?: LlmRunner;
-  /** AES key (when raw is encrypted); null/omitted otherwise. */
-  key?: Buffer | null;
+  /** AES key (when raw is encrypted); null otherwise. */
+  key: Buffer | null;
 }): Promise<RedoReport> {
   const idx = loadIndex(args.repoPath);
   const book = loadBookIndex(args.repoPath);
   const runner = args.runner ?? createRunner(args.runnerConfig);
-  const report = await runDigestRedo(runner, args.repoPath, idx, book, args.key ?? null);
+  const report = await runDigestRedo(runner, args.repoPath, idx, book, args.key);
   saveBookIndex(args.repoPath, book);
   return report;
 }

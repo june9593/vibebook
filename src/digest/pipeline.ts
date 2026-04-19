@@ -83,7 +83,7 @@ export function findNewSessionEntries(
 export function buildBatchingInput(
   entries: IndexEntry[],
   repoRoot: string,
-  key: Buffer | null = null,
+  key: Buffer | null,
 ): SessionForBatching[] {
   const out: SessionForBatching[] = [];
   for (const e of entries) {
@@ -156,7 +156,7 @@ export function buildArticleInputs(
   candidates: ThreadCandidate[],
   indexFile: IndexFile,
   repoRoot: string,
-  key: Buffer | null = null,
+  key: Buffer | null,
 ): ArticleInput[] {
   const out: ArticleInput[] = [];
   for (const c of candidates) {
@@ -198,7 +198,7 @@ export function buildArticleInputForThread(
   indexFile: IndexFile,
   repoRoot: string,
   contextLabel: string,
-  key: Buffer | null = null,
+  key: Buffer | null,
 ): ArticleInput | null {
   const lookup = sessionLookupBySid(indexFile);
   const entries: IndexEntry[] = [];
