@@ -4,10 +4,11 @@
  *
  * Rejects:
  *   - paths containing /.worktrees-*
- *   - paths ending in *.code-workspace, *.json (likely workspace.json fragments)
- *   - paths whose basename matches workspaceStorage hash patterns (32-hex)
+ *   - paths ending in *.code-workspace, *-workspace.json (workspace fragments)
+ *   - paths ending in -workspaceStorage (VSCode workspaceStorage hash dirs)
  *   - empty / "root" / "home"
- *   - paths under VSCode workspaceStorage (~/Library/.../Code/User/workspaceStorage)
+ *   - long-numeric-prefixed slugs (10+ digit run, e.g. workspaceStorage timestamps)
+ *   - 20+ pure-hex strings (workspaceStorage hashes)
  *
  * This is a heuristic — it's allowed to be wrong in edge cases. Goal: clean
  * the obviously-junk projects out of book/ TOC.
