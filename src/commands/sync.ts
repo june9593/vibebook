@@ -9,7 +9,7 @@ import { loadIndex, saveIndex, hasUnchanged, upsertEntry } from "../index-store.
 import type { IndexEntry } from "../types.js";
 import { writeSession } from "../writer.js";
 import { deriveKey, encrypt } from "../crypto.js";
-import { readConfig, getPassphrase, type Config } from "../config.js";
+import { readConfig, getPassphrase, DEFAULT_THREADING_CONCURRENCY, type Config } from "../config.js";
 import { ensureRepo, commitAndPush, ensureDeviceBranch } from "../git-ops.js";
 import { migrateLegacyMainToDevice } from "../migrate.js";
 import { loadBookIndex, saveBookIndex } from "../digest/book-index.js";
@@ -30,6 +30,8 @@ export interface SyncOptions {
   noDigest?: boolean;
   /** Runner config — required when noDigest is false and encrypt is false. */
   runnerConfig?: Pick<Config, "runner" | "runnerModel">;
+  /** Cap on parallel runner calls during the threading phase. Default 4. */
+  threadingConcurrency?: number;
 }
 
 export type DigestStatus = "ok" | "skipped-flag" | "skipped-no-runner" | "failed" | "not-attempted";
@@ -155,7 +157,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     const bookIndex = loadBookIndex(opts.repoPath);
     const runner = createRunner(opts.runnerConfig);
     try {
-      digestReport = await runDigest(runner, opts.repoPath, idx, bookIndex, key);
+      digestReport = await runDigest(runner, opts.repoPath, idx, bookIndex, key, opts.threadingConcurrency ?? DEFAULT_THREADING_CONCURRENCY);
       saveBookIndex(opts.repoPath, bookIndex);
       digestStatus = "ok";
       console.log(chalk.gray(
@@ -243,6 +245,7 @@ export async function syncCmd(opts: { noDigest?: boolean } = {}): Promise<void> 
     deviceBranch: cfg.deviceBranch,
     noDigest: opts.noDigest,
     runnerConfig: { runner: cfg.runner, runnerModel: cfg.runnerModel },
+    threadingConcurrency: cfg.threadingConcurrency,
   });
   console.log(chalk.bold(`\nSynced: +${r.newCount} new, ${r.skippedCount} unchanged`));
   if (r.committed) console.log(chalk.cyan(r.pushed ? "Pushed (raw)." : "Committed raw (push failed)."));

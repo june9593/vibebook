@@ -7,6 +7,9 @@ import { z } from "zod";
 const CONFIG_DIR = join(homedir(), ".memvc");
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 
+/** Default cap on concurrent runner calls during the threading phase. */
+export const DEFAULT_THREADING_CONCURRENCY = 4;
+
 const Schema = z.object({
   repoPath: z.string(),
   repoUrl: z.string(),
@@ -15,6 +18,7 @@ const Schema = z.object({
   deviceBranch: z.string().default(""),
   runner: z.enum(["claude-cli", "anthropic-api", "github-models"]).default("claude-cli"),
   runnerModel: z.string().default(""),
+  threadingConcurrency: z.number().int().positive().default(DEFAULT_THREADING_CONCURRENCY),
 });
 export type Config = z.infer<typeof Schema>;
 
