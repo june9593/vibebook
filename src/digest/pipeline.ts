@@ -10,6 +10,7 @@ import {
 import type { SessionForBatching, ThreadCandidate } from "./types.js";
 import { ARTICLE_VERSION, type ArticleInput } from "./article.js";
 import { decrypt } from "../crypto.js";
+import { isRealProjectPath } from "./project-filter.js";
 
 /**
  * Read a session body from disk, decrypting if its path ends with .enc.
@@ -64,7 +65,9 @@ export function findNewSessionEntries(
   }
   const out: IndexEntry[] = [];
   for (const e of Object.values(indexFile.entries)) {
-    if (!covered.has(e.sessionId)) out.push(e);
+    if (covered.has(e.sessionId)) continue;
+    if (!isRealProjectPath(e.project)) continue; // skip pseudo-projects
+    out.push(e);
   }
   out.sort((a, b) => (a.endedAt < b.endedAt ? -1 : a.endedAt > b.endedAt ? 1 : 0));
   return out;

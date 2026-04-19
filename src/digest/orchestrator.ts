@@ -1,6 +1,9 @@
 import type { LlmRunner } from "./runner.js";
 import type { IndexFile } from "../types.js";
 import { Buffer } from "node:buffer";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { type BookIndex } from "./book-index.js";
 import { makeBatches } from "./batcher.js";
 import { runThreading } from "./threading.js";
@@ -21,6 +24,7 @@ import {
   buildArticleInputs,
   buildArticleInputForThread,
 } from "./pipeline.js";
+import { isRealProjectPath } from "./project-filter.js";
 import { DEFAULT_THREADING_CONCURRENCY, DEFAULT_THREADING_MAX_ATTEMPTS } from "../config.js";
 
 export interface DigestReport {
@@ -55,6 +59,44 @@ export async function runDigest(
   key: Buffer | null,
   concurrency = DEFAULT_THREADING_CONCURRENCY,
   maxAttempts = DEFAULT_THREADING_MAX_ATTEMPTS,
+): Promise<DigestReport> {
+  // One-shot migration: drop pseudo-project entries from BookIndex.threads/chapters.
+  let pruned = 0;
+  for (const [tid, be] of Object.entries(bookIndex.threads)) {
+    if (!isRealProjectPath(be.project)) {
+      delete bookIndex.threads[tid];
+      pruned++;
+    }
+  }
+  for (const project of Object.keys(bookIndex.chapters)) {
+    if (!isRealProjectPath(project)) {
+      delete bookIndex.chapters[project];
+      pruned++;
+    }
+  }
+  if (pruned > 0) {
+    console.log(`runDigest: pruned ${pruned} pseudo-project entries from BookIndex`);
+  }
+
+  const isolatedCwd = mkdtempSync(join(tmpdir(), "memvc-claude-"));
+  const wrappedRunner: LlmRunner = {
+    run: (prompt, vars, opts = {}) => runner.run(prompt, vars, { ...opts, cwd: isolatedCwd }),
+  };
+  try {
+    return await runDigestImpl(wrappedRunner, repoRoot, indexFile, bookIndex, key, concurrency, maxAttempts);
+  } finally {
+    try { rmSync(isolatedCwd, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+}
+
+async function runDigestImpl(
+  runner: LlmRunner,
+  repoRoot: string,
+  indexFile: IndexFile,
+  bookIndex: BookIndex,
+  key: Buffer | null,
+  concurrency: number,
+  maxAttempts: number,
 ): Promise<DigestReport> {
   // -------------------------------------------------------------- plan
   const newEntries = findNewSessionEntries(indexFile, bookIndex);

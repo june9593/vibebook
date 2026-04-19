@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runDigestRedoFromRepo } from "../../src/commands/digest.js";
+import { runDigestRedoFromRepo, runDigestResetFromRepo } from "../../src/commands/digest.js";
 import { saveBookIndex, loadBookIndex } from "../../src/digest/book-index.js";
 import { saveIndex } from "../../src/index-store.js";
 import type { IndexFile, IndexEntry, Tool } from "../../src/types.js";
@@ -87,5 +87,78 @@ describe("runDigestRedoFromRepo (integration)", () => {
     });
     expect(report.threadsAttempted).toBe(0);
     expect(report.tocFilesWritten).toContain("book/index.md");
+  });
+});
+
+describe("runDigestResetFromRepo (integration)", () => {
+  let repo: string;
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), "memvc-cmd-reset-"));
+  });
+
+  it("wipes pre-existing book/ + .memvc/index.book.json then runs fresh digest", async () => {
+    // Pre-stage junk: a pre-existing book dir + index.book.json
+    mkdirSync(join(repo, "book/old-junk"), { recursive: true });
+    writeFileSync(join(repo, "book/old-junk/chapter.md"), "OLD");
+    writeFileSync(join(repo, "book/index.md"), "OLD INDEX");
+    mkdirSync(join(repo, ".memvc"), { recursive: true });
+    writeFileSync(join(repo, ".memvc/index.book.json"), JSON.stringify({
+      version: 1,
+      threads: {
+        "t-old": {
+          threadId: "t-old", project: "old-junk", title: "old",
+          sessionIds: ["sid-old"], articlePath: "", articleVersion: 1,
+          latestSourceSha: "", articleStatus: "ok", updatedAt: "2026-01-01T00:00:00Z",
+        },
+      },
+      chapters: {},
+    }));
+
+    // Stage one real session.
+    const ie: IndexEntry = {
+      sessionId: "sid-1", shortId: "sid-1", tool: "claude" as Tool,
+      project: "proj-a",
+      startedAt: "2026-04-15T09:00:00Z", endedAt: "2026-04-15T10:00:00Z",
+      nameSlug: "first", displayName: "First",
+      relativePath: "raw_sessions/c/proj-a/2026-04-15/first__sid-1.md",
+      sourcePath: "/tmp/x.jsonl", sourceMtimeMs: 1, sourceSha256: "shaA",
+    };
+    mkdirSync(join(repo, "raw_sessions/c/proj-a/2026-04-15"), { recursive: true });
+    writeFileSync(join(repo, ie.relativePath), "session body");
+    saveIndex(repo, { version: 1, entries: { [`claude:sid-1`]: ie } });
+
+    const queue: RunResult[] = [
+      { ok: true, durationMs: 1, text: JSON.stringify([
+        { threadId: "t-new", title: "新", sessionIds: ["sid-1"] },
+      ])},
+      { ok: true, durationMs: 1, text: "# 新\n\n文章。" },
+      { ok: true, durationMs: 1, text: "# proj-a\n\n章。" },
+    ];
+    const fakeRunner: LlmRunner = {
+      async run() {
+        const n = queue.shift();
+        if (!n) throw new Error("exhausted");
+        return n;
+      },
+    };
+
+    const report = await runDigestResetFromRepo({
+      repoPath: repo,
+      runnerConfig: { runner: "claude-cli", runnerModel: "" },
+      runner: fakeRunner,
+      key: null,
+    });
+
+    // Old junk is gone; fresh content is present.
+    expect(existsSync(join(repo, "book/old-junk"))).toBe(false);
+    expect(existsSync(join(repo, "book/proj-a/chapter.md"))).toBe(true);
+    expect(existsSync(join(repo, "book/index.md"))).toBe(true);
+    // Old book index gone; fresh one written.
+    const reloaded = loadBookIndex(repo);
+    expect(reloaded.threads["t-old"]).toBeUndefined();
+    expect(reloaded.threads["t-new"]).toBeDefined();
+    expect(reloaded.chapters["proj-a"]).toBeDefined();
+    expect(report.articlesOk).toBe(1);
+    expect(report.chaptersRewritten).toEqual(["proj-a"]);
   });
 });

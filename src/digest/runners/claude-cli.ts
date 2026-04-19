@@ -26,7 +26,7 @@ export async function runClaudeCli(
 
     let proc;
     try {
-      proc = spawn("claude", args, { stdio: ["pipe", "pipe", "pipe"] });
+      proc = spawn("claude", args, { stdio: ["pipe", "pipe", "pipe"], cwd: opts.cwd });
     } catch (err) {
       settle({
         ok: false,

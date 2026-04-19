@@ -374,3 +374,37 @@ describe("runDigest — stale article version forces regeneration", () => {
     expect(r.chaptersRewritten).toEqual(["proj-a"]);
   });
 });
+
+// =====================================================================
+describe("runDigest — pseudo-project pruning migration", () => {
+  it("prunes pre-existing pseudo-project entries from BookIndex on first run", async () => {
+    const idx: IndexFile = { version: 1, entries: {} };
+    const book: BookIndex = {
+      version: 1,
+      threads: {
+        "t-good": {
+          threadId: "t-good", project: "proj-a", title: "ok",
+          sessionIds: ["s-good"], articlePath: "book/proj-a/articles/ok.md",
+          articleVersion: 1, latestSourceSha: "x", articleStatus: "ok",
+          skip: false, updatedAt: "2026-04-15T10:00:00Z",
+        },
+        "t-junk": {
+          threadId: "t-junk", project: ".worktrees-abc-123", title: "junk",
+          sessionIds: ["s-junk"], articlePath: "book/.worktrees-abc-123/articles/junk.md",
+          articleVersion: 1, latestSourceSha: "y", articleStatus: "ok",
+          skip: false, updatedAt: "2026-04-15T10:00:00Z",
+        },
+      },
+      chapters: {
+        "proj-a": { chapterPath: "book/proj-a/chapter.md", articleHashesSha: "h", updatedAt: "2026-04-15T10:00:00Z" },
+        ".worktrees-abc-123": { chapterPath: "book/.worktrees-abc-123/chapter.md", articleHashesSha: "h2", updatedAt: "2026-04-15T10:00:00Z" },
+      },
+    };
+    const { runner } = makeRunner([]);
+    await runDigest(runner, repoRoot, idx, book, null);
+    expect(book.threads["t-junk"]).toBeUndefined();
+    expect(book.threads["t-good"]).toBeDefined();
+    expect(book.chapters[".worktrees-abc-123"]).toBeUndefined();
+    expect(book.chapters["proj-a"]).toBeDefined();
+  });
+});

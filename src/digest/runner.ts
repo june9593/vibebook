@@ -10,6 +10,11 @@ export type RunResult =
 export interface RunOptions {
   timeoutMs?: number;
   outputFormat?: "json" | "text";
+  /** Working directory for the subprocess (claude-cli only). When omitted,
+   *  uses process.cwd(), which causes Claude to log session history under
+   *  ~/.claude/projects/<hash-of-cwd>/. Pass an isolated tmp dir to prevent
+   *  polluting the user's project history. */
+  cwd?: string;
 }
 
 export interface LlmRunner {

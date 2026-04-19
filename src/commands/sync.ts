@@ -9,7 +9,8 @@ import { loadIndex, saveIndex, hasUnchanged, upsertEntry } from "../index-store.
 import type { IndexEntry } from "../types.js";
 import { writeSession } from "../writer.js";
 import { deriveKey, encrypt } from "../crypto.js";
-import { readConfig, getPassphrase, DEFAULT_THREADING_CONCURRENCY, DEFAULT_THREADING_MAX_ATTEMPTS, type Config } from "../config.js";
+import { readConfig, writeConfig, getPassphrase, DEFAULT_THREADING_CONCURRENCY, DEFAULT_THREADING_MAX_ATTEMPTS, type Config } from "../config.js";
+import { deviceBranchFromHostname } from "../device.js";
 import { ensureRepo, commitAndPush, ensureDeviceBranch } from "../git-ops.js";
 import { migrateLegacyMainToDevice } from "../migrate.js";
 import { loadBookIndex, saveBookIndex } from "../digest/book-index.js";
@@ -237,8 +238,31 @@ function collectDigestPaths(report: DigestReport, repoRoot: string): string[] {
   return [...out];
 }
 
+/**
+ * Pure helper: returns a possibly-migrated copy of cfg with deviceBranch set
+ * from hostname when the input is missing/empty. `migrated` indicates whether
+ * a write-back is needed.
+ */
+export function ensureDeviceBranchOnConfig(cfg: Config): { migrated: boolean; cfg: Config } {
+  if (cfg.deviceBranch && cfg.deviceBranch.trim() !== "") {
+    return { migrated: false, cfg };
+  }
+  return {
+    migrated: true,
+    cfg: { ...cfg, deviceBranch: deviceBranchFromHostname() },
+  };
+}
+
 export async function syncCmd(opts: { noDigest?: boolean } = {}): Promise<void> {
-  const cfg = readConfig();
+  const rawCfg = readConfig();
+  const heal = ensureDeviceBranchOnConfig(rawCfg);
+  if (heal.migrated) {
+    console.log(chalk.cyan(
+      `Migrating: legacy config missing deviceBranch. Setting to "${heal.cfg.deviceBranch}" and saving to ~/.memvc/config.json.`,
+    ));
+    writeConfig(heal.cfg);
+  }
+  const cfg = heal.cfg;
   const passphrase = cfg.encrypt ? getPassphrase() : undefined;
   const r = await runSync({
     repoPath: cfg.repoPath,
