@@ -24,11 +24,12 @@ export async function run(argv: string[]) {
     });
   program
     .command("digest")
-    .description("Run digest pipeline operations (currently only --redo is supported)")
+    .description("Digest pipeline operations: --redo retries failed; --reset wipes book/ and re-runs from scratch")
     .option("--redo", "retry all failed threads and force-rewrite every chapter")
-    .action(async (opts: { redo?: boolean }) => {
+    .option("--reset", "DESTRUCTIVE: wipe book/ + .memvc/index.book.json, then run digest from scratch")
+    .action(async (opts: { redo?: boolean; reset?: boolean }) => {
       const { digestCmd } = await import("./commands/digest.js");
-      await digestCmd({ redo: opts.redo });
+      await digestCmd({ redo: opts.redo, reset: opts.reset });
     });
   program
     .command("list")
