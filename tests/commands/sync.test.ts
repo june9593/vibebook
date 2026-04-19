@@ -4,10 +4,39 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Buffer } from "node:buffer";
 import { fileURLToPath } from "node:url";
-import { runSync } from "../../src/commands/sync.js";
+import { runSync, ensureDeviceBranchOnConfig } from "../../src/commands/sync.js";
 import { loadIndex } from "../../src/index-store.js";
 import type { LlmRunner, RunResult } from "../../src/digest/runner.js";
 import { loadBookIndex } from "../../src/digest/book-index.js";
+import type { Config } from "../../src/config.js";
+
+function baseCfg(overrides: Partial<Config> = {}): Config {
+  return {
+    repoPath: "/tmp/x",
+    repoUrl: "git@example.com:x.git",
+    encrypt: false,
+    salt: "AAAA",
+    deviceBranch: "",
+    runner: "claude-cli",
+    runnerModel: "",
+    threadingConcurrency: 4,
+    threadingMaxAttempts: 3,
+    ...overrides,
+  };
+}
+
+describe("ensureDeviceBranchOnConfig", () => {
+  it("migrates when deviceBranch is empty string", () => {
+    const r = ensureDeviceBranchOnConfig(baseCfg({ deviceBranch: "" }));
+    expect(r.migrated).toBe(true);
+    expect(r.cfg.deviceBranch.length).toBeGreaterThan(0);
+  });
+  it("no-op when deviceBranch is set", () => {
+    const r = ensureDeviceBranchOnConfig(baseCfg({ deviceBranch: "my-device" }));
+    expect(r.migrated).toBe(false);
+    expect(r.cfg.deviceBranch).toBe("my-device");
+  });
+});
 
 const fixturesDir = join(fileURLToPath(new URL(".", import.meta.url)), "..", "fixtures");
 
