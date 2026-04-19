@@ -1,5 +1,6 @@
 import type { LlmRunner } from "./runner.js";
 import type { IndexFile } from "../types.js";
+import { Buffer } from "node:buffer";
 import { type BookIndex } from "./book-index.js";
 import { makeBatches } from "./batcher.js";
 import { runThreading } from "./threading.js";
@@ -47,6 +48,7 @@ export async function runDigest(
   repoRoot: string,
   indexFile: IndexFile,
   bookIndex: BookIndex,
+  key: Buffer | null,
 ): Promise<DigestReport> {
   // -------------------------------------------------------------- plan
   const newEntries = findNewSessionEntries(indexFile, bookIndex);
@@ -65,19 +67,19 @@ export async function runDigest(
   // -------------------------------------------------------------- thread
   let articleInputs: ArticleInput[] = [];
   if (newEntries.length > 0) {
-    const sessionsForBatching = buildBatchingInput(newEntries, repoRoot);
+    const sessionsForBatching = buildBatchingInput(newEntries, repoRoot, key);
     const batches = makeBatches(sessionsForBatching);
     const candidates = await runThreading(runner, batches);
     report.threadCandidates = candidates.length;
     report.threadsSkipped = recordSkippedThreadCandidates(bookIndex, candidates, indexFile).length;
-    articleInputs = buildArticleInputs(candidates, indexFile, repoRoot);
+    articleInputs = buildArticleInputs(candidates, indexFile, repoRoot, key);
   }
 
   // ------------------------------ stale-thread re-generation (article-version drift)
   // Spec line 99: BookEntries whose articleVersion is below current need rewrite.
   // We don't include failed (those are 2.9 --redo) or skip threads.
   const freshThreadIds = new Set(articleInputs.map((i) => i.threadId));
-  const staleInputs = buildStaleArticleInputs(bookIndex, indexFile, repoRoot)
+  const staleInputs = buildStaleArticleInputs(bookIndex, indexFile, repoRoot, key)
     .filter((i) => !freshThreadIds.has(i.threadId));
   const allArticleInputs = [...articleInputs, ...staleInputs];
 
@@ -127,6 +129,7 @@ function buildStaleArticleInputs(
   bookIndex: BookIndex,
   indexFile: IndexFile,
   repoRoot: string,
+  key: Buffer | null,
 ): ArticleInput[] {
   const out: ArticleInput[] = [];
   for (const be of Object.values(bookIndex.threads)) {
@@ -134,7 +137,7 @@ function buildStaleArticleInputs(
     if (be.articleStatus === "failed") continue;
     if (be.articleVersion === ARTICLE_VERSION) continue;
     const input = buildArticleInputForThread(
-      be.threadId, be.title, be.sessionIds, indexFile, repoRoot, "orchestrator.ts",
+      be.threadId, be.title, be.sessionIds, indexFile, repoRoot, "orchestrator.ts", key,
     );
     if (input !== null) out.push(input);
   }

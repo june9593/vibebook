@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { Buffer } from "node:buffer";
 import type { IndexFile, IndexEntry } from "../types.js";
 import {
   type BookIndex,
@@ -8,6 +9,43 @@ import {
 } from "./book-index.js";
 import type { SessionForBatching, ThreadCandidate } from "./types.js";
 import { ARTICLE_VERSION, type ArticleInput } from "./article.js";
+import { decrypt } from "../crypto.js";
+
+/**
+ * Read a session body from disk, decrypting if its path ends with .enc.
+ * Throws when path is .enc but no key is provided (this preserves the previous
+ * "encryption not supported in digest" failure mode for callers that haven't
+ * yet been updated to thread the key).
+ */
+function readSessionBody(
+  repoRoot: string,
+  relativePath: string,
+  key: Buffer | null,
+  contextLabel: string,
+): string {
+  const abs = join(repoRoot, relativePath);
+  let raw: Buffer;
+  try {
+    raw = readFileSync(abs);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`${contextLabel}: cannot read session ${relativePath}: ${msg}`);
+  }
+  if (relativePath.endsWith(".enc")) {
+    if (!key) {
+      throw new Error(
+        `${contextLabel}: encrypted session ${relativePath} but no key provided`,
+      );
+    }
+    try {
+      return decrypt(raw, key).toString("utf8");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`${contextLabel}: failed to decrypt ${relativePath}: ${msg}`);
+    }
+  }
+  return raw.toString("utf8");
+}
 
 /**
  * IndexEntries that the BookIndex hasn't accounted for yet. An entry is
@@ -33,30 +71,23 @@ export function findNewSessionEntries(
 }
 
 /**
- * Read each entry's session .md from disk and produce SessionForBatching[].
+ * Read each entry's session body from disk and produce SessionForBatching[].
  * Tokens estimated as ceil(chars / 3.5).
  *
- * Throws on a missing/unreadable .md (upstream extract is broken — fail loud)
- * and on .enc paths (encryption + digest pipeline isn't supported in 2.8.x).
+ * When `key` is provided, `.enc` paths are decrypted in memory; when null,
+ * `.enc` paths throw (preserves previous "encryption not supported" failure
+ * mode for legacy callers).
+ *
+ * Throws on a missing/unreadable session (upstream extract is broken — fail loud).
  */
 export function buildBatchingInput(
   entries: IndexEntry[],
   repoRoot: string,
+  key: Buffer | null,
 ): SessionForBatching[] {
   const out: SessionForBatching[] = [];
   for (const e of entries) {
-    if (e.relativePath.endsWith(".enc")) {
-      throw new Error(
-        `pipeline.ts: encrypted sessions not supported in digest pipeline (got ${e.relativePath})`,
-      );
-    }
-    let body: string;
-    try {
-      body = readFileSync(join(repoRoot, e.relativePath), "utf8");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`pipeline.ts: cannot read session ${e.relativePath}: ${msg}`);
-    }
+    const body = readSessionBody(repoRoot, e.relativePath, key, "pipeline.ts");
     out.push({
       sessionId: e.sessionId,
       project: e.project,
@@ -125,12 +156,13 @@ export function buildArticleInputs(
   candidates: ThreadCandidate[],
   indexFile: IndexFile,
   repoRoot: string,
+  key: Buffer | null,
 ): ArticleInput[] {
   const out: ArticleInput[] = [];
   for (const c of candidates) {
     if (c.skip) continue;
     const input = buildArticleInputForThread(
-      c.threadId, c.title, c.sessionIds, indexFile, repoRoot, "pipeline.ts",
+      c.threadId, c.title, c.sessionIds, indexFile, repoRoot, "pipeline.ts", key,
     );
     if (input !== null) out.push(input);
   }
@@ -149,11 +181,15 @@ function sessionLookupBySid(indexFile: IndexFile): Map<string, IndexEntry> {
 /**
  * Materialize one ArticleInput from a thread's recorded sessionIds. Returns
  * null when any sessionId can't be resolved in indexFile (with console.warn);
- * throws on `.enc` paths or IO failure.
+ * throws on IO failure or on `.enc` paths when no `key` is provided.
+ *
+ * When `key` is provided, `.enc` session bodies are decrypted in memory; when
+ * null, `.enc` paths throw (preserves the previous "encryption out of scope"
+ * failure mode).
  *
  * Used by both `buildArticleInputs` (fresh threading candidates) and the
  * orchestrator's stale-thread regeneration path. Keeps the separator format,
- * endedAt-ASC ordering, and encryption policy in ONE place.
+ * endedAt-ASC ordering, and decryption policy in ONE place.
  */
 export function buildArticleInputForThread(
   threadId: string,
@@ -162,6 +198,7 @@ export function buildArticleInputForThread(
   indexFile: IndexFile,
   repoRoot: string,
   contextLabel: string,
+  key: Buffer | null,
 ): ArticleInput | null {
   const lookup = sessionLookupBySid(indexFile);
   const entries: IndexEntry[] = [];
@@ -188,18 +225,7 @@ export function buildArticleInputForThread(
 
   const bodies: string[] = [];
   for (const e of entries) {
-    if (e.relativePath.endsWith(".enc")) {
-      throw new Error(
-        `${contextLabel}: encrypted sessions not supported in digest pipeline (got ${e.relativePath})`,
-      );
-    }
-    let body: string;
-    try {
-      body = readFileSync(join(repoRoot, e.relativePath), "utf8");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`${contextLabel}: cannot read session ${e.relativePath}: ${msg}`);
-    }
+    const body = readSessionBody(repoRoot, e.relativePath, key, contextLabel);
     bodies.push(`--- SESSION ${e.shortId} (${e.endedAt}) ---\n\n${body}`);
   }
 

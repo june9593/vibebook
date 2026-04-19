@@ -1,10 +1,12 @@
 import chalk from "chalk";
-import { readConfig, type Config } from "../config.js";
+import { Buffer } from "node:buffer";
+import { readConfig, getPassphrase, type Config } from "../config.js";
 import { ensureRepo, commitAndPush, ensureDeviceBranch } from "../git-ops.js";
 import { loadIndex } from "../index-store.js";
 import { loadBookIndex, saveBookIndex } from "../digest/book-index.js";
 import { createRunner, type LlmRunner } from "../digest/runner.js";
 import { runDigestRedo, type RedoReport } from "../digest/redo.js";
+import { deriveKey } from "../crypto.js";
 
 export interface DigestOptions {
   /** When true, run the --redo recovery pipeline. */
@@ -29,15 +31,15 @@ export async function digestCmd(opts: DigestOptions): Promise<void> {
   }
 
   const cfg = readConfig();
-  if (cfg.encrypt) {
-    console.log(chalk.yellow("Digest --redo skipped: encrypted raw is not yet supported."));
-    return;
-  }
+  const key = cfg.encrypt
+    ? deriveKey(getPassphrase(), Buffer.from(cfg.salt, "base64"))
+    : null;
 
   console.log(chalk.gray("Running digest --redo..."));
   const report = await runDigestRedoFromRepo({
     repoPath: cfg.repoPath,
     runnerConfig: { runner: cfg.runner, runnerModel: cfg.runnerModel },
+    key,
   });
   console.log(chalk.bold(
     `\n--redo: ${report.threadsRecovered} recovered / ${report.threadsNewlySkipped} newly-skipped / ${report.threadsStillFailed} still failed / ${report.threadsUnresolvable} unresolvable; ${report.chaptersRewritten.length} chapters rewritten`,
@@ -85,11 +87,13 @@ export async function runDigestRedoFromRepo(args: {
   runnerConfig: Pick<Config, "runner" | "runnerModel">;
   /** Test-only override for createRunner. */
   runner?: LlmRunner;
+  /** AES key (when raw is encrypted); null otherwise. */
+  key: Buffer | null;
 }): Promise<RedoReport> {
   const idx = loadIndex(args.repoPath);
   const book = loadBookIndex(args.repoPath);
   const runner = args.runner ?? createRunner(args.runnerConfig);
-  const report = await runDigestRedo(runner, args.repoPath, idx, book);
+  const report = await runDigestRedo(runner, args.repoPath, idx, book, args.key);
   saveBookIndex(args.repoPath, book);
   return report;
 }

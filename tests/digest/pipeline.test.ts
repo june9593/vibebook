@@ -2,12 +2,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Buffer } from "node:buffer";
 import {
   findNewSessionEntries,
   buildBatchingInput,
   recordSkippedThreadCandidates,
   buildArticleInputs,
 } from "../../src/digest/pipeline.js";
+import { encrypt as encryptBuf, deriveKey } from "../../src/crypto.js";
 import type { IndexFile, IndexEntry, Tool } from "../../src/types.js";
 import type { BookIndex, BookEntry } from "../../src/digest/book-index.js";
 import type { ThreadCandidate } from "../../src/digest/types.js";
@@ -122,7 +124,7 @@ describe("buildBatchingInput", () => {
     const body = "x".repeat(35); // 35 chars → ceil(35/3.5) = 10 tokens
     const e = ie({ relativePath: "raw_sessions/c/p/2026-04-15/x.md" });
     writeSessionMd(e.relativePath, body);
-    const got = buildBatchingInput([e], repoRoot);
+    const got = buildBatchingInput([e], repoRoot, null);
     expect(got).toEqual([
       {
         sessionId: e.sessionId,
@@ -137,7 +139,7 @@ describe("buildBatchingInput", () => {
     const body = "x".repeat(36); // 36/3.5 = 10.28 → 11
     const e = ie({ relativePath: "raw_sessions/c/p/2026-04-15/y.md" });
     writeSessionMd(e.relativePath, body);
-    const got = buildBatchingInput([e], repoRoot);
+    const got = buildBatchingInput([e], repoRoot, null);
     expect(got[0]!.tokenEstimate).toBe(11);
   });
 
@@ -146,18 +148,41 @@ describe("buildBatchingInput", () => {
     const e2 = ie({ sessionId: "s2", relativePath: "raw_sessions/c/p/2026-04-15/b.md" });
     writeSessionMd(e1.relativePath, "aa");
     writeSessionMd(e2.relativePath, "bbb");
-    const got = buildBatchingInput([e1, e2], repoRoot);
+    const got = buildBatchingInput([e1, e2], repoRoot, null);
     expect(got.map((x) => x.sessionId)).toEqual(["s1", "s2"]);
   });
 
-  it("throws when relativePath ends with .enc (encryption is out of scope for 2.8.1)", () => {
+  it("decrypts .enc paths when a key is provided", () => {
+    const key = deriveKey("test-pass", Buffer.from("0123456789abcdef"));
     const e = ie({ relativePath: "raw_sessions/c/p/2026-04-15/secret.md.enc" });
-    expect(() => buildBatchingInput([e], repoRoot)).toThrow(/encrypted/);
+    const ciphertext = encryptBuf(Buffer.from("x".repeat(35)), key);
+    const abs = join(repoRoot, e.relativePath);
+    mkdirSync(join(abs, ".."), { recursive: true });
+    writeFileSync(abs, ciphertext);
+    const got = buildBatchingInput([e], repoRoot, key);
+    expect(got[0]!.tokenEstimate).toBe(10);
+  });
+
+  it("throws when relativePath ends with .enc but no key is provided", () => {
+    const e = ie({ relativePath: "raw_sessions/c/p/2026-04-15/secret.md.enc" });
+    writeSessionMd(e.relativePath, "some bytes");
+    expect(() => buildBatchingInput([e], repoRoot, null)).toThrow(/encrypted session/);
+  });
+
+  it("throws clearly when decryption fails (wrong key)", () => {
+    const right = deriveKey("right-pass", Buffer.from("0123456789abcdef"));
+    const wrong = deriveKey("wrong-pass", Buffer.from("0123456789abcdef"));
+    const e = ie({ relativePath: "raw_sessions/c/p/2026-04-15/secret.md.enc" });
+    const ciphertext = encryptBuf(Buffer.from("body"), right);
+    const abs = join(repoRoot, e.relativePath);
+    mkdirSync(join(abs, ".."), { recursive: true });
+    writeFileSync(abs, ciphertext);
+    expect(() => buildBatchingInput([e], repoRoot, wrong)).toThrow(/decrypt/);
   });
 
   it("throws clearly when a session's .md is missing on disk", () => {
     const e = ie({ relativePath: "raw_sessions/c/p/2026-04-15/missing.md" });
-    expect(() => buildBatchingInput([e], repoRoot)).toThrow(/missing\.md/);
+    expect(() => buildBatchingInput([e], repoRoot, null)).toThrow(/missing\.md/);
   });
 });
 
@@ -246,7 +271,7 @@ describe("buildArticleInputs", () => {
     const cands: ThreadCandidate[] = [
       { threadId: "t1", title: "题", sessionIds: ["new", "old"] }, // intentionally out of order
     ];
-    const got = buildArticleInputs(cands, idx, repoRoot);
+    const got = buildArticleInputs(cands, idx, repoRoot, null);
     expect(got).toHaveLength(1);
     const input = got[0]!;
     expect(input.threadId).toBe("t1");
@@ -270,7 +295,7 @@ describe("buildArticleInputs", () => {
     const cands: ThreadCandidate[] = [
       { threadId: "t", title: "", sessionIds: ["sid-1"], skip: true, reason: "x" },
     ];
-    expect(buildArticleInputs(cands, idx, repoRoot)).toEqual([]);
+    expect(buildArticleInputs(cands, idx, repoRoot, null)).toEqual([]);
   });
 
   it("throws when a candidate's sessions span multiple projects", () => {
@@ -282,7 +307,7 @@ describe("buildArticleInputs", () => {
     const cands: ThreadCandidate[] = [
       { threadId: "mixed", title: "", sessionIds: ["a", "b"] },
     ];
-    expect(() => buildArticleInputs(cands, idx, repoRoot)).toThrow(/multiple projects/);
+    expect(() => buildArticleInputs(cands, idx, repoRoot, null)).toThrow(/multiple projects/);
   });
 
   it("warns and drops only the bad candidate, keeping siblings", () => {
@@ -296,9 +321,25 @@ describe("buildArticleInputs", () => {
       { threadId: "ghost", title: "", sessionIds: ["real", "missing-from-index"] },
       { threadId: "good", title: "ok", sessionIds: ["ok"] },
     ];
-    const got = buildArticleInputs(cands, idx, repoRoot);
+    const got = buildArticleInputs(cands, idx, repoRoot, null);
     expect(got.map((x) => x.threadId)).toEqual(["good"]);
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/ghost/));
     warn.mockRestore();
+  });
+
+  it("decrypts .enc session bodies when a key is provided", () => {
+    const key = deriveKey("test-pass", Buffer.from("0123456789abcdef"));
+    const e = ie({ relativePath: "raw_sessions/c/p/2026-04-15/secret.md.enc" });
+    const ciphertext = encryptBuf(Buffer.from("PLAINTEXT BODY"), key);
+    const abs = join(repoRoot, e.relativePath);
+    mkdirSync(join(abs, ".."), { recursive: true });
+    writeFileSync(abs, ciphertext);
+    const idx = makeIndex([e]);
+    const cands: ThreadCandidate[] = [
+      { threadId: "t", title: "T", sessionIds: ["sid-1"] },
+    ];
+    const got = buildArticleInputs(cands, idx, repoRoot, key);
+    expect(got).toHaveLength(1);
+    expect(got[0]!.sessionsMd).toContain("PLAINTEXT BODY");
   });
 });

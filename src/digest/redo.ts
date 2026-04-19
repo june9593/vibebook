@@ -1,5 +1,6 @@
 import type { LlmRunner } from "./runner.js";
 import type { IndexFile } from "../types.js";
+import { Buffer } from "node:buffer";
 import type { BookIndex } from "./book-index.js";
 import { generateArticle } from "./article.js";
 import { generateChapter } from "./chapter.js";
@@ -38,6 +39,7 @@ export async function runDigestRedo(
   repoRoot: string,
   indexFile: IndexFile,
   bookIndex: BookIndex,
+  key: Buffer | null,
 ): Promise<RedoReport> {
   const report: RedoReport = {
     threadsAttempted: 0,
@@ -62,6 +64,7 @@ export async function runDigestRedo(
       indexFile,
       repoRoot,
       "redo.ts",
+      key,
     );
     if (input === null) {
       // sessionIds couldn't be resolved (pipeline.ts already warned) — leave as failed.

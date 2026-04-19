@@ -32,7 +32,7 @@ export interface SyncOptions {
   runnerConfig?: Pick<Config, "runner" | "runnerModel">;
 }
 
-export type DigestStatus = "ok" | "skipped-encrypted" | "skipped-flag" | "skipped-no-runner" | "failed" | "not-attempted";
+export type DigestStatus = "ok" | "skipped-flag" | "skipped-no-runner" | "failed" | "not-attempted";
 
 export interface SyncResult {
   newCount: number;
@@ -147,11 +147,6 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
 
   if (opts.noDigest) {
     digestStatus = "skipped-flag";
-  } else if (opts.encrypt) {
-    digestStatus = "skipped-encrypted";
-    console.log(chalk.yellow(
-      "Digest pipeline skipped: encrypted raw is not yet supported (book/ unchanged).",
-    ));
   } else if (!opts.runnerConfig) {
     digestStatus = "skipped-no-runner";
     console.log(chalk.yellow("Digest pipeline skipped: no runnerConfig provided."));
@@ -160,7 +155,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     const bookIndex = loadBookIndex(opts.repoPath);
     const runner = createRunner(opts.runnerConfig);
     try {
-      digestReport = await runDigest(runner, opts.repoPath, idx, bookIndex);
+      digestReport = await runDigest(runner, opts.repoPath, idx, bookIndex, key);
       saveBookIndex(opts.repoPath, bookIndex);
       digestStatus = "ok";
       console.log(chalk.gray(
@@ -259,8 +254,6 @@ export async function syncCmd(opts: { noDigest?: boolean } = {}): Promise<void> 
     ));
   } else if (r.digestStatus === "failed") {
     console.log(chalk.red(`Digest failed: ${r.digestError}`));
-  } else if (r.digestStatus === "skipped-encrypted") {
-    console.log(chalk.yellow("Digest skipped (encrypted mode)."));
   } else if (r.digestStatus === "skipped-flag") {
     console.log(chalk.gray("Digest skipped (--no-digest)."));
   } else if (r.digestStatus === "skipped-no-runner") {
