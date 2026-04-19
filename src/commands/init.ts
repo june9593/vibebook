@@ -1,4 +1,4 @@
-import { writeConfig, configExists, freshSaltBase64, type Config } from "../config.js";
+import { writeConfig, configExists, freshSaltBase64, DEFAULT_THREADING_CONCURRENCY, type Config } from "../config.js";
 import { ensureRepo } from "../git-ops.js";
 import { deviceBranchFromHostname } from "../device.js";
 import { homedir } from "node:os";
@@ -26,7 +26,7 @@ export async function initCmd(opts: InitOptions): Promise<void> {
     deviceBranch: opts.device ?? deviceBranchFromHostname(),
     runner: "claude-cli",
     runnerModel: "",
-    threadingConcurrency: 4,
+    threadingConcurrency: DEFAULT_THREADING_CONCURRENCY,
   };
   writeConfig(cfg);
   console.log(chalk.green(`memvc initialized:`));

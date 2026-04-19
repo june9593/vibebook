@@ -9,7 +9,7 @@ import { loadIndex, saveIndex, hasUnchanged, upsertEntry } from "../index-store.
 import type { IndexEntry } from "../types.js";
 import { writeSession } from "../writer.js";
 import { deriveKey, encrypt } from "../crypto.js";
-import { readConfig, getPassphrase, type Config } from "../config.js";
+import { readConfig, getPassphrase, DEFAULT_THREADING_CONCURRENCY, type Config } from "../config.js";
 import { ensureRepo, commitAndPush, ensureDeviceBranch } from "../git-ops.js";
 import { migrateLegacyMainToDevice } from "../migrate.js";
 import { loadBookIndex, saveBookIndex } from "../digest/book-index.js";
@@ -157,7 +157,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     const bookIndex = loadBookIndex(opts.repoPath);
     const runner = createRunner(opts.runnerConfig);
     try {
-      digestReport = await runDigest(runner, opts.repoPath, idx, bookIndex, key, opts.threadingConcurrency ?? 4);
+      digestReport = await runDigest(runner, opts.repoPath, idx, bookIndex, key, opts.threadingConcurrency ?? DEFAULT_THREADING_CONCURRENCY);
       saveBookIndex(opts.repoPath, bookIndex);
       digestStatus = "ok";
       console.log(chalk.gray(

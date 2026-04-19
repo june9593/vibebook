@@ -2,6 +2,7 @@ import type { LlmRunner } from "./runner.js";
 import type { ThreadCandidate, SessionForBatching } from "./types.js";
 import { loadPromptAsset } from "./prompt-loader.js";
 import { mapWithConcurrency } from "./concurrency.js";
+import { DEFAULT_THREADING_CONCURRENCY } from "../config.js";
 
 /** Cache the prompt at module load — file is static for the process lifetime. */
 const THREAD_PROMPT = loadPromptAsset(import.meta.url, "thread");
@@ -184,7 +185,7 @@ function asThreadCandidates(data: unknown, batchIndex: number): ThreadCandidate[
 export async function runThreading(
   runner: LlmRunner,
   batches: SessionForBatching[][],
-  concurrency = 4,
+  concurrency = DEFAULT_THREADING_CONCURRENCY,
 ): Promise<ThreadCandidate[]> {
   const results = await mapWithConcurrency(batches, concurrency, (batch) =>
     runner.run(

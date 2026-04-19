@@ -21,6 +21,7 @@ import {
   buildArticleInputs,
   buildArticleInputForThread,
 } from "./pipeline.js";
+import { DEFAULT_THREADING_CONCURRENCY } from "../config.js";
 
 export interface DigestReport {
   newSessions: number;
@@ -49,7 +50,7 @@ export async function runDigest(
   indexFile: IndexFile,
   bookIndex: BookIndex,
   key: Buffer | null,
-  concurrency = 4,
+  concurrency = DEFAULT_THREADING_CONCURRENCY,
 ): Promise<DigestReport> {
   // -------------------------------------------------------------- plan
   const newEntries = findNewSessionEntries(indexFile, bookIndex);
