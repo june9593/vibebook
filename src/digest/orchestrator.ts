@@ -21,11 +21,14 @@ import {
   buildArticleInputs,
   buildArticleInputForThread,
 } from "./pipeline.js";
-import { DEFAULT_THREADING_CONCURRENCY } from "../config.js";
+import { DEFAULT_THREADING_CONCURRENCY, DEFAULT_THREADING_MAX_ATTEMPTS } from "../config.js";
 
 export interface DigestReport {
   newSessions: number;
   threadCandidates: number;
+  /** Number of threading batches that soft-failed after all retries. Their
+   *  sessions are NOT in BookIndex yet and will be re-batched next sync. */
+  threadingBatchesFailed: number;
   threadsSkipped: number;
   articlesOk: number;
   articlesSkipped: number;
@@ -51,12 +54,14 @@ export async function runDigest(
   bookIndex: BookIndex,
   key: Buffer | null,
   concurrency = DEFAULT_THREADING_CONCURRENCY,
+  maxAttempts = DEFAULT_THREADING_MAX_ATTEMPTS,
 ): Promise<DigestReport> {
   // -------------------------------------------------------------- plan
   const newEntries = findNewSessionEntries(indexFile, bookIndex);
   const report: DigestReport = {
     newSessions: newEntries.length,
     threadCandidates: 0,
+    threadingBatchesFailed: 0,
     threadsSkipped: 0,
     articlesOk: 0,
     articlesSkipped: 0,
@@ -71,7 +76,9 @@ export async function runDigest(
   if (newEntries.length > 0) {
     const sessionsForBatching = buildBatchingInput(newEntries, repoRoot, key);
     const batches = makeBatches(sessionsForBatching);
-    const candidates = await runThreading(runner, batches, concurrency);
+    const threadingResult = await runThreading(runner, batches, concurrency, maxAttempts);
+    const candidates = threadingResult.candidates;
+    report.threadingBatchesFailed = threadingResult.failedBatches.length;
     report.threadCandidates = candidates.length;
     report.threadsSkipped = recordSkippedThreadCandidates(bookIndex, candidates, indexFile).length;
     articleInputs = buildArticleInputs(candidates, indexFile, repoRoot, key);

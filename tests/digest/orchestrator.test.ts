@@ -212,17 +212,30 @@ describe("runDigest — article phase failure isolation", () => {
 });
 
 // =====================================================================
-describe("runDigest — threading failure aborts phases 4-7", () => {
-  it("when threading runner returns ok:false, runDigest throws and toc is NOT run", async () => {
+describe("runDigest — threading partial failure", () => {
+  it("when threading runner returns ok:false, the batch soft-fails; toc still runs; report flags failed batches", async () => {
     const e = ie({ sessionId: "s1" });
     writeSessionMd(e.relativePath, "x");
     const idx = makeIndex([e]);
     const book: BookIndex = { version: 1, threads: {}, chapters: {} };
     const { runner } = makeRunner([
+      // Threading: return ok:false 3 times (default maxAttempts=3 will exhaust).
+      { ok: false, durationMs: 1, error: "thread runner exploded" },
+      { ok: false, durationMs: 1, error: "thread runner exploded" },
       { ok: false, durationMs: 1, error: "thread runner exploded" },
     ]);
-    await expect(runDigest(runner, repoRoot, idx, book, null)).rejects.toThrow(/thread/);
-    expect(existsSync(join(repoRoot, "book/index.md"))).toBe(false);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const r = await runDigest(runner, repoRoot, idx, book, null);
+      expect(r.threadingBatchesFailed).toBe(1);
+      expect(r.threadCandidates).toBe(0);
+      expect(r.articlesOk).toBe(0);
+      // Toc still ran.
+      expect(existsSync(join(repoRoot, "book/index.md"))).toBe(true);
+      expect(r.tocFilesWritten).toContain("book/index.md");
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

@@ -9,7 +9,7 @@ import { loadIndex, saveIndex, hasUnchanged, upsertEntry } from "../index-store.
 import type { IndexEntry } from "../types.js";
 import { writeSession } from "../writer.js";
 import { deriveKey, encrypt } from "../crypto.js";
-import { readConfig, getPassphrase, DEFAULT_THREADING_CONCURRENCY, type Config } from "../config.js";
+import { readConfig, getPassphrase, DEFAULT_THREADING_CONCURRENCY, DEFAULT_THREADING_MAX_ATTEMPTS, type Config } from "../config.js";
 import { ensureRepo, commitAndPush, ensureDeviceBranch } from "../git-ops.js";
 import { migrateLegacyMainToDevice } from "../migrate.js";
 import { loadBookIndex, saveBookIndex } from "../digest/book-index.js";
@@ -32,6 +32,8 @@ export interface SyncOptions {
   runnerConfig?: Pick<Config, "runner" | "runnerModel">;
   /** Cap on parallel runner calls during the threading phase. Default 4. */
   threadingConcurrency?: number;
+  /** Attempts per threading batch before soft-failing it. Default 3. */
+  threadingMaxAttempts?: number;
 }
 
 export type DigestStatus = "ok" | "skipped-flag" | "skipped-no-runner" | "failed" | "not-attempted";
@@ -157,11 +159,14 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     const bookIndex = loadBookIndex(opts.repoPath);
     const runner = createRunner(opts.runnerConfig);
     try {
-      digestReport = await runDigest(runner, opts.repoPath, idx, bookIndex, key, opts.threadingConcurrency ?? DEFAULT_THREADING_CONCURRENCY);
+      digestReport = await runDigest(runner, opts.repoPath, idx, bookIndex, key, opts.threadingConcurrency ?? DEFAULT_THREADING_CONCURRENCY, opts.threadingMaxAttempts ?? DEFAULT_THREADING_MAX_ATTEMPTS);
       saveBookIndex(opts.repoPath, bookIndex);
       digestStatus = "ok";
+      const failedBatchSuffix = digestReport.threadingBatchesFailed > 0
+        ? `; ${digestReport.threadingBatchesFailed} threading batch${digestReport.threadingBatchesFailed === 1 ? "" : "es"} failed (will retry next sync)`
+        : "";
       console.log(chalk.gray(
-        `  digest: +${digestReport.articlesOk} articles, ${digestReport.threadsSkipped} skip, ${digestReport.articlesFailed} fail; chapters [${digestReport.chaptersRewritten.join(", ")}]`,
+        `  digest: +${digestReport.articlesOk} articles, ${digestReport.threadsSkipped} skip, ${digestReport.articlesFailed} fail; chapters [${digestReport.chaptersRewritten.join(", ")}]${failedBatchSuffix}`,
       ));
     } catch (e) {
       digestStatus = "failed";
@@ -246,6 +251,7 @@ export async function syncCmd(opts: { noDigest?: boolean } = {}): Promise<void> 
     noDigest: opts.noDigest,
     runnerConfig: { runner: cfg.runner, runnerModel: cfg.runnerModel },
     threadingConcurrency: cfg.threadingConcurrency,
+    threadingMaxAttempts: cfg.threadingMaxAttempts,
   });
   console.log(chalk.bold(`\nSynced: +${r.newCount} new, ${r.skippedCount} unchanged`));
   if (r.committed) console.log(chalk.cyan(r.pushed ? "Pushed (raw)." : "Committed raw (push failed)."));
