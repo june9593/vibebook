@@ -10,6 +10,7 @@ import {
 } from "../../src/digest/chapter.js";
 import type { BookIndex, BookEntry, ChapterEntry } from "../../src/digest/book-index.js";
 import type { LlmRunner, RunResult } from "../../src/digest/runner.js";
+import { silentReporter } from "../../src/digest/reporter.js";
 
 function entry(over: Partial<BookEntry> = {}): BookEntry {
   return {
@@ -168,7 +169,7 @@ describe("generateChapter — happy path", () => {
       threads: { t1: entry({ project: "proj-a", threadId: "t1" }) },
       chapters: {},
     };
-    const res = await generateChapter(runner, repoRoot, "proj-a", idx);
+    const res = await generateChapter(runner, repoRoot, "proj-a", idx, silentReporter());
     expect(res).toEqual({ status: "ok", chapterPath: "book/proj-a/chapter.md" });
 
     const written = readFileSync(join(repoRoot, "book/proj-a/chapter.md"), "utf8");
@@ -209,7 +210,7 @@ describe("generateChapter — happy path", () => {
       },
       chapters: {},
     };
-    await generateChapter(runner, repoRoot, "p", idx);
+    await generateChapter(runner, repoRoot, "p", idx, silentReporter());
     expect(captured.indexOf("新文")).toBeLessThan(captured.indexOf("旧文"));
   });
 
@@ -236,7 +237,7 @@ describe("generateChapter — happy path", () => {
       },
       chapters: {},
     };
-    const res = await generateChapter(runner, repoRoot, "p", idx);
+    const res = await generateChapter(runner, repoRoot, "p", idx, silentReporter());
     expect(res.status).toBe("ok");
     expect(captured).toContain("OK 文");
     expect(captured).not.toContain("sk");
@@ -259,7 +260,7 @@ describe("generateChapter — empty project", () => {
       threads: { sk: entry({ project: "p", threadId: "sk", skip: true, articlePath: "" }) },
       chapters: {},
     };
-    const res = await generateChapter(runner, repoRoot, "p", idx);
+    const res = await generateChapter(runner, repoRoot, "p", idx, silentReporter());
     expect(res).toEqual({ status: "no-articles" });
     expect(existsSync(join(repoRoot, "book/p/chapter.md"))).toBe(false);
     expect(idx.chapters["p"]).toBeUndefined();
@@ -285,7 +286,7 @@ describe("generateChapter — failure isolation", () => {
       chapters: { p: prev },
     };
     const runner = fakeRunner(async () => ({ ok: false, error: "timeout", durationMs: 5 }));
-    const res = await generateChapter(runner, repoRoot, "p", idx);
+    const res = await generateChapter(runner, repoRoot, "p", idx, silentReporter());
     expect(res).toEqual({ status: "failed", error: "timeout" });
     expect(readFileSync(join(repoRoot, "book/p/chapter.md"), "utf8")).toBe("# p\n\n旧版本");
     expect(idx.chapters["p"]).toEqual(prev);
@@ -304,7 +305,7 @@ describe("generateChapter — failure isolation", () => {
     const runner = fakeRunner(async () => {
       throw new Error("network exploded");
     });
-    const res = await generateChapter(runner, repoRoot, "p", idx);
+    const res = await generateChapter(runner, repoRoot, "p", idx, silentReporter());
     expect(res.status).toBe("failed");
     expect((res as { error: string }).error).toBe("network exploded");
     expect(idx.chapters["p"]).toBeUndefined();
@@ -323,7 +324,7 @@ describe("generateChapter — failure isolation", () => {
       },
       chapters: {},
     };
-    const res = await generateChapter(runner, repoRoot, "p", idx);
+    const res = await generateChapter(runner, repoRoot, "p", idx, silentReporter());
     expect(res.status).toBe("failed");
     expect((res as { error: string }).error).toMatch(/missing\.md/);
     expect(idx.chapters["p"]).toBeUndefined();

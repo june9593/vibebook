@@ -7,6 +7,7 @@ import {
   upsertThread,
   latestSourceShaFor,
 } from "./book-index.js";
+import type { Reporter } from "./reporter.js";
 import { loadPromptAsset } from "./prompt-loader.js";
 
 /**
@@ -67,7 +68,9 @@ export async function generateArticle(
   repoRoot: string,
   input: ArticleInput,
   bookIndex: BookIndex,
+  reporter: Reporter,
 ): Promise<GenerateArticleResult> {
+  const started = Date.now();
   const nowIso = new Date().toISOString();
   const sourceSha = latestSourceShaFor(input.sessionShas);
 
@@ -83,11 +86,13 @@ export async function generateArticle(
     // but we treat a thrown error the same way to preserve isolation.
     const error = e instanceof Error ? e.message : String(e);
     upsertThread(bookIndex, failedEntry(input, sourceSha, nowIso, error));
+    reporter.articleDone(input.threadId, "failed", Date.now() - started);
     return { status: "failed", error };
   }
 
   if (!res.ok) {
     upsertThread(bookIndex, failedEntry(input, sourceSha, nowIso, res.error));
+    reporter.articleDone(input.threadId, "failed", Date.now() - started);
     return { status: "failed", error: res.error };
   }
 
@@ -108,6 +113,7 @@ export async function generateArticle(
       updatedAt: nowIso,
     };
     upsertThread(bookIndex, entry);
+    reporter.articleDone(input.threadId, "skipped", Date.now() - started);
     return { status: "skipped", skipReason };
   }
 
@@ -119,6 +125,7 @@ export async function generateArticle(
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     upsertThread(bookIndex, failedEntry(input, sourceSha, nowIso, error));
+    reporter.articleDone(input.threadId, "failed", Date.now() - started);
     return { status: "failed", error };
   }
 
@@ -134,6 +141,7 @@ export async function generateArticle(
     updatedAt: nowIso,
   };
   upsertThread(bookIndex, entry);
+  reporter.articleDone(input.threadId, "ok", Date.now() - started);
   return { status: "ok", articlePath };
 }
 

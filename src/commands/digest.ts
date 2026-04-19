@@ -9,6 +9,7 @@ import { loadBookIndex, saveBookIndex } from "../digest/book-index.js";
 import { createRunner, type LlmRunner } from "../digest/runner.js";
 import { runDigestRedo, type RedoReport } from "../digest/redo.js";
 import { runDigest, type DigestReport } from "../digest/orchestrator.js";
+import { consoleReporter } from "../digest/reporter.js";
 import { deriveKey } from "../crypto.js";
 
 export interface DigestOptions {
@@ -105,7 +106,7 @@ export async function runDigestRedoFromRepo(args: {
   const idx = loadIndex(args.repoPath);
   const book = loadBookIndex(args.repoPath);
   const runner = args.runner ?? createRunner(args.runnerConfig);
-  const report = await runDigestRedo(runner, args.repoPath, idx, book, args.key);
+  const report = await runDigestRedo(runner, args.repoPath, idx, book, args.key, consoleReporter());
   saveBookIndex(args.repoPath, book);
   return report;
 }
@@ -204,7 +205,7 @@ export async function runDigestResetFromRepo(args: {
   const runner = args.runner ?? createRunner(args.runnerConfig);
   const report = await runDigest(
     runner, args.repoPath, idx, book, args.key,
-    args.threadingConcurrency, args.threadingMaxAttempts,
+    args.threadingConcurrency, args.threadingMaxAttempts, consoleReporter(),
   );
   saveBookIndex(args.repoPath, book);
   return report;

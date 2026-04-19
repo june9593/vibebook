@@ -6,6 +6,7 @@ import { generateArticle, ARTICLE_VERSION, articleFilename } from "../../src/dig
 import { saveBookIndex, loadBookIndex } from "../../src/digest/book-index.js";
 import type { BookIndex } from "../../src/digest/book-index.js";
 import type { LlmRunner, RunResult } from "../../src/digest/runner.js";
+import { silentReporter } from "../../src/digest/reporter.js";
 
 function fakeRunner(reply: RunResult): LlmRunner {
   return { run: async () => reply };
@@ -54,7 +55,7 @@ describe("generateArticle — happy path", () => {
     const runner = fakeRunner({ ok: true, text: body, durationMs: 1 });
     const idx = emptyIndex();
 
-    const res = await generateArticle(runner, repoRoot, baseInput(), idx);
+    const res = await generateArticle(runner, repoRoot, baseInput(), idx, silentReporter());
 
     expect(res.status).toBe("ok");
     expect(res.articlePath).toBe(
@@ -88,7 +89,7 @@ describe("generateArticle — happy path", () => {
         return { ok: true, text: "# t\n\nbody", durationMs: 1 };
       },
     };
-    await generateArticle(runner, repoRoot, baseInput(), emptyIndex());
+    await generateArticle(runner, repoRoot, baseInput(), emptyIndex(), silentReporter());
     expect(capturedOpts?.outputFormat).toBe("text");
     expect(capturedVars?.title).toBe("修 auth 跳转");
     expect(capturedVars?.sessionsMd).toBe("## session 1\n...\n## session 2\n...");
@@ -104,7 +105,7 @@ describe("generateArticle — SKIP sentinel", () => {
     });
     const idx = emptyIndex();
 
-    const res = await generateArticle(runner, repoRoot, baseInput(), idx);
+    const res = await generateArticle(runner, repoRoot, baseInput(), idx, silentReporter());
 
     expect(res.status).toBe("skipped");
     expect(res.skipReason).toBe("内容只有几句寒暄，没有工程价值");
@@ -121,7 +122,7 @@ describe("generateArticle — SKIP sentinel", () => {
 
   it("tolerates leading whitespace before SKIP:", async () => {
     const runner = fakeRunner({ ok: true, text: "  \n  SKIP: 太短", durationMs: 1 });
-    const res = await generateArticle(runner, repoRoot, baseInput(), emptyIndex());
+    const res = await generateArticle(runner, repoRoot, baseInput(), emptyIndex(), silentReporter());
     expect(res.status).toBe("skipped");
     expect(res.skipReason).toBe("太短");
   });
@@ -132,7 +133,7 @@ describe("generateArticle — SKIP sentinel", () => {
       text: "# 标题\n\n这里讨论了 SKIP: 标志的实现",
       durationMs: 1,
     });
-    const res = await generateArticle(runner, repoRoot, baseInput(), emptyIndex());
+    const res = await generateArticle(runner, repoRoot, baseInput(), emptyIndex(), silentReporter());
     expect(res.status).toBe("ok");
   });
 });
@@ -142,7 +143,7 @@ describe("generateArticle — failure path", () => {
     const runner = fakeRunner({ ok: false, error: "timeout after 180s", durationMs: 180_000 });
     const idx = emptyIndex();
 
-    const res = await generateArticle(runner, repoRoot, baseInput(), idx);
+    const res = await generateArticle(runner, repoRoot, baseInput(), idx, silentReporter());
 
     expect(res.status).toBe("failed");
     expect(res.error).toBe("timeout after 180s");
@@ -160,7 +161,7 @@ describe("generateArticle — failure path", () => {
     const input = { ...baseInput(), project: "bad\0name" };
     const idx = emptyIndex();
 
-    const res = await generateArticle(runner, repoRoot, input, idx);
+    const res = await generateArticle(runner, repoRoot, input, idx, silentReporter());
 
     expect(res.status).toBe("failed");
     expect(res.error).toMatch(/.+/); // non-empty
@@ -173,7 +174,7 @@ describe("generateArticle — index persistence integration", () => {
   it("BookEntry survives saveBookIndex → loadBookIndex round-trip", async () => {
     const runner = fakeRunner({ ok: true, text: "# t\n\nbody", durationMs: 1 });
     const idx = emptyIndex();
-    await generateArticle(runner, repoRoot, baseInput(), idx);
+    await generateArticle(runner, repoRoot, baseInput(), idx, silentReporter());
     saveBookIndex(repoRoot, idx);
     const loaded = loadBookIndex(repoRoot);
     expect(loaded.threads["fix-auth-bug"].articleStatus).toBe("ok");

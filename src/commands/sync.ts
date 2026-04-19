@@ -16,6 +16,7 @@ import { migrateLegacyMainToDevice } from "../migrate.js";
 import { loadBookIndex, saveBookIndex } from "../digest/book-index.js";
 import { createRunner } from "../digest/runner.js";
 import { runDigest, type DigestReport } from "../digest/orchestrator.js";
+import { consoleReporter } from "../digest/reporter.js";
 
 export interface SyncOptions {
   repoPath: string;
@@ -160,7 +161,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     const bookIndex = loadBookIndex(opts.repoPath);
     const runner = createRunner(opts.runnerConfig);
     try {
-      digestReport = await runDigest(runner, opts.repoPath, idx, bookIndex, key, opts.threadingConcurrency ?? DEFAULT_THREADING_CONCURRENCY, opts.threadingMaxAttempts ?? DEFAULT_THREADING_MAX_ATTEMPTS);
+      digestReport = await runDigest(runner, opts.repoPath, idx, bookIndex, key, opts.threadingConcurrency ?? DEFAULT_THREADING_CONCURRENCY, opts.threadingMaxAttempts ?? DEFAULT_THREADING_MAX_ATTEMPTS, consoleReporter());
       saveBookIndex(opts.repoPath, bookIndex);
       digestStatus = "ok";
       const failedBatchSuffix = digestReport.threadingBatchesFailed > 0
