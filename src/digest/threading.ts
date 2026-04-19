@@ -2,7 +2,7 @@ import type { LlmRunner } from "./runner.js";
 import type { ThreadCandidate, SessionForBatching } from "./types.js";
 import { loadPromptAsset } from "./prompt-loader.js";
 import { mapWithConcurrency } from "./concurrency.js";
-import { DEFAULT_THREADING_CONCURRENCY } from "../config.js";
+import { DEFAULT_THREADING_CONCURRENCY, DEFAULT_THREADING_MAX_ATTEMPTS } from "../config.js";
 
 /** Cache the prompt at module load — file is static for the process lifetime. */
 const THREAD_PROMPT = loadPromptAsset(import.meta.url, "thread");
@@ -173,51 +173,95 @@ function asThreadCandidates(data: unknown, batchIndex: number): ThreadCandidate[
 }
 
 /**
- * Drive threading end-to-end:
+ * Drive threading end-to-end with per-batch retry + soft-fail:
  *   - render thread prompt with sessionList = JSON of batch's sessions
- *   - call runner per batch in parallel (outputFormat: json)
- *   - parse + validate each batch's result
- *   - cross-batch merge via mergeCandidates
+ *   - run via mapWithConcurrency with the cap
+ *   - per batch: try up to `maxAttempts` times; on each attempt, call runner →
+ *     parse → validate. If any of these fail, retry. If all attempts fail,
+ *     soft-fail (record + warn + skip).
+ *   - cross-batch merge via mergeCandidates over the succeeded subset
  *
- * Throws on the first sign of trouble (any batch ok:false, parse error, or
- * shape error). Errors include the batch index for diagnosis.
+ * Returns BOTH the merged candidates AND the per-batch failures so the caller
+ * can surface them in its report. Sessions in failed batches will reappear in
+ * findNewSessionEntries on the next sync (they were never written to BookIndex).
  */
+export interface ThreadingResult {
+  /** Merged ThreadCandidate[] from all batches that succeeded. */
+  candidates: ThreadCandidate[];
+  /** Per-batch failures after all retry attempts. Their sessions remain
+   *  unaccounted-for in BookIndex and will be re-batched on the next sync. */
+  failedBatches: { batchIndex: number; error: string }[];
+}
+
 export async function runThreading(
   runner: LlmRunner,
   batches: SessionForBatching[][],
   concurrency = DEFAULT_THREADING_CONCURRENCY,
-): Promise<ThreadCandidate[]> {
-  const results = await mapWithConcurrency(batches, concurrency, (batch) =>
-    runner.run(
-      THREAD_PROMPT,
-      { sessionList: JSON.stringify(batch.map((s) => ({
-        sessionId: s.sessionId,
-        project: s.project,
-        endedAt: s.endedAt,
-      }))) },
-      { outputFormat: "json" },
-    ),
+  maxAttempts = DEFAULT_THREADING_MAX_ATTEMPTS,
+): Promise<ThreadingResult> {
+  type BatchOutcome =
+    | { ok: true; candidates: ThreadCandidate[] }
+    | { ok: false; error: string };
+
+  const outcomes = await mapWithConcurrency(batches, concurrency, (batch, i) =>
+    processBatch(runner, batch, i, maxAttempts),
   );
 
   const perBatchCandidates: ThreadCandidate[][] = [];
-  const errors: string[] = [];
-  for (let i = 0; i < results.length; i++) {
-    const r = results[i]!;
-    if (!r.ok) {
-      errors.push(`batch ${i}: ${r.error}`);
-      continue;
+  const failedBatches: { batchIndex: number; error: string }[] = [];
+  for (let i = 0; i < outcomes.length; i++) {
+    const o = outcomes[i]!;
+    if (o.ok) {
+      perBatchCandidates.push(o.candidates);
+    } else {
+      failedBatches.push({ batchIndex: i, error: o.error });
+      console.warn(`threading batch ${i} failed after ${maxAttempts} attempts: ${o.error}`);
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(r.text);
-    } catch (e) {
-      throw new Error(`threading batch ${i}: parse error — ${(e as Error).message}`);
-    }
-    perBatchCandidates.push(asThreadCandidates(parsed, i));
-  }
-  if (errors.length > 0) {
-    throw new Error(`threading runner failed: ${errors.join("; ")}`);
   }
 
-  return mergeCandidates(perBatchCandidates);
+  return {
+    candidates: mergeCandidates(perBatchCandidates),
+    failedBatches,
+  };
+
+  /** Per-batch helper: run + parse + validate, with retry. Returns an outcome
+   *  discriminated union; never throws. */
+  async function processBatch(
+    runner: LlmRunner,
+    batch: SessionForBatching[],
+    batchIndex: number,
+    maxAttempts: number,
+  ): Promise<BatchOutcome> {
+    let lastError = "";
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const r = await runner.run(
+        THREAD_PROMPT,
+        { sessionList: JSON.stringify(batch.map((s) => ({
+          sessionId: s.sessionId,
+          project: s.project,
+          endedAt: s.endedAt,
+        }))) },
+        { outputFormat: "json" },
+      );
+      if (!r.ok) {
+        lastError = r.error;
+        continue;
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(r.text);
+      } catch (e) {
+        lastError = `parse error — ${(e as Error).message}`;
+        continue;
+      }
+      try {
+        const candidates = asThreadCandidates(parsed, batchIndex);
+        return { ok: true, candidates };
+      } catch (e) {
+        lastError = (e as Error).message;
+        continue;
+      }
+    }
+    return { ok: false, error: lastError };
+  }
 }

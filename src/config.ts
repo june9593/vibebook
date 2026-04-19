@@ -10,6 +10,9 @@ const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 /** Default cap on concurrent runner calls during the threading phase. */
 export const DEFAULT_THREADING_CONCURRENCY = 4;
 
+/** Default attempts per threading batch before soft-failing it. */
+export const DEFAULT_THREADING_MAX_ATTEMPTS = 3;
+
 const Schema = z.object({
   repoPath: z.string(),
   repoUrl: z.string(),
@@ -19,6 +22,7 @@ const Schema = z.object({
   runner: z.enum(["claude-cli", "anthropic-api", "github-models"]).default("claude-cli"),
   runnerModel: z.string().default(""),
   threadingConcurrency: z.number().int().positive().default(DEFAULT_THREADING_CONCURRENCY),
+  threadingMaxAttempts: z.number().int().positive().default(DEFAULT_THREADING_MAX_ATTEMPTS),
 });
 export type Config = z.infer<typeof Schema>;
 

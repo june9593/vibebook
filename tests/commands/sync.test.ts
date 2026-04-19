@@ -166,7 +166,7 @@ describe("runSync — digest integration", () => {
     }
   });
 
-  it("with noDigest=false + fake runner returning failed thread: digestStatus=failed, no book commit", async () => {
+  it("with noDigest=false + fake runner returning failed thread: threading batch soft-fails, digest still ok", async () => {
     const queue: RunResult[] = [
       { ok: false, durationMs: 1, error: "thread runner exploded" },
     ];
@@ -179,16 +179,20 @@ describe("runSync — digest integration", () => {
     };
     const runnerMod = await import("../../src/digest/runner.js");
     const spy = vi.spyOn(runnerMod, "createRunner").mockReturnValue(fakeRunner);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       const r = await runSync({
         repoPath: repo, claudeRoot, vscodeRoot, encrypt: false,
         runnerConfig: { runner: "claude-cli", runnerModel: "" },
+        threadingMaxAttempts: 1,
       });
-      expect(r.digestStatus).toBe("failed");
-      expect(r.digestError).toMatch(/thread/);
-      expect(existsSync(join(repo, "book"))).toBe(false);
-      expect(r.digestCommitted).toBe(false);
+      expect(r.digestStatus).toBe("ok");
+      expect(r.digestReport!.threadingBatchesFailed).toBe(1);
+      expect(r.digestReport!.articlesOk).toBe(0);
+      // Toc still ran, so book/index.md exists; but no per-project chapter.
+      expect(existsSync(join(repo, "book/edge-memvc"))).toBe(false);
     } finally {
+      warn.mockRestore();
       spy.mockRestore();
     }
   });

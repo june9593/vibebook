@@ -121,7 +121,7 @@ describe("mergeCandidates", () => {
 });
 
 describe("runThreading", () => {
-  it("calls the runner once per batch and returns the merged ThreadCandidate[]", async () => {
+  it("calls the runner once per batch and returns the merged result", async () => {
     const runner = fakeRunner([
       {
         ok: true,
@@ -145,37 +145,121 @@ describe("runThreading", () => {
       [s("s1"), s("s2")],
       [s("s3"), s("s4")],
     ];
-    const merged = await runThreading(runner, batches);
+    const result = await runThreading(runner, batches);
 
     expect(runSpy).toHaveBeenCalledTimes(2);
-    expect(merged.length).toBe(2);
-    const t1 = merged.find((c) => c.threadId === "t1")!;
-    expect(t1.sessionIds).toEqual(["s1", "s2", "s3"]);
+    expect(result.failedBatches).toEqual([]);
+    expect(result.candidates).toHaveLength(2);
+    expect(result.candidates.map((c) => c.threadId).sort()).toEqual(["t1", "t2"]);
+    expect(result.candidates.find((c) => c.threadId === "t1")!.sessionIds.sort()).toEqual(["s1", "s2", "s3"]);
   });
 
-  it("throws when any batch's runner call returns ok:false, with all errors", async () => {
+  it("with maxAttempts=1: ok:false batch soft-fails (recorded in failedBatches, warns, no throw)", async () => {
     const runner = fakeRunner([
-      { ok: true, text: JSON.stringify([]), durationMs: 1 },
+      { ok: true, text: "[]", durationMs: 1 },
       { ok: false, error: "timeout", durationMs: 1 },
     ]);
-    const batches = [[s("s1")], [s("s2")]];
-    await expect(runThreading(runner, batches)).rejects.toThrow(/batch 1.*timeout/i);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const r = await runThreading(runner, [[s("s1")], [s("s2")]], 4, 1);
+      expect(r.candidates).toEqual([]);
+      expect(r.failedBatches).toEqual([{ batchIndex: 1, error: "timeout" }]);
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/batch 1.*timeout/));
+    } finally {
+      warn.mockRestore();
+    }
   });
 
-  it("throws when a batch returns malformed JSON", async () => {
+  it("with maxAttempts=1: parse error soft-fails", async () => {
     const runner = fakeRunner([
-      { ok: true, text: "not json at all", durationMs: 1 },
+      { ok: true, text: "not-json{", durationMs: 1 },
     ]);
-    const batches = [[s("s1")]];
-    await expect(runThreading(runner, batches)).rejects.toThrow(/batch 0.*parse/i);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const r = await runThreading(runner, [[s("s0")]], 4, 1);
+      expect(r.candidates).toEqual([]);
+      expect(r.failedBatches).toHaveLength(1);
+      expect(r.failedBatches[0]!.error).toMatch(/parse error/i);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
-  it("throws when a batch returns valid JSON but not a ThreadCandidate[] shape", async () => {
+  it("with maxAttempts=1: shape error soft-fails", async () => {
     const runner = fakeRunner([
-      { ok: true, text: JSON.stringify({ not: "an array" }), durationMs: 1 },
+      { ok: true, text: JSON.stringify([{ wrong: "shape" }]), durationMs: 1 },
     ]);
-    const batches = [[s("s1")]];
-    await expect(runThreading(runner, batches)).rejects.toThrow(/batch 0.*shape/i);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const r = await runThreading(runner, [[s("s0")]], 4, 1);
+      expect(r.candidates).toEqual([]);
+      expect(r.failedBatches).toHaveLength(1);
+      expect(r.failedBatches[0]!.error).toMatch(/missing threadId/);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("retries a batch that fails first then succeeds, returning candidates from the successful attempt", async () => {
+    const runner = fakeRunner([
+      { ok: false, error: "transient", durationMs: 1 },
+      { ok: true, text: JSON.stringify([
+        { threadId: "t-ok", title: "ok", sessionIds: ["s1"] },
+      ]), durationMs: 1 },
+    ]);
+    const r = await runThreading(runner, [[s("s1")]], 4, 3);
+    expect(r.failedBatches).toEqual([]);
+    expect(r.candidates).toHaveLength(1);
+    expect(r.candidates[0]!.threadId).toBe("t-ok");
+  });
+
+  it("with maxAttempts=3: retries on parse error, succeeds on third attempt", async () => {
+    const runner = fakeRunner([
+      { ok: true, text: "garbage{", durationMs: 1 },
+      { ok: true, text: "still-bad", durationMs: 1 },
+      { ok: true, text: JSON.stringify([
+        { threadId: "t-late", title: "late", sessionIds: ["s1"] },
+      ]), durationMs: 1 },
+    ]);
+    const r = await runThreading(runner, [[s("s1")]], 4, 3);
+    expect(r.failedBatches).toEqual([]);
+    expect(r.candidates[0]!.threadId).toBe("t-late");
+  });
+
+  it("with maxAttempts=2: gives up after 2 failed attempts and records last error", async () => {
+    const runner = fakeRunner([
+      { ok: true, text: "garbage1", durationMs: 1 },
+      { ok: true, text: "garbage2", durationMs: 1 },
+    ]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const r = await runThreading(runner, [[s("s1")]], 4, 2);
+      expect(r.candidates).toEqual([]);
+      expect(r.failedBatches).toHaveLength(1);
+      expect(r.failedBatches[0]!.error).toMatch(/parse error/);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("partial failure: one batch fails, others succeed; merged candidates come only from successful batches", async () => {
+    const runner = fakeRunner([
+      { ok: true, text: JSON.stringify([
+        { threadId: "t-good", title: "G", sessionIds: ["s0"] },
+      ]), durationMs: 1 },
+      { ok: true, text: "garbage", durationMs: 1 },
+      { ok: true, text: JSON.stringify([
+        { threadId: "t-also-good", title: "A", sessionIds: ["s2"] },
+      ]), durationMs: 1 },
+    ]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const r = await runThreading(runner, [[s("s0")], [s("s1")], [s("s2")]], 4, 1);
+      expect(r.failedBatches).toEqual([{ batchIndex: 1, error: expect.stringMatching(/parse error/) }]);
+      expect(r.candidates.map((c) => c.threadId).sort()).toEqual(["t-also-good", "t-good"]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("calls runner with outputFormat:'json'", async () => {
