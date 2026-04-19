@@ -168,9 +168,6 @@ describe("runSync — digest integration", () => {
 
   it("with noDigest=false + fake runner returning failed thread: threading batch soft-fails, digest still ok", async () => {
     const queue: RunResult[] = [
-      // Default maxAttempts=3: provide 3 ok:false replies for the single batch.
-      { ok: false, durationMs: 1, error: "thread runner exploded" },
-      { ok: false, durationMs: 1, error: "thread runner exploded" },
       { ok: false, durationMs: 1, error: "thread runner exploded" },
     ];
     const fakeRunner: LlmRunner = {
@@ -187,6 +184,7 @@ describe("runSync — digest integration", () => {
       const r = await runSync({
         repoPath: repo, claudeRoot, vscodeRoot, encrypt: false,
         runnerConfig: { runner: "claude-cli", runnerModel: "" },
+        threadingMaxAttempts: 1,
       });
       expect(r.digestStatus).toBe("ok");
       expect(r.digestReport!.threadingBatchesFailed).toBe(1);

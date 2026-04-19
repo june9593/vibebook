@@ -219,14 +219,11 @@ describe("runDigest — threading partial failure", () => {
     const idx = makeIndex([e]);
     const book: BookIndex = { version: 1, threads: {}, chapters: {} };
     const { runner } = makeRunner([
-      // Threading: return ok:false 3 times (default maxAttempts=3 will exhaust).
-      { ok: false, durationMs: 1, error: "thread runner exploded" },
-      { ok: false, durationMs: 1, error: "thread runner exploded" },
       { ok: false, durationMs: 1, error: "thread runner exploded" },
     ]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
-      const r = await runDigest(runner, repoRoot, idx, book, null);
+      const r = await runDigest(runner, repoRoot, idx, book, null, 4, 1);
       expect(r.threadingBatchesFailed).toBe(1);
       expect(r.threadCandidates).toBe(0);
       expect(r.articlesOk).toBe(0);
