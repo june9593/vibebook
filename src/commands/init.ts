@@ -1,4 +1,4 @@
-import { writeConfig, configExists, freshSaltBase64, DEFAULT_THREADING_CONCURRENCY, type Config } from "../config.js";
+import { writeConfig, configExists, freshSaltBase64, DEFAULT_THREADING_CONCURRENCY, DEFAULT_THREADING_MAX_ATTEMPTS, type Config } from "../config.js";
 import { ensureRepo } from "../git-ops.js";
 import { deviceBranchFromHostname } from "../device.js";
 import { homedir } from "node:os";
@@ -27,6 +27,7 @@ export async function initCmd(opts: InitOptions): Promise<void> {
     runner: "claude-cli",
     runnerModel: "",
     threadingConcurrency: DEFAULT_THREADING_CONCURRENCY,
+    threadingMaxAttempts: DEFAULT_THREADING_MAX_ATTEMPTS,
   };
   writeConfig(cfg);
   console.log(chalk.green(`memvc initialized:`));
