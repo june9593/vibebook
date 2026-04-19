@@ -1,6 +1,9 @@
 import type { LlmRunner } from "./runner.js";
 import type { IndexFile } from "../types.js";
 import { Buffer } from "node:buffer";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { BookIndex } from "./book-index.js";
 import { generateArticle } from "./article.js";
 import { generateChapter } from "./chapter.js";
@@ -35,6 +38,24 @@ export interface RedoReport {
  * Mutates `bookIndex` in place. Caller persists with saveBookIndex.
  */
 export async function runDigestRedo(
+  runner: LlmRunner,
+  repoRoot: string,
+  indexFile: IndexFile,
+  bookIndex: BookIndex,
+  key: Buffer | null,
+): Promise<RedoReport> {
+  const isolatedCwd = mkdtempSync(join(tmpdir(), "memvc-claude-"));
+  const wrappedRunner: LlmRunner = {
+    run: (prompt, vars, opts = {}) => runner.run(prompt, vars, { ...opts, cwd: isolatedCwd }),
+  };
+  try {
+    return await runDigestRedoImpl(wrappedRunner, repoRoot, indexFile, bookIndex, key);
+  } finally {
+    try { rmSync(isolatedCwd, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+}
+
+async function runDigestRedoImpl(
   runner: LlmRunner,
   repoRoot: string,
   indexFile: IndexFile,
