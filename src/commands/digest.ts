@@ -75,7 +75,7 @@ export async function digestCmd(opts: DigestOptions): Promise<void> {
       ...report.chaptersRewritten.map((p) => `book/${p}/chapter.md`),
       // Stage every project's articles dir so any newly-written article files
       // get added (analogous to sync.ts's collectDigestPaths).
-      ...uniqueProjects(report).map((p) => `book/${p}/articles`),
+      ...uniqueProjectsFromReport(report).map((p) => `book/${p}/articles`),
     ];
     const r = await commitAndPush(
       git,
@@ -112,18 +112,11 @@ export async function runDigestRedoFromRepo(args: {
   return report;
 }
 
-function uniqueProjects(report: RedoReport): string[] {
+export function uniqueProjectsFromReport(
+  report: { chaptersRewritten: string[]; tocFilesWritten: string[] },
+): string[] {
   const out = new Set<string>(report.chaptersRewritten);
   // Pull project names from per-chapter timeline paths in tocFilesWritten.
-  for (const path of report.tocFilesWritten) {
-    const m = path.match(/^book\/([^/]+)\/timeline\.md$/);
-    if (m && m[1]) out.add(m[1]);
-  }
-  return [...out];
-}
-
-function uniqueDigestProjects(report: DigestReport): string[] {
-  const out = new Set<string>(report.chaptersRewritten);
   for (const path of report.tocFilesWritten) {
     const m = path.match(/^book\/([^/]+)\/timeline\.md$/);
     if (m && m[1]) out.add(m[1]);
@@ -164,7 +157,7 @@ async function runDigestResetCmd(): Promise<void> {
       ".memvc/index.book.json",
       ...report.tocFilesWritten,
       ...report.chaptersRewritten.map((p) => `book/${p}/chapter.md`),
-      ...uniqueDigestProjects(report).map((p) => `book/${p}/articles`),
+      ...uniqueProjectsFromReport(report).map((p) => `book/${p}/articles`),
     ];
     const r = await commitAndPush(
       git,

@@ -17,7 +17,7 @@ export function isRealProjectPath(slugOrPath: string): boolean {
   const lower = slugOrPath.toLowerCase();
   if (lower.includes(".worktrees-")) return false;
   if (lower.endsWith(".code-workspace") || lower.endsWith("-workspacestorage")) return false;
-  if (lower.endsWith(".json") || lower.endsWith("-workspace.json")) return false;
+  if (lower.endsWith("-workspace.json")) return false;
   // Reject pure-numeric / 32-hex-like pseudo-IDs masquerading as project names
   if (/^\d{10,}/.test(slugOrPath)) return false;
   if (/^[a-f0-9]{20,}$/.test(slugOrPath)) return false;
