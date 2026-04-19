@@ -204,4 +204,24 @@ describe("runThreading", () => {
       endedAt: "2026-04-01T00:00:00Z",
     });
   });
+
+  it("respects the concurrency cap (no more than `concurrency` runner calls in flight at once)", async () => {
+    let active = 0;
+    let peak = 0;
+    const replies: RunResult[] = [];
+    const runner: LlmRunner = {
+      run: async () => {
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise((r) => setTimeout(r, 10));
+        active--;
+        return { ok: true, text: "[]", durationMs: 10 } satisfies RunResult;
+      },
+    };
+    const batches = Array.from({ length: 8 }, (_, i) => [s(`s${i}`)]);
+    await runThreading(runner, batches, 2);
+    expect(peak).toBeLessThanOrEqual(2);
+    expect(peak).toBeGreaterThan(1);
+    void replies; // silences unused-var if you remove the array
+  });
 });

@@ -1,6 +1,7 @@
 import type { LlmRunner } from "./runner.js";
 import type { ThreadCandidate, SessionForBatching } from "./types.js";
 import { loadPromptAsset } from "./prompt-loader.js";
+import { mapWithConcurrency } from "./concurrency.js";
 
 /** Cache the prompt at module load — file is static for the process lifetime. */
 const THREAD_PROMPT = loadPromptAsset(import.meta.url, "thread");
@@ -183,25 +184,24 @@ function asThreadCandidates(data: unknown, batchIndex: number): ThreadCandidate[
 export async function runThreading(
   runner: LlmRunner,
   batches: SessionForBatching[][],
+  concurrency = 4,
 ): Promise<ThreadCandidate[]> {
-  const results = await Promise.all(
-    batches.map((batch) =>
-      runner.run(
-        THREAD_PROMPT,
-        { sessionList: JSON.stringify(batch.map((s) => ({
-          sessionId: s.sessionId,
-          project: s.project,
-          endedAt: s.endedAt,
-        }))) },
-        { outputFormat: "json" },
-      ),
+  const results = await mapWithConcurrency(batches, concurrency, (batch) =>
+    runner.run(
+      THREAD_PROMPT,
+      { sessionList: JSON.stringify(batch.map((s) => ({
+        sessionId: s.sessionId,
+        project: s.project,
+        endedAt: s.endedAt,
+      }))) },
+      { outputFormat: "json" },
     ),
   );
 
   const perBatchCandidates: ThreadCandidate[][] = [];
   const errors: string[] = [];
   for (let i = 0; i < results.length; i++) {
-    const r = results[i];
+    const r = results[i]!;
     if (!r.ok) {
       errors.push(`batch ${i}: ${r.error}`);
       continue;

@@ -49,6 +49,7 @@ export async function runDigest(
   indexFile: IndexFile,
   bookIndex: BookIndex,
   key: Buffer | null,
+  concurrency = 4,
 ): Promise<DigestReport> {
   // -------------------------------------------------------------- plan
   const newEntries = findNewSessionEntries(indexFile, bookIndex);
@@ -69,7 +70,7 @@ export async function runDigest(
   if (newEntries.length > 0) {
     const sessionsForBatching = buildBatchingInput(newEntries, repoRoot, key);
     const batches = makeBatches(sessionsForBatching);
-    const candidates = await runThreading(runner, batches);
+    const candidates = await runThreading(runner, batches, concurrency);
     report.threadCandidates = candidates.length;
     report.threadsSkipped = recordSkippedThreadCandidates(bookIndex, candidates, indexFile).length;
     articleInputs = buildArticleInputs(candidates, indexFile, repoRoot, key);

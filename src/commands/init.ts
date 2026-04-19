@@ -26,6 +26,7 @@ export async function initCmd(opts: InitOptions): Promise<void> {
     deviceBranch: opts.device ?? deviceBranchFromHostname(),
     runner: "claude-cli",
     runnerModel: "",
+    threadingConcurrency: 4,
   };
   writeConfig(cfg);
   console.log(chalk.green(`memvc initialized:`));

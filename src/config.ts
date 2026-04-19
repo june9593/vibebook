@@ -15,6 +15,7 @@ const Schema = z.object({
   deviceBranch: z.string().default(""),
   runner: z.enum(["claude-cli", "anthropic-api", "github-models"]).default("claude-cli"),
   runnerModel: z.string().default(""),
+  threadingConcurrency: z.number().int().positive().default(4),
 });
 export type Config = z.infer<typeof Schema>;
 
