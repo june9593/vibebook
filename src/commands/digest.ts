@@ -2,7 +2,8 @@ import chalk from "chalk";
 import { Buffer } from "node:buffer";
 import { rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { readConfig, getPassphrase, type Config } from "../config.js";
+import { getPassphrase, type Config } from "../config.js";
+import { readConfigWithMigration } from "./sync.js";
 import { ensureRepo, commitAndPush, ensureDeviceBranch } from "../git-ops.js";
 import { loadIndex } from "../index-store.js";
 import { loadBookIndex, saveBookIndex } from "../digest/book-index.js";
@@ -43,7 +44,7 @@ export async function digestCmd(opts: DigestOptions): Promise<void> {
     return;
   }
 
-  const cfg = readConfig();
+  const cfg = readConfigWithMigration();
   const key = cfg.encrypt
     ? deriveKey(getPassphrase(), Buffer.from(cfg.salt, "base64"))
     : null;
@@ -135,7 +136,7 @@ function uniqueDigestProjects(report: DigestReport): string[] {
  * then runs runDigest from scratch and (when configured) commits/pushes.
  */
 async function runDigestResetCmd(): Promise<void> {
-  const cfg = readConfig();
+  const cfg = readConfigWithMigration();
   console.log(chalk.yellow(
     `memvc digest --reset: wiping book/ and .memvc/index.book.json under ${cfg.repoPath}`,
   ));
