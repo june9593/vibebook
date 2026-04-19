@@ -1,5 +1,6 @@
 import type { LlmRunner } from "./runner.js";
 import type { ThreadCandidate, SessionForBatching } from "./types.js";
+import type { Reporter } from "./reporter.js";
 import { loadPromptAsset } from "./prompt-loader.js";
 import { mapWithConcurrency } from "./concurrency.js";
 import { DEFAULT_THREADING_CONCURRENCY, DEFAULT_THREADING_MAX_ATTEMPTS } from "../config.js";
@@ -198,14 +199,19 @@ export async function runThreading(
   batches: SessionForBatching[][],
   concurrency = DEFAULT_THREADING_CONCURRENCY,
   maxAttempts = DEFAULT_THREADING_MAX_ATTEMPTS,
+  reporter: Reporter,
 ): Promise<ThreadingResult> {
   type BatchOutcome =
     | { ok: true; candidates: ThreadCandidate[] }
     | { ok: false; error: string };
 
-  const outcomes = await mapWithConcurrency(batches, concurrency, (batch, i) =>
-    processBatch(runner, batch, i, maxAttempts),
-  );
+  reporter.threadingStart(batches.length);
+  const outcomes = await mapWithConcurrency(batches, concurrency, async (batch, i) => {
+    const started = Date.now();
+    const outcome = await processBatch(runner, batch, i, maxAttempts);
+    reporter.threadingBatchDone(i, batches.length, Date.now() - started, outcome.ok);
+    return outcome;
+  });
 
   const perBatchCandidates: ThreadCandidate[][] = [];
   const failedBatches: { batchIndex: number; error: string }[] = [];

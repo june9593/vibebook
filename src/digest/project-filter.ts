@@ -4,10 +4,11 @@
  *
  * Rejects:
  *   - paths containing /.worktrees-*
- *   - paths ending in *.code-workspace, *.json (likely workspace.json fragments)
- *   - paths whose basename matches workspaceStorage hash patterns (32-hex)
+ *   - paths ending in *.code-workspace, *-workspace.json (workspace fragments)
+ *   - paths ending in -workspaceStorage (VSCode workspaceStorage hash dirs)
  *   - empty / "root" / "home"
- *   - paths under VSCode workspaceStorage (~/Library/.../Code/User/workspaceStorage)
+ *   - long-numeric-prefixed slugs (10+ digit run, e.g. workspaceStorage timestamps)
+ *   - 20+ pure-hex strings (workspaceStorage hashes)
  *
  * This is a heuristic — it's allowed to be wrong in edge cases. Goal: clean
  * the obviously-junk projects out of book/ TOC.
@@ -17,7 +18,7 @@ export function isRealProjectPath(slugOrPath: string): boolean {
   const lower = slugOrPath.toLowerCase();
   if (lower.includes(".worktrees-")) return false;
   if (lower.endsWith(".code-workspace") || lower.endsWith("-workspacestorage")) return false;
-  if (lower.endsWith(".json") || lower.endsWith("-workspace.json")) return false;
+  if (lower.endsWith("-workspace.json")) return false;
   // Reject pure-numeric / 32-hex-like pseudo-IDs masquerading as project names
   if (/^\d{10,}/.test(slugOrPath)) return false;
   if (/^[a-f0-9]{20,}$/.test(slugOrPath)) return false;

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { runThreading, mergeCandidates, normalizeSlug } from "../../src/digest/threading.js";
 import type { ThreadCandidate, SessionForBatching } from "../../src/digest/types.js";
 import type { LlmRunner, RunResult } from "../../src/digest/runner.js";
+import { silentReporter } from "../../src/digest/reporter.js";
 
 function fakeRunner(replies: RunResult[]): LlmRunner {
   let i = 0;
@@ -145,7 +146,7 @@ describe("runThreading", () => {
       [s("s1"), s("s2")],
       [s("s3"), s("s4")],
     ];
-    const result = await runThreading(runner, batches);
+    const result = await runThreading(runner, batches, 4, 3, silentReporter());
 
     expect(runSpy).toHaveBeenCalledTimes(2);
     expect(result.failedBatches).toEqual([]);
@@ -161,7 +162,7 @@ describe("runThreading", () => {
     ]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
-      const r = await runThreading(runner, [[s("s1")], [s("s2")]], 4, 1);
+      const r = await runThreading(runner, [[s("s1")], [s("s2")]], 4, 1, silentReporter());
       expect(r.candidates).toEqual([]);
       expect(r.failedBatches).toEqual([{ batchIndex: 1, error: "timeout" }]);
       expect(warn).toHaveBeenCalledWith(expect.stringMatching(/batch 1.*timeout/));
@@ -176,7 +177,7 @@ describe("runThreading", () => {
     ]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
-      const r = await runThreading(runner, [[s("s0")]], 4, 1);
+      const r = await runThreading(runner, [[s("s0")]], 4, 1, silentReporter());
       expect(r.candidates).toEqual([]);
       expect(r.failedBatches).toHaveLength(1);
       expect(r.failedBatches[0]!.error).toMatch(/parse error/i);
@@ -191,7 +192,7 @@ describe("runThreading", () => {
     ]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
-      const r = await runThreading(runner, [[s("s0")]], 4, 1);
+      const r = await runThreading(runner, [[s("s0")]], 4, 1, silentReporter());
       expect(r.candidates).toEqual([]);
       expect(r.failedBatches).toHaveLength(1);
       expect(r.failedBatches[0]!.error).toMatch(/missing threadId/);
@@ -207,7 +208,7 @@ describe("runThreading", () => {
         { threadId: "t-ok", title: "ok", sessionIds: ["s1"] },
       ]), durationMs: 1 },
     ]);
-    const r = await runThreading(runner, [[s("s1")]], 4, 3);
+    const r = await runThreading(runner, [[s("s1")]], 4, 3, silentReporter());
     expect(r.failedBatches).toEqual([]);
     expect(r.candidates).toHaveLength(1);
     expect(r.candidates[0]!.threadId).toBe("t-ok");
@@ -221,7 +222,7 @@ describe("runThreading", () => {
         { threadId: "t-late", title: "late", sessionIds: ["s1"] },
       ]), durationMs: 1 },
     ]);
-    const r = await runThreading(runner, [[s("s1")]], 4, 3);
+    const r = await runThreading(runner, [[s("s1")]], 4, 3, silentReporter());
     expect(r.failedBatches).toEqual([]);
     expect(r.candidates[0]!.threadId).toBe("t-late");
   });
@@ -233,7 +234,7 @@ describe("runThreading", () => {
     ]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
-      const r = await runThreading(runner, [[s("s1")]], 4, 2);
+      const r = await runThreading(runner, [[s("s1")]], 4, 2, silentReporter());
       expect(r.candidates).toEqual([]);
       expect(r.failedBatches).toHaveLength(1);
       expect(r.failedBatches[0]!.error).toMatch(/parse error/);
@@ -254,7 +255,7 @@ describe("runThreading", () => {
     ]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
-      const r = await runThreading(runner, [[s("s0")], [s("s1")], [s("s2")]], 4, 1);
+      const r = await runThreading(runner, [[s("s0")], [s("s1")], [s("s2")]], 4, 1, silentReporter());
       expect(r.failedBatches).toEqual([{ batchIndex: 1, error: expect.stringMatching(/parse error/) }]);
       expect(r.candidates.map((c) => c.threadId).sort()).toEqual(["t-also-good", "t-good"]);
     } finally {
@@ -267,7 +268,7 @@ describe("runThreading", () => {
       { ok: true, text: JSON.stringify([]), durationMs: 1 },
     ]);
     const runSpy = vi.spyOn(runner, "run");
-    await runThreading(runner, [[s("s1")]]);
+    await runThreading(runner, [[s("s1")]], 4, 3, silentReporter());
     const opts = runSpy.mock.calls[0][2];
     expect(opts?.outputFormat).toBe("json");
   });
@@ -277,7 +278,7 @@ describe("runThreading", () => {
       { ok: true, text: JSON.stringify([]), durationMs: 1 },
     ]);
     const runSpy = vi.spyOn(runner, "run");
-    await runThreading(runner, [[s("s1", "p", "2026-04-01T00:00:00Z")]]);
+    await runThreading(runner, [[s("s1", "p", "2026-04-01T00:00:00Z")]], 4, 3, silentReporter());
     const vars = runSpy.mock.calls[0][1];
     expect(vars.sessionList).toBeDefined();
     const parsed = JSON.parse(vars.sessionList);
@@ -302,7 +303,7 @@ describe("runThreading", () => {
       },
     };
     const batches = Array.from({ length: 8 }, (_, i) => [s(`s${i}`)]);
-    await runThreading(runner, batches, 2);
+    await runThreading(runner, batches, 2, 3, silentReporter());
     expect(peak).toBeLessThanOrEqual(2);
     expect(peak).toBeGreaterThan(1);
   });

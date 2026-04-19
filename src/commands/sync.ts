@@ -16,6 +16,7 @@ import { migrateLegacyMainToDevice } from "../migrate.js";
 import { loadBookIndex, saveBookIndex } from "../digest/book-index.js";
 import { createRunner } from "../digest/runner.js";
 import { runDigest, type DigestReport } from "../digest/orchestrator.js";
+import { consoleReporter } from "../digest/reporter.js";
 
 export interface SyncOptions {
   repoPath: string;
@@ -160,7 +161,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     const bookIndex = loadBookIndex(opts.repoPath);
     const runner = createRunner(opts.runnerConfig);
     try {
-      digestReport = await runDigest(runner, opts.repoPath, idx, bookIndex, key, opts.threadingConcurrency ?? DEFAULT_THREADING_CONCURRENCY, opts.threadingMaxAttempts ?? DEFAULT_THREADING_MAX_ATTEMPTS);
+      digestReport = await runDigest(runner, opts.repoPath, idx, bookIndex, key, opts.threadingConcurrency ?? DEFAULT_THREADING_CONCURRENCY, opts.threadingMaxAttempts ?? DEFAULT_THREADING_MAX_ATTEMPTS, consoleReporter());
       saveBookIndex(opts.repoPath, bookIndex);
       digestStatus = "ok";
       const failedBatchSuffix = digestReport.threadingBatchesFailed > 0
@@ -253,7 +254,12 @@ export function ensureDeviceBranchOnConfig(cfg: Config): { migrated: boolean; cf
   };
 }
 
-export async function syncCmd(opts: { noDigest?: boolean } = {}): Promise<void> {
+/**
+ * Loads ~/.memvc/config.json and applies any in-place migrations needed by
+ * current code (currently: deviceBranch self-heal). On migration, writes the
+ * fixed config back to disk. Used by both syncCmd and digestCmd.
+ */
+export function readConfigWithMigration(): Config {
   const rawCfg = readConfig();
   const heal = ensureDeviceBranchOnConfig(rawCfg);
   if (heal.migrated) {
@@ -262,7 +268,11 @@ export async function syncCmd(opts: { noDigest?: boolean } = {}): Promise<void> 
     ));
     writeConfig(heal.cfg);
   }
-  const cfg = heal.cfg;
+  return heal.cfg;
+}
+
+export async function syncCmd(opts: { noDigest?: boolean } = {}): Promise<void> {
+  const cfg = readConfigWithMigration();
   const passphrase = cfg.encrypt ? getPassphrase() : undefined;
   const r = await runSync({
     repoPath: cfg.repoPath,

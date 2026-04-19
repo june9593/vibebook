@@ -8,6 +8,7 @@ import {
   type ChapterEntry,
   upsertChapter,
 } from "./book-index.js";
+import type { Reporter } from "./reporter.js";
 import { loadPromptAsset } from "./prompt-loader.js";
 
 /**
@@ -110,15 +111,21 @@ export async function generateChapter(
   repoRoot: string,
   project: string,
   bookIndex: BookIndex,
+  reporter: Reporter,
 ): Promise<GenerateChapterResult> {
+  const started = Date.now();
   const articles = publishableArticlesFor(bookIndex, project);
-  if (articles.length === 0) return { status: "no-articles" };
+  if (articles.length === 0) {
+    reporter.chapterDone(project, "no-articles", Date.now() - started);
+    return { status: "no-articles" };
+  }
 
   let articlesVar: string;
   try {
     articlesVar = renderArticlesVar(repoRoot, articles);
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
+    reporter.chapterDone(project, "failed", Date.now() - started);
     return { status: "failed", error };
   }
 
@@ -131,10 +138,14 @@ export async function generateChapter(
     );
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
+    reporter.chapterDone(project, "failed", Date.now() - started);
     return { status: "failed", error };
   }
 
-  if (!res.ok) return { status: "failed", error: res.error };
+  if (!res.ok) {
+    reporter.chapterDone(project, "failed", Date.now() - started);
+    return { status: "failed", error: res.error };
+  }
 
   const chapterPath = join("book", project, "chapter.md");
   try {
@@ -143,6 +154,7 @@ export async function generateChapter(
     writeFileSync(abs, res.text);
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
+    reporter.chapterDone(project, "failed", Date.now() - started);
     return { status: "failed", error };
   }
 
@@ -152,5 +164,6 @@ export async function generateChapter(
     latestArticleHash: computeChapterArticleHash(articles.map(summaryFor)),
   };
   upsertChapter(bookIndex, project, entry);
+  reporter.chapterDone(project, "ok", Date.now() - started);
   return { status: "ok", chapterPath };
 }

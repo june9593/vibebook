@@ -6,6 +6,7 @@ import { runDigest } from "../../src/digest/orchestrator.js";
 import type { IndexFile, IndexEntry, Tool } from "../../src/types.js";
 import type { BookIndex } from "../../src/digest/book-index.js";
 import type { LlmRunner, RunResult } from "../../src/digest/runner.js";
+import { silentReporter } from "../../src/digest/reporter.js";
 
 let repoRoot: string;
 beforeEach(() => {
@@ -72,7 +73,7 @@ describe("runDigest — empty input", () => {
     const idx: IndexFile = { version: 1, entries: {} };
     const book: BookIndex = { version: 1, threads: {}, chapters: {} };
     const { runner, calls } = makeRunner([]);
-    const r = await runDigest(runner, repoRoot, idx, book, null);
+    const r = await runDigest(runner, repoRoot, idx, book, null, 4, 3, silentReporter());
     expect(calls).toHaveLength(0);
     expect(r).toMatchObject({
       newSessions: 0,
@@ -107,7 +108,7 @@ describe("runDigest — happy path: one new session → one thread → one artic
       { ok: true, durationMs: 1, text: "# proj-a\n\n章前言。" },
     ]);
 
-    const r = await runDigest(runner, repoRoot, idx, book, null);
+    const r = await runDigest(runner, repoRoot, idx, book, null, 4, 3, silentReporter());
 
     // Three LLM calls in order: thread, article, chapter.
     expect(calls).toHaveLength(3);
@@ -154,7 +155,7 @@ describe("runDigest — skip candidate: persists skip BookEntry, no article/chap
       // No more replies — if anything is called the fake throws.
     ]);
 
-    const r = await runDigest(runner, repoRoot, idx, book, null);
+    const r = await runDigest(runner, repoRoot, idx, book, null, 4, 3, silentReporter());
 
     expect(calls).toHaveLength(1); // threading only
     expect(r.threadsSkipped).toBe(1);
@@ -199,7 +200,7 @@ describe("runDigest — article phase failure isolation", () => {
       { ok: true, durationMs: 1, text: "# proj-a\n\n章。" },
     ]);
 
-    const r = await runDigest(runner, repoRoot, idx, book, null);
+    const r = await runDigest(runner, repoRoot, idx, book, null, 4, 3, silentReporter());
 
     expect(r.articlesOk).toBe(1);
     expect(r.articlesFailed).toBe(1);
@@ -223,7 +224,7 @@ describe("runDigest — threading partial failure", () => {
     ]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
-      const r = await runDigest(runner, repoRoot, idx, book, null, 4, 1);
+      const r = await runDigest(runner, repoRoot, idx, book, null, 4, 1, silentReporter());
       expect(r.threadingBatchesFailed).toBe(1);
       expect(r.threadCandidates).toBe(0);
       expect(r.articlesOk).toBe(0);
@@ -256,7 +257,7 @@ describe("runDigest — chapter phase failure is isolated", () => {
       { ok: false, durationMs: 1, error: "chapter runner timeout" }, // chapter fails
     ]);
 
-    const r = await runDigest(runner, repoRoot, idx, book, null);
+    const r = await runDigest(runner, repoRoot, idx, book, null, 4, 3, silentReporter());
 
     expect(r.articlesOk).toBe(1);
     expect(r.chaptersRewritten).toEqual([]);
@@ -324,7 +325,7 @@ describe("runDigest — chapter rewrite gate", () => {
       { ok: true, durationMs: 1, text: "# proj-a\n\n章。" },
     ]);
 
-    const r = await runDigest(runner, repoRoot, idx, book, null);
+    const r = await runDigest(runner, repoRoot, idx, book, null, 4, 3, silentReporter());
 
     expect(r.chaptersRewritten).toEqual(["proj-a"]);
     expect(book.chapters["proj-b"]!.lastFullRewrite).toBe("2026-04-10T00:00:00Z"); // untouched
@@ -364,7 +365,7 @@ describe("runDigest — stale article version forces regeneration", () => {
       { ok: true, durationMs: 1, text: "# proj-a\n\n章。" },
     ]);
 
-    const r = await runDigest(runner, repoRoot, idx, book, null);
+    const r = await runDigest(runner, repoRoot, idx, book, null, 4, 3, silentReporter());
 
     // No threading call — only article + chapter.
     expect(calls).toHaveLength(2);
@@ -401,7 +402,7 @@ describe("runDigest — pseudo-project pruning migration", () => {
       },
     };
     const { runner } = makeRunner([]);
-    await runDigest(runner, repoRoot, idx, book, null);
+    await runDigest(runner, repoRoot, idx, book, null, 4, 3, silentReporter());
     expect(book.threads["t-junk"]).toBeUndefined();
     expect(book.threads["t-good"]).toBeDefined();
     expect(book.chapters[".worktrees-abc-123"]).toBeUndefined();

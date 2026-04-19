@@ -4,10 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Buffer } from "node:buffer";
 import { fileURLToPath } from "node:url";
-import { runSync, ensureDeviceBranchOnConfig } from "../../src/commands/sync.js";
+import { runSync, ensureDeviceBranchOnConfig, readConfigWithMigration } from "../../src/commands/sync.js";
 import { loadIndex } from "../../src/index-store.js";
 import type { LlmRunner, RunResult } from "../../src/digest/runner.js";
 import { loadBookIndex } from "../../src/digest/book-index.js";
+import * as configModule from "../../src/config.js";
 import type { Config } from "../../src/config.js";
 
 function baseCfg(overrides: Partial<Config> = {}): Config {
@@ -35,6 +36,26 @@ describe("ensureDeviceBranchOnConfig", () => {
     const r = ensureDeviceBranchOnConfig(baseCfg({ deviceBranch: "my-device" }));
     expect(r.migrated).toBe(false);
     expect(r.cfg.deviceBranch).toBe("my-device");
+  });
+});
+
+describe("readConfigWithMigration", () => {
+  it("writes back the migrated config when deviceBranch was empty", () => {
+    const cfg = baseCfg({ deviceBranch: "" });
+    const writes: Config[] = [];
+    const readSpy = vi.spyOn(configModule, "readConfig").mockReturnValue(cfg);
+    const writeSpy = vi.spyOn(configModule, "writeConfig").mockImplementation((c) => { writes.push(c); });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      const result = readConfigWithMigration();
+      expect(result.deviceBranch.length).toBeGreaterThan(0);
+      expect(writes).toHaveLength(1);
+      expect(writes[0]!.deviceBranch).toBe(result.deviceBranch);
+    } finally {
+      readSpy.mockRestore();
+      writeSpy.mockRestore();
+      logSpy.mockRestore();
+    }
   });
 });
 

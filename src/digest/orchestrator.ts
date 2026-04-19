@@ -1,9 +1,6 @@
 import type { LlmRunner } from "./runner.js";
 import type { IndexFile } from "../types.js";
 import { Buffer } from "node:buffer";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { type BookIndex } from "./book-index.js";
 import { makeBatches } from "./batcher.js";
 import { runThreading } from "./threading.js";
@@ -17,6 +14,8 @@ import {
   generateChapter,
 } from "./chapter.js";
 import { generateToc } from "./toc.js";
+import type { Reporter } from "./reporter.js";
+import { withIsolatedCwd } from "./with-isolated-cwd.js";
 import {
   findNewSessionEntries,
   buildBatchingInput,
@@ -59,6 +58,7 @@ export async function runDigest(
   key: Buffer | null,
   concurrency = DEFAULT_THREADING_CONCURRENCY,
   maxAttempts = DEFAULT_THREADING_MAX_ATTEMPTS,
+  reporter: Reporter,
 ): Promise<DigestReport> {
   // One-shot migration: drop pseudo-project entries from BookIndex.threads/chapters.
   let pruned = 0;
@@ -78,15 +78,9 @@ export async function runDigest(
     console.log(`runDigest: pruned ${pruned} pseudo-project entries from BookIndex`);
   }
 
-  const isolatedCwd = mkdtempSync(join(tmpdir(), "memvc-claude-"));
-  const wrappedRunner: LlmRunner = {
-    run: (prompt, vars, opts = {}) => runner.run(prompt, vars, { ...opts, cwd: isolatedCwd }),
-  };
-  try {
-    return await runDigestImpl(wrappedRunner, repoRoot, indexFile, bookIndex, key, concurrency, maxAttempts);
-  } finally {
-    try { rmSync(isolatedCwd, { recursive: true, force: true }); } catch { /* best-effort */ }
-  }
+  return withIsolatedCwd(runner, (wrappedRunner) =>
+    runDigestImpl(wrappedRunner, repoRoot, indexFile, bookIndex, key, concurrency, maxAttempts, reporter),
+  );
 }
 
 async function runDigestImpl(
@@ -97,6 +91,7 @@ async function runDigestImpl(
   key: Buffer | null,
   concurrency: number,
   maxAttempts: number,
+  reporter: Reporter,
 ): Promise<DigestReport> {
   // -------------------------------------------------------------- plan
   const newEntries = findNewSessionEntries(indexFile, bookIndex);
@@ -118,7 +113,7 @@ async function runDigestImpl(
   if (newEntries.length > 0) {
     const sessionsForBatching = buildBatchingInput(newEntries, repoRoot, key);
     const batches = makeBatches(sessionsForBatching);
-    const threadingResult = await runThreading(runner, batches, concurrency, maxAttempts);
+    const threadingResult = await runThreading(runner, batches, concurrency, maxAttempts, reporter);
     const candidates = threadingResult.candidates;
     report.threadingBatchesFailed = threadingResult.failedBatches.length;
     report.threadCandidates = candidates.length;
@@ -140,8 +135,9 @@ async function runDigestImpl(
   for (const input of allArticleInputs) touchedProjects.add(input.project);
 
   // -------------------------------------------------------------- article
+  reporter.articleStart(allArticleInputs.length);
   for (const input of allArticleInputs) {
-    const res = await generateArticle(runner, repoRoot, input, bookIndex);
+    const res = await generateArticle(runner, repoRoot, input, bookIndex, reporter);
     if (res.status === "ok") report.articlesOk++;
     else if (res.status === "skipped") report.articlesSkipped++;
     else report.articlesFailed++;
@@ -151,17 +147,20 @@ async function runDigestImpl(
   // Consider any project with a touched article OR an existing entry whose hash
   // would change. We only call chapterNeedsRewrite for the touched set — we
   // assume untouched projects' hashes can't have shifted.
+  reporter.chapterStart(touchedProjects.size);
   for (const project of Array.from(touchedProjects).sort()) {
     if (!chapterNeedsRewrite(bookIndex, project)) continue;
-    const res = await generateChapter(runner, repoRoot, project, bookIndex);
+    const res = await generateChapter(runner, repoRoot, project, bookIndex, reporter);
     if (res.status === "ok") report.chaptersRewritten.push(project);
     else if (res.status === "failed") report.chaptersFailed.push({ project, error: res.error });
     // "no-articles" → silent: nothing to do.
   }
 
   // -------------------------------------------------------------- toc
+  reporter.tocStart();
   const tocResult = generateToc(repoRoot, bookIndex);
   report.tocFilesWritten = tocResult.written;
+  reporter.tocDone(tocResult.written.length);
 
   return report;
 }

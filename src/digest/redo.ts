@@ -1,13 +1,12 @@
 import type { LlmRunner } from "./runner.js";
 import type { IndexFile } from "../types.js";
 import { Buffer } from "node:buffer";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { BookIndex } from "./book-index.js";
 import { generateArticle } from "./article.js";
 import { generateChapter } from "./chapter.js";
 import { generateToc } from "./toc.js";
+import type { Reporter } from "./reporter.js";
+import { withIsolatedCwd } from "./with-isolated-cwd.js";
 import { buildArticleInputForThread } from "./pipeline.js";
 
 export interface RedoReport {
@@ -43,16 +42,11 @@ export async function runDigestRedo(
   indexFile: IndexFile,
   bookIndex: BookIndex,
   key: Buffer | null,
+  reporter: Reporter,
 ): Promise<RedoReport> {
-  const isolatedCwd = mkdtempSync(join(tmpdir(), "memvc-claude-"));
-  const wrappedRunner: LlmRunner = {
-    run: (prompt, vars, opts = {}) => runner.run(prompt, vars, { ...opts, cwd: isolatedCwd }),
-  };
-  try {
-    return await runDigestRedoImpl(wrappedRunner, repoRoot, indexFile, bookIndex, key);
-  } finally {
-    try { rmSync(isolatedCwd, { recursive: true, force: true }); } catch { /* best-effort */ }
-  }
+  return withIsolatedCwd(runner, (wrappedRunner) =>
+    runDigestRedoImpl(wrappedRunner, repoRoot, indexFile, bookIndex, key, reporter),
+  );
 }
 
 async function runDigestRedoImpl(
@@ -61,6 +55,7 @@ async function runDigestRedoImpl(
   indexFile: IndexFile,
   bookIndex: BookIndex,
   key: Buffer | null,
+  reporter: Reporter,
 ): Promise<RedoReport> {
   const report: RedoReport = {
     threadsAttempted: 0,
@@ -74,10 +69,11 @@ async function runDigestRedoImpl(
   };
 
   // ----------------------------------------------------- Phase 1: retry failed
-  for (const be of Object.values(bookIndex.threads)) {
-    if (be.skip) continue;
-    if (be.articleStatus !== "failed") continue;
-
+  const failed = Object.values(bookIndex.threads).filter(
+    (be) => !be.skip && be.articleStatus === "failed",
+  );
+  reporter.articleStart(failed.length);
+  for (const be of failed) {
     const input = buildArticleInputForThread(
       be.threadId,
       be.title,
@@ -94,7 +90,7 @@ async function runDigestRedoImpl(
     }
 
     report.threadsAttempted++;
-    const res = await generateArticle(runner, repoRoot, input, bookIndex);
+    const res = await generateArticle(runner, repoRoot, input, bookIndex, reporter);
     if (res.status === "ok") {
       report.threadsRecovered++;
     } else if (res.status === "skipped") {
@@ -105,17 +101,20 @@ async function runDigestRedoImpl(
   }
 
   // ----------------------------------- Phase 2: force-rewrite ALL chapters
-  const projects = collectProjectsWithArticles(bookIndex);
-  for (const project of Array.from(projects).sort()) {
-    const res = await generateChapter(runner, repoRoot, project, bookIndex);
+  const projects = Array.from(collectProjectsWithArticles(bookIndex)).sort();
+  reporter.chapterStart(projects.length);
+  for (const project of projects) {
+    const res = await generateChapter(runner, repoRoot, project, bookIndex, reporter);
     if (res.status === "ok") report.chaptersRewritten.push(project);
     else if (res.status === "failed") report.chaptersFailed.push({ project, error: res.error });
     // "no-articles" → silent skip.
   }
 
   // ----------------------------------------------------- Phase 3: toc
+  reporter.tocStart();
   const tocResult = generateToc(repoRoot, bookIndex);
   report.tocFilesWritten = tocResult.written;
+  reporter.tocDone(tocResult.written.length);
 
   return report;
 }
