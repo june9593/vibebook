@@ -1,9 +1,6 @@
 import type { LlmRunner } from "./runner.js";
 import type { IndexFile } from "../types.js";
 import { Buffer } from "node:buffer";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { type BookIndex } from "./book-index.js";
 import { makeBatches } from "./batcher.js";
 import { runThreading } from "./threading.js";
@@ -18,6 +15,7 @@ import {
 } from "./chapter.js";
 import { generateToc } from "./toc.js";
 import type { Reporter } from "./reporter.js";
+import { withIsolatedCwd } from "./with-isolated-cwd.js";
 import {
   findNewSessionEntries,
   buildBatchingInput,
@@ -80,15 +78,9 @@ export async function runDigest(
     console.log(`runDigest: pruned ${pruned} pseudo-project entries from BookIndex`);
   }
 
-  const isolatedCwd = mkdtempSync(join(tmpdir(), "memvc-claude-"));
-  const wrappedRunner: LlmRunner = {
-    run: (prompt, vars, opts = {}) => runner.run(prompt, vars, { ...opts, cwd: isolatedCwd }),
-  };
-  try {
-    return await runDigestImpl(wrappedRunner, repoRoot, indexFile, bookIndex, key, concurrency, maxAttempts, reporter);
-  } finally {
-    try { rmSync(isolatedCwd, { recursive: true, force: true }); } catch { /* best-effort */ }
-  }
+  return withIsolatedCwd(runner, (wrappedRunner) =>
+    runDigestImpl(wrappedRunner, repoRoot, indexFile, bookIndex, key, concurrency, maxAttempts, reporter),
+  );
 }
 
 async function runDigestImpl(

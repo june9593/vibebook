@@ -1,14 +1,12 @@
 import type { LlmRunner } from "./runner.js";
 import type { IndexFile } from "../types.js";
 import { Buffer } from "node:buffer";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { BookIndex } from "./book-index.js";
 import { generateArticle } from "./article.js";
 import { generateChapter } from "./chapter.js";
 import { generateToc } from "./toc.js";
 import type { Reporter } from "./reporter.js";
+import { withIsolatedCwd } from "./with-isolated-cwd.js";
 import { buildArticleInputForThread } from "./pipeline.js";
 
 export interface RedoReport {
@@ -46,15 +44,9 @@ export async function runDigestRedo(
   key: Buffer | null,
   reporter: Reporter,
 ): Promise<RedoReport> {
-  const isolatedCwd = mkdtempSync(join(tmpdir(), "memvc-claude-"));
-  const wrappedRunner: LlmRunner = {
-    run: (prompt, vars, opts = {}) => runner.run(prompt, vars, { ...opts, cwd: isolatedCwd }),
-  };
-  try {
-    return await runDigestRedoImpl(wrappedRunner, repoRoot, indexFile, bookIndex, key, reporter);
-  } finally {
-    try { rmSync(isolatedCwd, { recursive: true, force: true }); } catch { /* best-effort */ }
-  }
+  return withIsolatedCwd(runner, (wrappedRunner) =>
+    runDigestRedoImpl(wrappedRunner, repoRoot, indexFile, bookIndex, key, reporter),
+  );
 }
 
 async function runDigestRedoImpl(
