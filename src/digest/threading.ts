@@ -45,7 +45,6 @@ export function mergeCandidates(perBatch: ThreadCandidate[][]): ThreadCandidate[
     sessionIds: string[];   // ordered, deduped
     skip: boolean;
     reason?: string;
-    worthWriting?: boolean;
     firstSeen: number;      // index across the flattened stream
   }
   const key = (threadId: string, project: string) => `${threadId}\0${project}`;
@@ -72,9 +71,6 @@ export function mergeCandidates(perBatch: ThreadCandidate[][]): ThreadCandidate[
       if (c.skip) {
         g.skip = true;
         if (c.reason && !g.reason) g.reason = c.reason;
-      }
-      if (c.worthWriting !== undefined && g.worthWriting === undefined) {
-        g.worthWriting = c.worthWriting;
       }
       idx++;
     }
@@ -129,9 +125,6 @@ export function mergeCandidates(perBatch: ThreadCandidate[][]): ThreadCandidate[
       cg.skip = true;
       if (g.reason && !cg.reason) cg.reason = g.reason;
     }
-    if (g.worthWriting !== undefined && cg.worthWriting === undefined) {
-      cg.worthWriting = g.worthWriting;
-    }
   }
 
   // Emit in firstSeen order for deterministic output.
@@ -146,7 +139,6 @@ export function mergeCandidates(perBatch: ThreadCandidate[][]): ThreadCandidate[
       };
       if (g.skip) tc.skip = true;
       if (g.reason) tc.reason = g.reason;
-      if (g.worthWriting !== undefined) tc.worthWriting = g.worthWriting;
       return tc;
     });
   return out;
@@ -185,11 +177,6 @@ function asThreadCandidates(data: unknown, batchIndex: number): ThreadCandidate[
       if (typeof sid !== "string") {
         throw new Error(`threading batch ${batchIndex}: bad shape — sessionIds must be string[]`);
       }
-    }
-    if (c.worthWriting !== undefined && typeof c.worthWriting !== "boolean") {
-      throw new Error(
-        `threading batch ${batchIndex}: bad shape — element ${i} worthWriting must be boolean if present`,
-      );
     }
   }
   return data as ThreadCandidate[];
@@ -299,7 +286,6 @@ export async function runThreading(
     project: s.project,
     title: synthTitle(s),
     sessionIds: [s.sessionId],
-    worthWriting: true,
   }));
   const finalCandidates = splitCandidates.concat(recoveredCandidates);
 
@@ -366,7 +352,6 @@ export async function runThreading(
               sessionIds: sids,
               ...(c.skip ? { skip: true } : {}),
               ...(c.reason ? { reason: c.reason } : {}),
-              ...(c.worthWriting !== undefined ? { worthWriting: c.worthWriting } : {}),
             });
           }
         }
