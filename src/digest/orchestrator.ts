@@ -39,6 +39,10 @@ export interface DigestReport {
   chaptersRewritten: string[];
   chaptersFailed: { project: string; error: string }[];
   tocFilesWritten: string[];
+  /** When set, the pipeline body threw before completion. toc still ran in
+   *  the finally block. Caller should warn the user but not treat sync as
+   *  total failure. */
+  crashedAt?: string;
 }
 
 /**
@@ -108,60 +112,71 @@ async function runDigestImpl(
     tocFilesWritten: [],
   };
 
-  // -------------------------------------------------------------- thread
-  let articleInputs: ArticleInput[] = [];
-  if (newEntries.length > 0) {
-    const sessionsForBatching = buildBatchingInput(newEntries, repoRoot, key);
-    const batches = makeBatches(sessionsForBatching);
-    const threadingResult = await runThreading(runner, batches, concurrency, maxAttempts, reporter);
-    const candidates = threadingResult.candidates;
-    report.threadingBatchesFailed = threadingResult.failedBatches.length;
-    report.threadCandidates = candidates.length;
-    report.threadsSkipped = recordSkippedThreadCandidates(bookIndex, candidates, indexFile).length;
-    articleInputs = buildArticleInputs(candidates, indexFile, repoRoot, key);
+  let crashedAt: string | undefined;
+  try {
+    // -------------------------------------------------------------- thread
+    let articleInputs: ArticleInput[] = [];
+    if (newEntries.length > 0) {
+      const sessionsForBatching = buildBatchingInput(newEntries, repoRoot, key);
+      const batches = makeBatches(sessionsForBatching);
+      const threadingResult = await runThreading(runner, batches, concurrency, maxAttempts, reporter);
+      const candidates = threadingResult.candidates;
+      report.threadingBatchesFailed = threadingResult.failedBatches.length;
+      report.threadCandidates = candidates.length;
+      report.threadsSkipped = recordSkippedThreadCandidates(bookIndex, candidates, indexFile).length;
+      articleInputs = buildArticleInputs(candidates, indexFile, repoRoot, key);
+    }
+
+    // ------------------------------ stale-thread re-generation (article-version drift)
+    // Spec line 99: BookEntries whose articleVersion is below current need rewrite.
+    // We don't include failed (those are 2.9 --redo) or skip threads.
+    const freshThreadIds = new Set(articleInputs.map((i) => i.threadId));
+    const staleInputs = buildStaleArticleInputs(bookIndex, indexFile, repoRoot, key)
+      .filter((i) => !freshThreadIds.has(i.threadId));
+    const allArticleInputs = [...articleInputs, ...staleInputs];
+
+    // Track which projects had any article touched, so chapter phase only
+    // considers them (in addition to chapterNeedsRewrite's own gate).
+    const touchedProjects = new Set<string>();
+    for (const input of allArticleInputs) touchedProjects.add(input.project);
+
+    // -------------------------------------------------------------- article
+    reporter.articleStart(allArticleInputs.length);
+    for (const input of allArticleInputs) {
+      const res = await generateArticle(runner, repoRoot, input, bookIndex, reporter);
+      if (res.status === "ok") report.articlesOk++;
+      else if (res.status === "skipped") report.articlesSkipped++;
+      else report.articlesFailed++;
+    }
+
+    // -------------------------------------------------------------- chapter
+    // Consider any project with a touched article OR an existing entry whose hash
+    // would change. We only call chapterNeedsRewrite for the touched set — we
+    // assume untouched projects' hashes can't have shifted.
+    reporter.chapterStart(touchedProjects.size);
+    for (const project of Array.from(touchedProjects).sort()) {
+      if (!chapterNeedsRewrite(bookIndex, project)) continue;
+      const res = await generateChapter(runner, repoRoot, project, bookIndex, reporter);
+      if (res.status === "ok") report.chaptersRewritten.push(project);
+      else if (res.status === "failed") report.chaptersFailed.push({ project, error: res.error });
+      // "no-articles" → silent: nothing to do.
+    }
+  } catch (e) {
+    crashedAt = e instanceof Error ? e.message : String(e);
+    console.warn(`runDigest: phase crashed: ${crashedAt}; will still attempt toc + persist BookIndex`);
   }
 
-  // ------------------------------ stale-thread re-generation (article-version drift)
-  // Spec line 99: BookEntries whose articleVersion is below current need rewrite.
-  // We don't include failed (those are 2.9 --redo) or skip threads.
-  const freshThreadIds = new Set(articleInputs.map((i) => i.threadId));
-  const staleInputs = buildStaleArticleInputs(bookIndex, indexFile, repoRoot, key)
-    .filter((i) => !freshThreadIds.has(i.threadId));
-  const allArticleInputs = [...articleInputs, ...staleInputs];
-
-  // Track which projects had any article touched, so chapter phase only
-  // considers them (in addition to chapterNeedsRewrite's own gate).
-  const touchedProjects = new Set<string>();
-  for (const input of allArticleInputs) touchedProjects.add(input.project);
-
-  // -------------------------------------------------------------- article
-  reporter.articleStart(allArticleInputs.length);
-  for (const input of allArticleInputs) {
-    const res = await generateArticle(runner, repoRoot, input, bookIndex, reporter);
-    if (res.status === "ok") report.articlesOk++;
-    else if (res.status === "skipped") report.articlesSkipped++;
-    else report.articlesFailed++;
+  // -------------------------------------------------------------- toc (always)
+  try {
+    reporter.tocStart();
+    const tocResult = generateToc(repoRoot, bookIndex);
+    report.tocFilesWritten = tocResult.written;
+    reporter.tocDone(tocResult.written.length);
+  } catch (e) {
+    console.warn(`runDigest: toc phase also crashed: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  // -------------------------------------------------------------- chapter
-  // Consider any project with a touched article OR an existing entry whose hash
-  // would change. We only call chapterNeedsRewrite for the touched set — we
-  // assume untouched projects' hashes can't have shifted.
-  reporter.chapterStart(touchedProjects.size);
-  for (const project of Array.from(touchedProjects).sort()) {
-    if (!chapterNeedsRewrite(bookIndex, project)) continue;
-    const res = await generateChapter(runner, repoRoot, project, bookIndex, reporter);
-    if (res.status === "ok") report.chaptersRewritten.push(project);
-    else if (res.status === "failed") report.chaptersFailed.push({ project, error: res.error });
-    // "no-articles" → silent: nothing to do.
-  }
-
-  // -------------------------------------------------------------- toc
-  reporter.tocStart();
-  const tocResult = generateToc(repoRoot, bookIndex);
-  report.tocFilesWritten = tocResult.written;
-  reporter.tocDone(tocResult.written.length);
-
+  if (crashedAt) report.crashedAt = crashedAt;
   return report;
 }
 

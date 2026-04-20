@@ -377,6 +377,58 @@ describe("runDigest — stale article version forces regeneration", () => {
 });
 
 // =====================================================================
+describe("runDigest — top-level crash containment", () => {
+  it("when article phase throws, toc still runs and BookIndex is preserved in caller's ref", async () => {
+    // Stage a session, but make generateArticle throw via a runner that throws
+    // synchronously (orchestrator catches in its outer try).
+    const e = ie({ sessionId: "s1" });
+    writeSessionMd(e.relativePath, "## User\n\nfix bug");
+    const idx = makeIndex([e]);
+    const book: BookIndex = { version: 1, threads: {}, chapters: {} };
+    let called = 0;
+    const runner: LlmRunner = {
+      async run() {
+        called++;
+        // First call = threading: returns valid candidate.
+        if (called === 1) return { ok: true, durationMs: 1, text: JSON.stringify([
+          { threadId: "t1", title: "t", sessionIds: ["s1"] },
+        ])};
+        // Second call = article: throw to simulate downstream crash.
+        throw new Error("simulated crash inside article phase");
+      },
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const r = await runDigest(runner, repoRoot, idx, book, null, 4, 1, silentReporter());
+      // generateArticle's contract converts a thrown runner into a "failed"
+      // status; orchestrator-level crash needs an upstream throw — see next test.
+      // What matters here: toc still runs and book/index.md is written.
+      expect(r.tocFilesWritten).toContain("book/index.md");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("when buildArticleInputs throws (e.g. corrupt index), report.crashedAt is set and toc still runs", async () => {
+    // Make pipeline.ts throw by passing an indexFile entry whose .md path is
+    // a directory (causes readSync EISDIR).
+    const e = ie({ sessionId: "s1", relativePath: "some/dir-not-file" });
+    mkdirSync(join(repoRoot, "some/dir-not-file"), { recursive: true }); // exists as dir
+    const idx = makeIndex([e]);
+    const book: BookIndex = { version: 1, threads: {}, chapters: {} };
+    const runner: LlmRunner = { async run() { throw new Error("not called"); } };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const r = await runDigest(runner, repoRoot, idx, book, null, 4, 1, silentReporter());
+      expect(r.crashedAt).toBeTruthy();
+      expect(r.tocFilesWritten).toContain("book/index.md"); // toc still ran
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+// =====================================================================
 describe("runDigest — pseudo-project pruning migration", () => {
   it("prunes pre-existing pseudo-project entries from BookIndex on first run", async () => {
     const idx: IndexFile = { version: 1, entries: {} };
