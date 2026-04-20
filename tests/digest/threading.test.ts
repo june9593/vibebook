@@ -53,10 +53,10 @@ describe("mergeCandidates", () => {
 
   it("merges identical threadIds across batches, unioning sessionIds in first-appearance order", () => {
     const batchA: ThreadCandidate[] = [
-      { threadId: "fix-bug", title: "修 bug", sessionIds: ["s1", "s2"] },
+      { threadId: "fix-bug", project: "p", title: "修 bug", sessionIds: ["s1", "s2"] },
     ];
     const batchB: ThreadCandidate[] = [
-      { threadId: "fix-bug", title: "修 bug", sessionIds: ["s2", "s3"] },
+      { threadId: "fix-bug", project: "p", title: "修 bug", sessionIds: ["s2", "s3"] },
     ];
     const merged = mergeCandidates([batchA, batchB]);
     expect(merged.length).toBe(1);
@@ -66,10 +66,10 @@ describe("mergeCandidates", () => {
 
   it("collapses prefix-equivalent slugs onto the longer one", () => {
     const batchA: ThreadCandidate[] = [
-      { threadId: "fix-bug", title: "修 bug", sessionIds: ["s1"] },
+      { threadId: "fix-bug", project: "p", title: "修 bug", sessionIds: ["s1"] },
     ];
     const batchB: ThreadCandidate[] = [
-      { threadId: "fix-bug-in-parser", title: "修 parser", sessionIds: ["s2"] },
+      { threadId: "fix-bug-in-parser", project: "p", title: "修 parser", sessionIds: ["s2"] },
     ];
     const merged = mergeCandidates([batchA, batchB]);
     expect(merged.length).toBe(1);
@@ -79,10 +79,10 @@ describe("mergeCandidates", () => {
 
   it("collapses normalize-equivalent slugs (trailing numbers, double hyphens)", () => {
     const batchA: ThreadCandidate[] = [
-      { threadId: "fix-bug-1", title: "a", sessionIds: ["s1"] },
+      { threadId: "fix-bug-1", project: "p", title: "a", sessionIds: ["s1"] },
     ];
     const batchB: ThreadCandidate[] = [
-      { threadId: "fix-bug-2", title: "b", sessionIds: ["s2"] },
+      { threadId: "fix-bug-2", project: "p", title: "b", sessionIds: ["s2"] },
     ];
     const merged = mergeCandidates([batchA, batchB]);
     expect(merged.length).toBe(1);
@@ -93,10 +93,10 @@ describe("mergeCandidates", () => {
 
   it("passes skip through when any candidate of a merged group is skip", () => {
     const batchA: ThreadCandidate[] = [
-      { threadId: "say-hi", title: "打招呼", sessionIds: ["s1"], skip: true, reason: "no content" },
+      { threadId: "say-hi", project: "p", title: "打招呼", sessionIds: ["s1"], skip: true, reason: "no content" },
     ];
     const batchB: ThreadCandidate[] = [
-      { threadId: "say-hi", title: "打招呼", sessionIds: ["s2"] },
+      { threadId: "say-hi", project: "p", title: "打招呼", sessionIds: ["s2"] },
     ];
     const merged = mergeCandidates([batchA, batchB]);
     expect(merged.length).toBe(1);
@@ -107,8 +107,8 @@ describe("mergeCandidates", () => {
 
   it("keeps unrelated threads as separate entries", () => {
     const batchA: ThreadCandidate[] = [
-      { threadId: "fix-bug", title: "a", sessionIds: ["s1"] },
-      { threadId: "add-feature", title: "b", sessionIds: ["s2"] },
+      { threadId: "fix-bug", project: "p", title: "a", sessionIds: ["s1"] },
+      { threadId: "add-feature", project: "p", title: "b", sessionIds: ["s2"] },
     ];
     const merged = mergeCandidates([batchA]);
     expect(merged.length).toBe(2);
@@ -119,14 +119,48 @@ describe("mergeCandidates", () => {
     // "fix" is a raw-string prefix of "fixture", but not a hyphen-segment
     // prefix. They are unrelated threads and must stay distinct.
     const batchA: ThreadCandidate[] = [
-      { threadId: "fix", title: "fix", sessionIds: ["s1"] },
+      { threadId: "fix", project: "p", title: "fix", sessionIds: ["s1"] },
     ];
     const batchB: ThreadCandidate[] = [
-      { threadId: "fixture", title: "fixture", sessionIds: ["s2"] },
+      { threadId: "fixture", project: "p", title: "fixture", sessionIds: ["s2"] },
     ];
     const merged = mergeCandidates([batchA, batchB]);
     expect(merged.length).toBe(2);
     expect(merged.map((c) => c.threadId).sort()).toEqual(["fix", "fixture"]);
+  });
+});
+
+describe("mergeCandidates — cross-project safety", () => {
+  it("two candidates with the SAME threadId but DIFFERENT projects stay distinct", () => {
+    const merged = mergeCandidates([
+      [{ threadId: "misc-empty", project: "proj-a", title: "空", sessionIds: ["a1"] }],
+      [{ threadId: "misc-empty", project: "proj-b", title: "空", sessionIds: ["b1"] }],
+    ]);
+    expect(merged).toHaveLength(2);
+    expect(merged.map((c) => `${c.threadId}@${c.project}`).sort())
+      .toEqual(["misc-empty@proj-a", "misc-empty@proj-b"]);
+    // Sessions stay separate, not merged.
+    expect(merged.find((c) => c.project === "proj-a")!.sessionIds).toEqual(["a1"]);
+    expect(merged.find((c) => c.project === "proj-b")!.sessionIds).toEqual(["b1"]);
+  });
+
+  it("same threadId AND same project DOES merge (regression of pre-fix behavior)", () => {
+    const merged = mergeCandidates([
+      [{ threadId: "fix-bug", project: "proj-a", title: "fix", sessionIds: ["s1"] }],
+      [{ threadId: "fix-bug", project: "proj-a", title: "fix", sessionIds: ["s2"] }],
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.sessionIds).toEqual(["s1", "s2"]);
+  });
+
+  it("slug-equivalence collapse only happens within the same project", () => {
+    // "fix-bug" and "fix-bug-1" normalize to same slug → would collapse...
+    // ...but only within same project. Across projects they stay distinct.
+    const merged = mergeCandidates([
+      [{ threadId: "fix-bug", project: "proj-a", title: "x", sessionIds: ["a1"] }],
+      [{ threadId: "fix-bug-1", project: "proj-b", title: "y", sessionIds: ["b1"] }],
+    ]);
+    expect(merged).toHaveLength(2);
   });
 });
 

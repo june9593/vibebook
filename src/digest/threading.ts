@@ -36,29 +36,34 @@ export function normalizeSlug(slug: string): string {
  *   4. Re-merge sessionIds + skip on the canonical group.
  */
 export function mergeCandidates(perBatch: ThreadCandidate[][]): ThreadCandidate[] {
-  // Step 1+2: group by exact threadId.
+  // Step 1+2: group by composite (threadId, project) — two projects'
+  // identical threadIds (e.g. "misc-empty") stay distinct.
   interface Group {
     threadId: string;
+    project: string;
     title: string;
     sessionIds: string[];   // ordered, deduped
     skip: boolean;
     reason?: string;
     firstSeen: number;      // index across the flattened stream
   }
+  const key = (threadId: string, project: string) => `${threadId}\0${project}`;
   const groups = new Map<string, Group>();
   let idx = 0;
   for (const batch of perBatch) {
     for (const c of batch) {
-      let g = groups.get(c.threadId);
+      const k = key(c.threadId, c.project);
+      let g = groups.get(k);
       if (!g) {
         g = {
           threadId: c.threadId,
+          project: c.project,
           title: c.title,
           sessionIds: [],
           skip: false,
           firstSeen: idx,
         };
-        groups.set(c.threadId, g);
+        groups.set(k, g);
       }
       for (const sid of c.sessionIds) {
         if (!g.sessionIds.includes(sid)) g.sessionIds.push(sid);
@@ -71,14 +76,16 @@ export function mergeCandidates(perBatch: ThreadCandidate[][]): ThreadCandidate[
     }
   }
 
-  // Step 3: build collapse map. For each group, decide its canonical threadId.
+  // Step 3: build collapse map — slug-equivalence collapse only happens
+  // within the SAME project. Cross-project look-alikes stay distinct.
   const groupList = Array.from(groups.values());
-  const canonicalOf = new Map<string, string>(); // threadId → canonical threadId
+  const canonicalOf = new Map<string, string>(); // composite key → canonical key
 
   for (const g of groupList) {
     let canonical = g;
     for (const other of groupList) {
       if (other === g) continue;
+      if (other.project !== g.project) continue;
       if (areEquivalent(g.threadId, other.threadId)) {
         // Pick longer raw; tie-break by earlier firstSeen.
         if (
@@ -90,25 +97,26 @@ export function mergeCandidates(perBatch: ThreadCandidate[][]): ThreadCandidate[
         }
       }
     }
-    canonicalOf.set(g.threadId, canonical.threadId);
+    canonicalOf.set(key(g.threadId, g.project), key(canonical.threadId, canonical.project));
   }
 
   // Step 4: re-merge into canonical groups.
   const finalGroups = new Map<string, Group>();
   for (const g of groupList) {
-    const canonId = canonicalOf.get(g.threadId)!;
-    let cg = finalGroups.get(canonId);
+    const canonKey = canonicalOf.get(key(g.threadId, g.project))!;
+    let cg = finalGroups.get(canonKey);
     if (!cg) {
       // Seed from the canonical group itself (so title comes from canonical).
-      const seed = groups.get(canonId)!;
+      const seed = groups.get(canonKey)!;
       cg = {
         threadId: seed.threadId,
+        project: seed.project,
         title: seed.title,
         sessionIds: [],
         skip: false,
         firstSeen: seed.firstSeen,
       };
-      finalGroups.set(canonId, cg);
+      finalGroups.set(canonKey, cg);
     }
     for (const sid of g.sessionIds) {
       if (!cg.sessionIds.includes(sid)) cg.sessionIds.push(sid);
@@ -125,6 +133,7 @@ export function mergeCandidates(perBatch: ThreadCandidate[][]): ThreadCandidate[
     .map((g) => {
       const tc: ThreadCandidate = {
         threadId: g.threadId,
+        project: g.project,
         title: g.title,
         sessionIds: g.sessionIds,
       };
@@ -256,6 +265,7 @@ export async function runThreading(
   }
   const recoveredCandidates: ThreadCandidate[] = dropped.map((s) => ({
     threadId: synthThreadId(s),
+    project: s.project,
     title: synthTitle(s),
     sessionIds: [s.sessionId],
     worthWriting: true,
@@ -301,7 +311,34 @@ export async function runThreading(
         continue;
       }
       try {
-        const candidates = asThreadCandidates(parsed, batchIndex);
+        const rawCandidates = asThreadCandidates(parsed, batchIndex);
+        // Inject project from the input batch. If a candidate's sessionIds span
+        // multiple projects within this batch (shouldn't happen — batcher groups
+        // by project — but defensive), split into one candidate per project.
+        const sidToProject = new Map<string, string>();
+        for (const s of batch) sidToProject.set(s.sessionId, s.project);
+        const candidates: ThreadCandidate[] = [];
+        for (const c of rawCandidates) {
+          const byProject = new Map<string, string[]>();
+          for (const sid of c.sessionIds) {
+            const proj = sidToProject.get(sid);
+            if (!proj) continue; // sessionId not in this batch — drop (recovery picks it up)
+            let bucket = byProject.get(proj);
+            if (!bucket) { bucket = []; byProject.set(proj, bucket); }
+            bucket.push(sid);
+          }
+          for (const [proj, sids] of byProject) {
+            candidates.push({
+              threadId: c.threadId,
+              project: proj,
+              title: c.title,
+              sessionIds: sids,
+              ...(c.skip ? { skip: true } : {}),
+              ...(c.reason ? { reason: c.reason } : {}),
+              ...(c.worthWriting !== undefined ? { worthWriting: c.worthWriting } : {}),
+            });
+          }
+        }
         return { ok: true, candidates };
       } catch (e) {
         lastError = (e as Error).message;

@@ -35,6 +35,11 @@ export interface EnrichedSessionForBatching extends SessionForBatching, SessionS
  */
 export interface ThreadCandidate {
   threadId: string;
+  /** Project this thread belongs to. Populated by threading.ts from input
+   *  batch context (LLM doesn't see this field). Required for cross-batch
+   *  identity in mergeCandidates so two projects' identical slugs stay
+   *  distinct (e.g. misc-empty-session in proj-a vs proj-b). */
+  project: string;
   sessionIds: string[];
   title: string;
   skip?: boolean;

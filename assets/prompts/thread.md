@@ -17,6 +17,7 @@ SESSION_LIST 是一个 JSON 数组，每个元素：
 ## 关键规则（必须遵守）
 
 1. **每个输入的 sessionId 必须出现在输出的某个 thread 中**。即使是琐碎的、看起来没价值的 session，也必须分配到一个 thread。绝对不允许在输出中遗漏任何 session。
+1.5. **绝对不要跨项目合并**：每个 thread 必须属于唯一一个项目。如果两个 session 看起来话题相关但 project 字段不同，它们必须分到不同的 thread（即使 threadId 相似也没关系，因为后端按 (threadId, project) 去重，跨项目同名 threadId 不会被错误合并）。
 2. **worthWriting=false** 用来标记不值得写文章的 thread（纯闲聊、太短、低分数）。这样的 thread 仍然被记录，只是不生成文章。
 3. **worthWriting=true** 是默认；除非明确判断不值得写，否则都置为 true。
 4. **threadId** 是 slug：小写字母数字短横线；应描述这件事，如 "fix-copilot-scan"、"add-progress-output"。
