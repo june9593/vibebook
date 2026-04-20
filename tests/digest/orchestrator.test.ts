@@ -7,6 +7,7 @@ import type { IndexFile, IndexEntry, Tool } from "../../src/types.js";
 import type { BookIndex } from "../../src/digest/book-index.js";
 import type { LlmRunner, RunResult } from "../../src/digest/runner.js";
 import { silentReporter } from "../../src/digest/reporter.js";
+import { ARTICLE_VERSION } from "../../src/digest/article.js";
 
 let repoRoot: string;
 beforeEach(() => {
@@ -204,6 +205,12 @@ describe("runDigest — article phase failure isolation", () => {
 
     expect(r.articlesOk).toBe(1);
     expect(r.articlesFailed).toBe(1);
+    expect(r.articleFailures).toHaveLength(1);
+    expect(r.articleFailures[0]).toMatchObject({
+      threadId: expect.stringMatching(/t-bad/),
+      error: expect.any(String),
+    });
+    expect(r.articleFailures[0]!.error.length).toBeGreaterThan(0);
     expect(book.threads["t-bad"]!.articleStatus).toBe("failed");
     expect(book.threads["t-good"]!.articleStatus).toBe("ok");
     // Chapter was attempted (only ok articles included by chapter.ts).
@@ -296,7 +303,7 @@ describe("runDigest — chapter rewrite gate", () => {
     // matches its current articles (so chapterNeedsRewrite returns false).
     const { computeChapterArticleHash } = await import("../../src/digest/chapter.js");
     const priorThreadHash = computeChapterArticleHash([
-      { threadId: "t-prior", articleVersion: 1, latestSourceSha: "shaPrior" },
+      { threadId: "t-prior", articleVersion: 2, latestSourceSha: "shaPrior" },
     ]);
     const book: BookIndex = {
       version: 1,
@@ -305,7 +312,7 @@ describe("runDigest — chapter rewrite gate", () => {
           threadId: "t-prior", project: "proj-b", title: "Prior",
           sessionIds: ["prior"],
           articlePath: "book/proj-b/articles/prior.md",
-          articleVersion: 1, latestSourceSha: "shaPrior",
+          articleVersion: 2, latestSourceSha: "shaPrior",
           articleStatus: "ok", updatedAt: "2026-04-10T00:00:00Z",
         },
       },
@@ -348,7 +355,7 @@ describe("runDigest — stale article version forces regeneration", () => {
           threadId: "t-stale", project: "proj-a", title: "陈旧",
           sessionIds: ["s1"],
           articlePath: "book/proj-a/articles/stale.md",
-          articleVersion: 0, // older than current ARTICLE_VERSION (=1)
+          articleVersion: 0, // older than current ARTICLE_VERSION
           latestSourceSha: "shaA",
           articleStatus: "ok",
           updatedAt: "2026-04-10T00:00:00Z",
@@ -370,7 +377,7 @@ describe("runDigest — stale article version forces regeneration", () => {
     // No threading call — only article + chapter.
     expect(calls).toHaveLength(2);
     expect(r.articlesOk).toBe(1);
-    expect(book.threads["t-stale"]!.articleVersion).toBe(1); // bumped
+    expect(book.threads["t-stale"]!.articleVersion).toBe(2); // bumped
     expect(book.threads["t-stale"]!.title).toBe("陈旧"); // preserved
     expect(r.chaptersRewritten).toEqual(["proj-a"]);
   });
@@ -438,13 +445,13 @@ describe("runDigest — pseudo-project pruning migration", () => {
         "t-good": {
           threadId: "t-good", project: "proj-a", title: "ok",
           sessionIds: ["s-good"], articlePath: "book/proj-a/articles/ok.md",
-          articleVersion: 1, latestSourceSha: "x", articleStatus: "ok",
+          articleVersion: ARTICLE_VERSION, latestSourceSha: "x", articleStatus: "ok",
           skip: false, updatedAt: "2026-04-15T10:00:00Z",
         },
         "t-junk": {
           threadId: "t-junk", project: ".worktrees-abc-123", title: "junk",
           sessionIds: ["s-junk"], articlePath: "book/.worktrees-abc-123/articles/junk.md",
-          articleVersion: 1, latestSourceSha: "y", articleStatus: "ok",
+          articleVersion: ARTICLE_VERSION, latestSourceSha: "y", articleStatus: "ok",
           skip: false, updatedAt: "2026-04-15T10:00:00Z",
         },
       },

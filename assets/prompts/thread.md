@@ -23,6 +23,7 @@ SESSION_LIST 是一个 JSON 数组，每个元素：
 4. **threadId** 是 slug：小写字母数字短横线；应描述这件事，如 "fix-copilot-scan"、"add-progress-output"。
 5. **title** 是中文短标题，≤ 20 字。
 6. 倾向于**保留**而不是丢弃：用户更怕错过工作记录，不怕文章里有几篇 trivial 的。
+7. **每个 thread 最多包含 5 个 session**。如果某个 topic 涉及 > 5 个 session（如 350 个 edge-memvc session 的混合工作），分成多个 thread（命名加 `-1`, `-2` 等数字后缀；如 `fix-claude-cli-1`、`fix-claude-cli-2`）。这样每篇文章聚焦更具体的工作，避免被概括成"日常工作总结"而被 SKIP。
 
 ## 输出
 

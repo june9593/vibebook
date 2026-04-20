@@ -16,6 +16,8 @@ export interface RedoReport {
   /** Threads whose retry returned a SKIP sentinel (now skip:true in BookIndex). */
   threadsNewlySkipped: number;
   threadsUnresolvable: number;
+  /** Per-thread failure reasons from Phase 1 retries that still failed. */
+  articleFailures: { threadId: string; error: string }[];
   chaptersRewritten: string[];
   chaptersFailed: { project: string; error: string }[];
   tocFilesWritten: string[];
@@ -66,6 +68,7 @@ async function runDigestRedoImpl(
     threadsStillFailed: 0,
     threadsNewlySkipped: 0,
     threadsUnresolvable: 0,
+    articleFailures: [],
     chaptersRewritten: [],
     chaptersFailed: [],
     tocFilesWritten: [],
@@ -102,6 +105,7 @@ async function runDigestRedoImpl(
         report.threadsNewlySkipped++;
       } else {
         report.threadsStillFailed++;
+        report.articleFailures.push({ threadId: be.threadId, error: res.error });
       }
     }
 

@@ -81,4 +81,34 @@ describe("ClaudeCodeAdapter — pollution filter", () => {
     expect(sourcePaths.some((p) => p.endsWith("junk3.jsonl"))).toBe(false);
     expect(sourcePaths.some((p) => p.endsWith("junk4.jsonl"))).toBe(false);
   });
+
+  it("skips subagents/ subdirs at any depth", async () => {
+    const proj = join(claudeRoot, "-Users-yueliu-real-project");
+    mkdirSync(proj, { recursive: true });
+    // A real top-level session.
+    writeFileSync(join(proj, "real.jsonl"), '{"sessionId":"real","cwd":"/Users/yueliu/real-project"}\n');
+    // A subagents/ subdir nested inside an outer session's dir.
+    const outerSession = join(proj, "outer-session-id");
+    mkdirSync(join(outerSession, "subagents"), { recursive: true });
+    writeFileSync(
+      join(outerSession, "subagents", "agent-foo.jsonl"),
+      '{"sessionId":"agent-foo","cwd":"/Users/yueliu/real-project"}\n',
+    );
+    // A nested subagents/ deeper still (defensive).
+    mkdirSync(join(outerSession, "subagents", "nested-stuff"), { recursive: true });
+    writeFileSync(
+      join(outerSession, "subagents", "nested-stuff", "agent-bar.jsonl"),
+      '{"sessionId":"agent-bar","cwd":"/Users/yueliu/real-project"}\n',
+    );
+
+    const adapter = new ClaudeCodeAdapter(claudeRoot);
+    const sourcePaths: string[] = [];
+    for await (const ds of adapter.discover()) {
+      sourcePaths.push(ds.sourcePath);
+    }
+    expect(sourcePaths.some((p) => p.endsWith("real.jsonl"))).toBe(true);
+    expect(sourcePaths.some((p) => p.includes("/subagents/"))).toBe(false);
+    expect(sourcePaths.some((p) => p.endsWith("agent-foo.jsonl"))).toBe(false);
+    expect(sourcePaths.some((p) => p.endsWith("agent-bar.jsonl"))).toBe(false);
+  });
 });
