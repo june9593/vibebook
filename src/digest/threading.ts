@@ -169,6 +169,11 @@ function asThreadCandidates(data: unknown, batchIndex: number): ThreadCandidate[
         throw new Error(`threading batch ${batchIndex}: bad shape — sessionIds must be string[]`);
       }
     }
+    if (c.worthWriting !== undefined && typeof c.worthWriting !== "boolean") {
+      throw new Error(
+        `threading batch ${batchIndex}: bad shape — element ${i} worthWriting must be boolean if present`,
+      );
+    }
   }
   return data as ThreadCandidate[];
 }
@@ -246,6 +251,9 @@ export async function runThreading(
           sessionId: s.sessionId,
           project: s.project,
           endedAt: s.endedAt,
+          title: s.title,
+          preview: s.preview,
+          insightScore: Number(s.insightScore.toFixed(2)),
         }))) },
         { outputFormat: "json" },
       );
