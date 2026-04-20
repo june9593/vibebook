@@ -230,8 +230,40 @@ export async function runThreading(
     }
   }
 
+  const mergedCandidates = mergeCandidates(perBatchCandidates);
+
+  // Compute which input sessionIds are NOT in any candidate output. These are
+  // LLM omissions — recover by force-creating one-session threads. This GUARANTEES
+  // no input session vanishes silently. (Sessions in failedBatches don't need
+  // recovery here — they will reappear in findNewSessionEntries on the next sync,
+  // per the soft-fail contract.)
+  const succeededBatchIndices = new Set(
+    outcomes.map((o, i) => o.ok ? i : -1).filter((i) => i >= 0),
+  );
+  const outputSids = new Set<string>();
+  for (const c of mergedCandidates) {
+    for (const sid of c.sessionIds) outputSids.add(sid);
+  }
+  const dropped: EnrichedSessionForBatching[] = [];
+  for (let i = 0; i < batches.length; i++) {
+    if (!succeededBatchIndices.has(i)) continue;
+    for (const s of batches[i]!) {
+      if (!outputSids.has(s.sessionId)) dropped.push(s);
+    }
+  }
+  if (dropped.length > 0) {
+    console.warn(`runThreading: LLM omitted ${dropped.length} session(s); auto-recovering as 1-session threads`);
+  }
+  const recoveredCandidates: ThreadCandidate[] = dropped.map((s) => ({
+    threadId: synthThreadId(s),
+    title: synthTitle(s),
+    sessionIds: [s.sessionId],
+    worthWriting: true,
+  }));
+  const finalCandidates = mergedCandidates.concat(recoveredCandidates);
+
   return {
-    candidates: mergeCandidates(perBatchCandidates),
+    candidates: finalCandidates,
     failedBatches,
   };
 
@@ -278,4 +310,23 @@ export async function runThreading(
     }
     return { ok: false, error: lastError };
   }
+}
+
+/** Build a synthetic threadId from session signals. Used only for recovered
+ *  (LLM-omitted) sessions; the threadId must be a unique slug stable enough
+ *  to survive cross-batch merging. We use the first 8 chars of sessionId
+ *  + a kebab-case excerpt of the title so it reads OK in book/index.md. */
+function synthThreadId(s: EnrichedSessionForBatching): string {
+  const titleSlug = s.title
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 30);
+  const sidPart = s.sessionId.slice(0, 8);
+  return titleSlug ? `${titleSlug}-${sidPart}` : `recovered-${sidPart}`;
+}
+
+function synthTitle(s: EnrichedSessionForBatching): string {
+  const t = s.title.trim();
+  return t ? t.slice(0, 20) : "（自动恢复）";
 }

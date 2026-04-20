@@ -172,7 +172,9 @@ describe("runThreading", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       const r = await runThreading(runner, [[s("s1")], [s("s2")]], 4, 1, silentReporter());
-      expect(r.candidates).toEqual([]);
+      // s1's batch succeeded with empty output → s1 is auto-recovered.
+      // s2's batch failed → s2 is NOT recovered (will retry next sync).
+      expect(r.candidates.flatMap((c) => c.sessionIds)).toEqual(["s1"]);
       expect(r.failedBatches).toEqual([{ batchIndex: 1, error: "timeout" }]);
       expect(warn).toHaveBeenCalledWith(expect.stringMatching(/batch 1.*timeout/));
     } finally {
@@ -315,5 +317,76 @@ describe("runThreading", () => {
     await runThreading(runner, batches, 2, 3, silentReporter());
     expect(peak).toBeLessThanOrEqual(2);
     expect(peak).toBeGreaterThan(1);
+  });
+});
+
+describe("runThreading dropped-session recovery", () => {
+  it("auto-recovers sessions the LLM omitted from its output", async () => {
+    const runner = fakeRunner([
+      {
+        ok: true,
+        text: JSON.stringify([
+          { threadId: "t1", title: "T1", sessionIds: ["s1"], worthWriting: true },
+        ]),
+        durationMs: 1,
+      },
+    ]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const r = await runThreading(
+        runner,
+        [[s("s1", { title: "fix bug" }), s("s2", { title: "add feature" }), s("s3", { title: "" })]],
+        4,
+        1,
+        silentReporter(),
+      );
+      const allSids = new Set(r.candidates.flatMap((c) => c.sessionIds));
+      expect(allSids).toEqual(new Set(["s1", "s2", "s3"]));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("auto-recovering"));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does NOT recover sessions from failed batches (those are retried next sync per soft-fail contract)", async () => {
+    const runner = fakeRunner([
+      { ok: false, error: "boom", durationMs: 1 },
+    ]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const r = await runThreading(
+        runner,
+        [[s("s1"), s("s2")]],
+        4,
+        1,
+        silentReporter(),
+      );
+      expect(r.candidates).toEqual([]);
+      expect(r.failedBatches).toHaveLength(1);
+      const recoveryCalls = warn.mock.calls.filter((c) => String(c[0]).includes("auto-recovering"));
+      expect(recoveryCalls).toHaveLength(0);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("synthesized threadId derives readable slug from session title", async () => {
+    const runner = fakeRunner([
+      { ok: true, text: JSON.stringify([]), durationMs: 1 },
+    ]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const r = await runThreading(
+        runner,
+        [[s("session-uuid-12345", { title: "Fix Login Bug" })]],
+        4, 1,
+        silentReporter(),
+      );
+      expect(r.candidates).toHaveLength(1);
+      expect(r.candidates[0]!.threadId).toMatch(/fix-login-bug/);
+      expect(r.candidates[0]!.threadId).toContain("session-");
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
