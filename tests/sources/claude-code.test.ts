@@ -58,20 +58,27 @@ describe("ClaudeCodeAdapter — pollution filter", () => {
     mkdirSync(polluted4, { recursive: true });
     writeFileSync(join(polluted4, "junk4.jsonl"), '{"sessionId":"junk4","cwd":"/x/memvc-claude-Jkl"}\n');
 
+    // Legit developer work in /tmp/experiment — must NOT be filtered out.
+    const realTmpProj = join(claudeRoot, "-tmp-experiment");
+    mkdirSync(realTmpProj, { recursive: true });
+    writeFileSync(join(realTmpProj, "real-tmp.jsonl"), '{"sessionId":"real-tmp","cwd":"/tmp/experiment"}\n');
+
     const adapter = new ClaudeCodeAdapter(claudeRoot);
-    const sessionIds: string[] = [];
+    const sourcePaths: string[] = [];
     for await (const ds of adapter.discover()) {
-      try {
-        const s = await ds.load();
-        sessionIds.push(s.sessionId);
-      } catch {
-        // Some toy JSONLs may not parse cleanly; ignore for this test
-      }
+      sourcePaths.push(ds.sourcePath);
     }
-    expect(sessionIds).toContain("s1");
-    expect(sessionIds).not.toContain("junk");
-    expect(sessionIds).not.toContain("junk2");
-    expect(sessionIds).not.toContain("junk3");
-    expect(sessionIds).not.toContain("junk4");
+    // Real session yielded.
+    expect(sourcePaths.some((p) => p.includes("-Users-yueliu-edge-memvc"))).toBe(true);
+    // Legit tmp-rooted developer work also yielded — we only filter memvc's own scratch.
+    expect(sourcePaths.some((p) => p.includes("-tmp-experiment"))).toBe(true);
+    // No memvc-claude scratch yielded — assertion is on discover() itself,
+    // not on load(), so a filter regression cannot be masked by parse errors.
+    // (The mkdtemp root itself contains "memvc-claude-test-" so we check the
+    // junk filenames that only exist inside the polluted dirs.)
+    expect(sourcePaths.some((p) => p.endsWith("junk.jsonl"))).toBe(false);
+    expect(sourcePaths.some((p) => p.endsWith("junk2.jsonl"))).toBe(false);
+    expect(sourcePaths.some((p) => p.endsWith("junk3.jsonl"))).toBe(false);
+    expect(sourcePaths.some((p) => p.endsWith("junk4.jsonl"))).toBe(false);
   });
 });

@@ -43,23 +43,13 @@ export class ClaudeCodeAdapter implements SourceAdapter {
 
 /**
  * Skip Claude project directories that correspond to memvc's own scratch
- * subprocesses, or to system tmpdirs in general. Without this filter, an
- * interrupted `memvc sync` leaves ~/.claude/projects/<-private-var-folders-...-memvc-claude-X>/
- * dirs that the next sync would happily ingest as "T-memvc-claude-X" projects,
- * polluting BookIndex.
- *
- * Matches:
- *   - any name containing "-memvc-claude-" (defensive belt for our own subprocesses)
- *   - names starting with "-private-var-folders-" (macOS resolved tmpdirs)
- *   - names starting with "-var-folders-"        (macOS raw tmpdirs, pre-realpath)
- *   - names starting with "-tmp-"                 (Linux tmpdirs)
+ * subprocesses. We deliberately do NOT filter by tmpdir-prefix alone —
+ * developers may legitimately run `claude` in /tmp/experiment etc., and we
+ * shouldn't silently drop their work. We require the `-memvc-claude-` substring
+ * (which ONLY memvc-spawned cwds contain) to confirm provenance.
  */
 function isMemvcOrTmpProjectDir(name: string): boolean {
-  if (name.includes("-memvc-claude-")) return true;
-  if (name.startsWith("-private-var-folders-")) return true;
-  if (name.startsWith("-var-folders-")) return true;
-  if (name.startsWith("-tmp-")) return true;
-  return false;
+  return name.includes("-memvc-claude-");
 }
 
 function parseClaudeJsonl(sourcePath: string, content: string): NormalizedSession {
