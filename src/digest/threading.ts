@@ -45,6 +45,7 @@ export function mergeCandidates(perBatch: ThreadCandidate[][]): ThreadCandidate[
     sessionIds: string[];   // ordered, deduped
     skip: boolean;
     reason?: string;
+    worthWriting?: boolean;
     firstSeen: number;      // index across the flattened stream
   }
   const key = (threadId: string, project: string) => `${threadId}\0${project}`;
@@ -71,6 +72,9 @@ export function mergeCandidates(perBatch: ThreadCandidate[][]): ThreadCandidate[
       if (c.skip) {
         g.skip = true;
         if (c.reason && !g.reason) g.reason = c.reason;
+      }
+      if (c.worthWriting !== undefined && g.worthWriting === undefined) {
+        g.worthWriting = c.worthWriting;
       }
       idx++;
     }
@@ -125,6 +129,9 @@ export function mergeCandidates(perBatch: ThreadCandidate[][]): ThreadCandidate[
       cg.skip = true;
       if (g.reason && !cg.reason) cg.reason = g.reason;
     }
+    if (g.worthWriting !== undefined && cg.worthWriting === undefined) {
+      cg.worthWriting = g.worthWriting;
+    }
   }
 
   // Emit in firstSeen order for deterministic output.
@@ -139,6 +146,7 @@ export function mergeCandidates(perBatch: ThreadCandidate[][]): ThreadCandidate[
       };
       if (g.skip) tc.skip = true;
       if (g.reason) tc.reason = g.reason;
+      if (g.worthWriting !== undefined) tc.worthWriting = g.worthWriting;
       return tc;
     });
   return out;
@@ -241,6 +249,29 @@ export async function runThreading(
 
   const mergedCandidates = mergeCandidates(perBatchCandidates);
 
+  // Post-merge: cap any candidate's sessionIds at MAX_SESSIONS_PER_THREAD by
+  // splitting into multiple candidates with -1, -2, ... suffixes. Even if the
+  // LLM ignored the prompt's ≤ 5 rule, this enforces it deterministically.
+  const MAX_SESSIONS_PER_THREAD = 5;
+  const splitCandidates: ThreadCandidate[] = [];
+  for (const c of mergedCandidates) {
+    if (c.sessionIds.length <= MAX_SESSIONS_PER_THREAD) {
+      splitCandidates.push(c);
+      continue;
+    }
+    const chunks: string[][] = [];
+    for (let i = 0; i < c.sessionIds.length; i += MAX_SESSIONS_PER_THREAD) {
+      chunks.push(c.sessionIds.slice(i, i + MAX_SESSIONS_PER_THREAD));
+    }
+    for (let i = 0; i < chunks.length; i++) {
+      splitCandidates.push({
+        ...c,
+        threadId: `${c.threadId}-${i + 1}`,
+        sessionIds: chunks[i]!,
+      });
+    }
+  }
+
   // Compute which input sessionIds are NOT in any candidate output. These are
   // LLM omissions — recover by force-creating one-session threads. This GUARANTEES
   // no input session vanishes silently. (Sessions in failedBatches don't need
@@ -250,7 +281,7 @@ export async function runThreading(
     outcomes.map((o, i) => o.ok ? i : -1).filter((i) => i >= 0),
   );
   const outputSids = new Set<string>();
-  for (const c of mergedCandidates) {
+  for (const c of splitCandidates) {
     for (const sid of c.sessionIds) outputSids.add(sid);
   }
   const dropped: EnrichedSessionForBatching[] = [];
@@ -270,7 +301,7 @@ export async function runThreading(
     sessionIds: [s.sessionId],
     worthWriting: true,
   }));
-  const finalCandidates = mergedCandidates.concat(recoveredCandidates);
+  const finalCandidates = splitCandidates.concat(recoveredCandidates);
 
   return {
     candidates: finalCandidates,

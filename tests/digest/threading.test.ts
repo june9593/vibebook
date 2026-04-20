@@ -424,3 +424,68 @@ describe("runThreading dropped-session recovery", () => {
     }
   });
 });
+
+describe("runThreading — cap thread size at 5 sessions", () => {
+  it("splits a candidate with 12 sessions into 3 threads of 5+5+2", async () => {
+    const sids = Array.from({ length: 12 }, (_, i) => `s${i}`);
+    const runner = fakeRunner([
+      { ok: true, text: JSON.stringify([
+        { threadId: "mega", title: "M", sessionIds: sids, project: "p" },
+      ]), durationMs: 1 },
+    ]);
+    const r = await runThreading(
+      runner,
+      [sids.map((sid) => s(sid))],
+      4, 1,
+      silentReporter(),
+    );
+    const mega = r.candidates.filter((c) => c.threadId.startsWith("mega"));
+    expect(mega.map((c) => c.threadId).sort()).toEqual(["mega-1", "mega-2", "mega-3"]);
+    expect(mega.find((c) => c.threadId === "mega-1")!.sessionIds).toHaveLength(5);
+    expect(mega.find((c) => c.threadId === "mega-2")!.sessionIds).toHaveLength(5);
+    expect(mega.find((c) => c.threadId === "mega-3")!.sessionIds).toHaveLength(2);
+    // All 12 sessions present, none lost.
+    const allSids = new Set(mega.flatMap((c) => c.sessionIds));
+    expect(allSids).toEqual(new Set(sids));
+  });
+
+  it("does NOT split candidates with <=5 sessions", async () => {
+    const sids = ["a", "b", "c"];
+    const runner = fakeRunner([
+      { ok: true, text: JSON.stringify([
+        { threadId: "small", title: "s", sessionIds: sids, project: "p" },
+      ]), durationMs: 1 },
+    ]);
+    const r = await runThreading(
+      runner,
+      [sids.map((sid) => s(sid))],
+      4, 1,
+      silentReporter(),
+    );
+    expect(r.candidates).toHaveLength(1);
+    expect(r.candidates[0]!.threadId).toBe("small");
+    expect(r.candidates[0]!.sessionIds).toEqual(sids);
+  });
+
+  it("preserves project + title + worthWriting on each split", async () => {
+    const sids = Array.from({ length: 7 }, (_, i) => `s${i}`);
+    const runner = fakeRunner([
+      { ok: true, text: JSON.stringify([
+        { threadId: "feat", title: "功能", sessionIds: sids, project: "proj-a", worthWriting: true },
+      ]), durationMs: 1 },
+    ]);
+    const r = await runThreading(
+      runner,
+      [sids.map((sid) => s(sid, { project: "proj-a" }))],
+      4, 1,
+      silentReporter(),
+    );
+    const feats = r.candidates.filter((c) => c.threadId.startsWith("feat"));
+    expect(feats).toHaveLength(2);
+    for (const c of feats) {
+      expect(c.title).toBe("功能");
+      expect(c.project).toBe("proj-a");
+      expect(c.worthWriting).toBe(true);
+    }
+  });
+});
