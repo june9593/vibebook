@@ -19,7 +19,12 @@ export class ClaudeCodeAdapter implements SourceAdapter {
       try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
       for (const e of entries) {
         const p = join(dir, e.name);
-        if (e.isDirectory()) stack.push(p);
+        if (e.isDirectory()) {
+          // Skip our own scratch dirs and system tmpdirs — see isMemvcOrTmpProjectDir.
+          // We only filter at the top level (entries directly under ~/.claude/projects/).
+          if (dir === this.root && isMemvcOrTmpProjectDir(e.name)) continue;
+          stack.push(p);
+        }
         else if (e.isFile() && e.name.endsWith(".jsonl")) {
           const st = statSync(p);
           const buf = readFileSync(p);
@@ -34,6 +39,27 @@ export class ClaudeCodeAdapter implements SourceAdapter {
       }
     }
   }
+}
+
+/**
+ * Skip Claude project directories that correspond to memvc's own scratch
+ * subprocesses, or to system tmpdirs in general. Without this filter, an
+ * interrupted `memvc sync` leaves ~/.claude/projects/<-private-var-folders-...-memvc-claude-X>/
+ * dirs that the next sync would happily ingest as "T-memvc-claude-X" projects,
+ * polluting BookIndex.
+ *
+ * Matches:
+ *   - any name containing "-memvc-claude-" (defensive belt for our own subprocesses)
+ *   - names starting with "-private-var-folders-" (macOS resolved tmpdirs)
+ *   - names starting with "-var-folders-"        (macOS raw tmpdirs, pre-realpath)
+ *   - names starting with "-tmp-"                 (Linux tmpdirs)
+ */
+function isMemvcOrTmpProjectDir(name: string): boolean {
+  if (name.includes("-memvc-claude-")) return true;
+  if (name.startsWith("-private-var-folders-")) return true;
+  if (name.startsWith("-var-folders-")) return true;
+  if (name.startsWith("-tmp-")) return true;
+  return false;
 }
 
 function parseClaudeJsonl(sourcePath: string, content: string): NormalizedSession {
