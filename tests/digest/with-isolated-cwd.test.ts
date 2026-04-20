@@ -54,4 +54,11 @@ describe("withIsolatedCwd", () => {
       "-var-folders-x-T-memvc-claude-Ab",
     );
   });
+
+  it("claudeProjectHash for a /private/var/folders path produces a -private-var-folders-... hash on macOS-style realpath", () => {
+    // Simulate what realpath would have returned for an unresolved /var path.
+    expect(_claudeProjectHashForTests("/private/var/folders/zm/x/T/memvc-claude-Ab")).toBe(
+      "-private-var-folders-zm-x-T-memvc-claude-Ab",
+    );
+  });
 });
