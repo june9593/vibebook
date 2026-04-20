@@ -172,7 +172,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
       ));
       if (digestReport.articleFailures.length > 0) {
         for (const f of digestReport.articleFailures) {
-          console.log(chalk.yellow(`    ! article ${f.threadId} failed: ${f.error.slice(0, 200)}`));
+          console.log(chalk.yellow(`    ! article ${f.threadId} failed: ${f.error.replace(/\s+/g, " ").slice(0, 200)}`));
         }
       }
     } catch (e) {

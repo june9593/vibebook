@@ -7,6 +7,7 @@ import type { IndexFile, IndexEntry, Tool } from "../../src/types.js";
 import type { BookIndex } from "../../src/digest/book-index.js";
 import type { LlmRunner, RunResult } from "../../src/digest/runner.js";
 import { silentReporter } from "../../src/digest/reporter.js";
+import { ARTICLE_VERSION } from "../../src/digest/article.js";
 
 let repoRoot: string;
 beforeEach(() => {
@@ -444,13 +445,13 @@ describe("runDigest — pseudo-project pruning migration", () => {
         "t-good": {
           threadId: "t-good", project: "proj-a", title: "ok",
           sessionIds: ["s-good"], articlePath: "book/proj-a/articles/ok.md",
-          articleVersion: 1, latestSourceSha: "x", articleStatus: "ok",
+          articleVersion: ARTICLE_VERSION, latestSourceSha: "x", articleStatus: "ok",
           skip: false, updatedAt: "2026-04-15T10:00:00Z",
         },
         "t-junk": {
           threadId: "t-junk", project: ".worktrees-abc-123", title: "junk",
           sessionIds: ["s-junk"], articlePath: "book/.worktrees-abc-123/articles/junk.md",
-          articleVersion: 1, latestSourceSha: "y", articleStatus: "ok",
+          articleVersion: ARTICLE_VERSION, latestSourceSha: "y", articleStatus: "ok",
           skip: false, updatedAt: "2026-04-15T10:00:00Z",
         },
       },

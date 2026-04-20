@@ -60,7 +60,7 @@ export async function digestCmd(opts: DigestOptions): Promise<void> {
   ));
   if (report.articleFailures.length > 0) {
     for (const f of report.articleFailures) {
-      console.log(chalk.yellow(`    ! article ${f.threadId} failed: ${f.error.slice(0, 200)}`));
+      console.log(chalk.yellow(`    ! article ${f.threadId} failed: ${f.error.replace(/\s+/g, " ").slice(0, 200)}`));
     }
   }
   if (report.chaptersFailed.length > 0) {
@@ -155,7 +155,7 @@ async function runDigestResetCmd(): Promise<void> {
   ));
   if (report.articleFailures.length > 0) {
     for (const f of report.articleFailures) {
-      console.log(chalk.yellow(`    ! article ${f.threadId} failed: ${f.error.slice(0, 200)}`));
+      console.log(chalk.yellow(`    ! article ${f.threadId} failed: ${f.error.replace(/\s+/g, " ").slice(0, 200)}`));
     }
   }
 
