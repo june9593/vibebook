@@ -302,7 +302,7 @@ describe("runDigest — chapter rewrite gate", () => {
     // matches its current articles (so chapterNeedsRewrite returns false).
     const { computeChapterArticleHash } = await import("../../src/digest/chapter.js");
     const priorThreadHash = computeChapterArticleHash([
-      { threadId: "t-prior", articleVersion: 1, latestSourceSha: "shaPrior" },
+      { threadId: "t-prior", articleVersion: 2, latestSourceSha: "shaPrior" },
     ]);
     const book: BookIndex = {
       version: 1,
@@ -311,7 +311,7 @@ describe("runDigest — chapter rewrite gate", () => {
           threadId: "t-prior", project: "proj-b", title: "Prior",
           sessionIds: ["prior"],
           articlePath: "book/proj-b/articles/prior.md",
-          articleVersion: 1, latestSourceSha: "shaPrior",
+          articleVersion: 2, latestSourceSha: "shaPrior",
           articleStatus: "ok", updatedAt: "2026-04-10T00:00:00Z",
         },
       },
@@ -354,7 +354,7 @@ describe("runDigest — stale article version forces regeneration", () => {
           threadId: "t-stale", project: "proj-a", title: "陈旧",
           sessionIds: ["s1"],
           articlePath: "book/proj-a/articles/stale.md",
-          articleVersion: 0, // older than current ARTICLE_VERSION (=1)
+          articleVersion: 0, // older than current ARTICLE_VERSION
           latestSourceSha: "shaA",
           articleStatus: "ok",
           updatedAt: "2026-04-10T00:00:00Z",
@@ -376,7 +376,7 @@ describe("runDigest — stale article version forces regeneration", () => {
     // No threading call — only article + chapter.
     expect(calls).toHaveLength(2);
     expect(r.articlesOk).toBe(1);
-    expect(book.threads["t-stale"]!.articleVersion).toBe(1); // bumped
+    expect(book.threads["t-stale"]!.articleVersion).toBe(2); // bumped
     expect(book.threads["t-stale"]!.title).toBe("陈旧"); // preserved
     expect(r.chaptersRewritten).toEqual(["proj-a"]);
   });

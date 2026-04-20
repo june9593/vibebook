@@ -15,7 +15,7 @@ import { loadPromptAsset } from "./prompt-loader.js";
  * makes older articles need regeneration. Stamped onto every BookEntry; the
  * pipeline glue (Sprint 2.8) compares against current to decide what to redo.
  */
-export const ARTICLE_VERSION = 1;
+export const ARTICLE_VERSION = 2;
 
 const ARTICLE_PROMPT = loadPromptAsset(import.meta.url, "article");
 
