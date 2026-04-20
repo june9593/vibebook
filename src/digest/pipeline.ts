@@ -133,7 +133,7 @@ export function recordSkippedThreadCandidates(
       );
     }
     const project = ie?.project ?? "unknown";
-    const reason = c.reason ?? (c.worthWriting === false ? "not worth writing" : "");
+    const reason = c.reason ?? (c.worthWriting === false ? "不值得写" : "");
     const entry: BookEntry = {
       threadId: c.threadId,
       project,

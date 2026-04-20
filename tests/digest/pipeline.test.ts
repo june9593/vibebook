@@ -269,7 +269,7 @@ describe("recordSkippedThreadCandidates", () => {
     expect(book.threads["t"]!.skipReason).toBe("too short");
   });
 
-  it("recordSkippedThreadCandidates defaults reason to 'not worth writing' when worthWriting=false and no reason", () => {
+  it("recordSkippedThreadCandidates defaults reason to '不值得写' when worthWriting=false and no reason", () => {
     const idx = makeIndex([ie({ sessionId: "sid-1", project: "p" })]);
     const book: BookIndex = { version: 1, threads: {}, chapters: {} };
     recordSkippedThreadCandidates(
@@ -277,7 +277,7 @@ describe("recordSkippedThreadCandidates", () => {
       [{ threadId: "t", title: "trivial", sessionIds: ["sid-1"], worthWriting: false }],
       idx,
     );
-    expect(book.threads["t"]!.skipReason).toBe("not worth writing");
+    expect(book.threads["t"]!.skipReason).toBe("不值得写");
   });
 });
 
