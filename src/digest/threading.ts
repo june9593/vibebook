@@ -1,5 +1,5 @@
 import type { LlmRunner } from "./runner.js";
-import type { ThreadCandidate, SessionForBatching } from "./types.js";
+import type { ThreadCandidate, EnrichedSessionForBatching } from "./types.js";
 import type { Reporter } from "./reporter.js";
 import { loadPromptAsset } from "./prompt-loader.js";
 import { mapWithConcurrency } from "./concurrency.js";
@@ -196,7 +196,7 @@ export interface ThreadingResult {
 
 export async function runThreading(
   runner: LlmRunner,
-  batches: SessionForBatching[][],
+  batches: EnrichedSessionForBatching[][],
   concurrency = DEFAULT_THREADING_CONCURRENCY,
   maxAttempts = DEFAULT_THREADING_MAX_ATTEMPTS,
   reporter: Reporter,
@@ -234,7 +234,7 @@ export async function runThreading(
    *  discriminated union; never throws. */
   async function processBatch(
     runner: LlmRunner,
-    batch: SessionForBatching[],
+    batch: EnrichedSessionForBatching[],
     batchIndex: number,
     maxAttempts: number,
   ): Promise<BatchOutcome> {

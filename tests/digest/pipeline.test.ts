@@ -125,14 +125,13 @@ describe("buildBatchingInput", () => {
     const e = ie({ relativePath: "raw_sessions/c/p/2026-04-15/x.md" });
     writeSessionMd(e.relativePath, body);
     const got = buildBatchingInput([e], repoRoot, null);
-    expect(got).toEqual([
-      {
-        sessionId: e.sessionId,
-        project: e.project,
-        endedAt: e.endedAt,
-        tokenEstimate: 10,
-      },
-    ]);
+    expect(got).toHaveLength(1);
+    expect(got[0]).toMatchObject({
+      sessionId: e.sessionId,
+      project: e.project,
+      endedAt: e.endedAt,
+      tokenEstimate: 10,
+    });
   });
 
   it("rounds up partial token estimates", () => {
@@ -183,6 +182,15 @@ describe("buildBatchingInput", () => {
   it("throws clearly when a session's .md is missing on disk", () => {
     const e = ie({ relativePath: "raw_sessions/c/p/2026-04-15/missing.md" });
     expect(() => buildBatchingInput([e], repoRoot, null)).toThrow(/missing\.md/);
+  });
+
+  it("buildBatchingInput attaches signals from extractSessionSignals", () => {
+    const e = ie({ relativePath: "raw_sessions/c/p/2026-04-15/x.md" });
+    writeSessionMd(e.relativePath, `# Disp\n\n## User\n\nfix bug, learn from architecture decision\n`);
+    const got = buildBatchingInput([e], repoRoot, null);
+    expect(got[0]!.title).toContain("fix bug");
+    expect(got[0]!.preview).toBeTruthy();
+    expect(got[0]!.insightScore).toBeGreaterThan(0);
   });
 });
 

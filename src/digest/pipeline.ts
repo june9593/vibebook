@@ -7,10 +7,11 @@ import {
   type BookEntry,
   upsertThread,
 } from "./book-index.js";
-import type { SessionForBatching, ThreadCandidate } from "./types.js";
+import type { EnrichedSessionForBatching, ThreadCandidate } from "./types.js";
 import { ARTICLE_VERSION, type ArticleInput } from "./article.js";
 import { decrypt } from "../crypto.js";
 import { isRealProjectPath } from "./project-filter.js";
+import { extractSessionSignals } from "./session-signal.js";
 
 /**
  * Read a session body from disk, decrypting if its path ends with .enc.
@@ -87,15 +88,19 @@ export function buildBatchingInput(
   entries: IndexEntry[],
   repoRoot: string,
   key: Buffer | null,
-): SessionForBatching[] {
-  const out: SessionForBatching[] = [];
+): EnrichedSessionForBatching[] {
+  const out: EnrichedSessionForBatching[] = [];
   for (const e of entries) {
     const body = readSessionBody(repoRoot, e.relativePath, key, "pipeline.ts");
+    const signals = extractSessionSignals(body);
     out.push({
       sessionId: e.sessionId,
       project: e.project,
       endedAt: e.endedAt,
       tokenEstimate: Math.ceil(body.length / 3.5),
+      title: signals.title,
+      preview: signals.preview,
+      insightScore: signals.insightScore,
     });
   }
   return out;

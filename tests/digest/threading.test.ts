@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { runThreading, mergeCandidates, normalizeSlug } from "../../src/digest/threading.js";
-import type { ThreadCandidate, SessionForBatching } from "../../src/digest/types.js";
+import type { ThreadCandidate, EnrichedSessionForBatching } from "../../src/digest/types.js";
 import type { LlmRunner, RunResult } from "../../src/digest/runner.js";
 import { silentReporter } from "../../src/digest/reporter.js";
 
@@ -15,8 +15,17 @@ function fakeRunner(replies: RunResult[]): LlmRunner {
   };
 }
 
-function s(sessionId: string, project = "p", endedAt = "2026-04-01T00:00:00Z"): SessionForBatching {
-  return { sessionId, project, endedAt, tokenEstimate: 10 };
+function s(sessionId: string, opts: Partial<EnrichedSessionForBatching> = {}): EnrichedSessionForBatching {
+  return {
+    sessionId,
+    project: "p",
+    endedAt: "2026-04-01T00:00:00Z",
+    tokenEstimate: 10,
+    title: "",
+    preview: "",
+    insightScore: 0,
+    ...opts,
+  };
 }
 
 describe("normalizeSlug", () => {
@@ -278,7 +287,7 @@ describe("runThreading", () => {
       { ok: true, text: JSON.stringify([]), durationMs: 1 },
     ]);
     const runSpy = vi.spyOn(runner, "run");
-    await runThreading(runner, [[s("s1", "p", "2026-04-01T00:00:00Z")]], 4, 3, silentReporter());
+    await runThreading(runner, [[s("s1")]], 4, 3, silentReporter());
     const vars = runSpy.mock.calls[0][1];
     expect(vars.sessionList).toBeDefined();
     const parsed = JSON.parse(vars.sessionList);
