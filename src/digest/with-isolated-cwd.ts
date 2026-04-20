@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LlmRunner } from "./runner.js";
@@ -26,12 +26,28 @@ export async function withIsolatedCwd<T>(
   try {
     return await callback(wrappedRunner);
   } finally {
-    // Best-effort cleanup #1: the tmp cwd dir.
+    // First, resolve the cwd path so we can derive Claude CLI's hash. Must be
+    // BEFORE we rm the tmpdir (since realpath needs the dir to exist).
+    let resolvedCwd = isolatedCwd;
+    try {
+      resolvedCwd = realpathSync(isolatedCwd);
+    } catch {
+      // Defensive: if it was already gone, fall back to manual /private prefix
+      // for macOS /var paths (the only platform where realpath matters here).
+      if (isolatedCwd.startsWith("/var/")) {
+        resolvedCwd = "/private" + isolatedCwd;
+      }
+    }
+    // Best-effort #1: clean the tmp cwd dir.
     try { rmSync(isolatedCwd, { recursive: true, force: true }); } catch { /* swallow */ }
-    // Best-effort cleanup #2: Claude CLI session files at ~/.claude/projects/<hash>/.
-    const claudeProjectsDir = join(homedir(), ".claude", "projects", claudeProjectHash(isolatedCwd));
-    if (existsSync(claudeProjectsDir)) {
-      try { rmSync(claudeProjectsDir, { recursive: true, force: true }); } catch { /* swallow */ }
+    // Best-effort #2: clean Claude CLI's session-history dir under
+    // ~/.claude/projects/<hash>/ — we may have one or both of (resolved, unresolved)
+    // hash names depending on Claude CLI's exact behavior. Try both.
+    for (const candidatePath of new Set([resolvedCwd, isolatedCwd])) {
+      const claudeProjectsDir = join(homedir(), ".claude", "projects", claudeProjectHash(candidatePath));
+      if (existsSync(claudeProjectsDir)) {
+        try { rmSync(claudeProjectsDir, { recursive: true, force: true }); } catch { /* swallow */ }
+      }
     }
   }
 }

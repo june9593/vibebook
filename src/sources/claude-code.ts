@@ -19,7 +19,12 @@ export class ClaudeCodeAdapter implements SourceAdapter {
       try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
       for (const e of entries) {
         const p = join(dir, e.name);
-        if (e.isDirectory()) stack.push(p);
+        if (e.isDirectory()) {
+          // Skip our own scratch dirs and system tmpdirs — see isMemvcOrTmpProjectDir.
+          // We only filter at the top level (entries directly under ~/.claude/projects/).
+          if (dir === this.root && isMemvcOrTmpProjectDir(e.name)) continue;
+          stack.push(p);
+        }
         else if (e.isFile() && e.name.endsWith(".jsonl")) {
           const st = statSync(p);
           const buf = readFileSync(p);
@@ -34,6 +39,17 @@ export class ClaudeCodeAdapter implements SourceAdapter {
       }
     }
   }
+}
+
+/**
+ * Skip Claude project directories that correspond to memvc's own scratch
+ * subprocesses. We deliberately do NOT filter by tmpdir-prefix alone —
+ * developers may legitimately run `claude` in /tmp/experiment etc., and we
+ * shouldn't silently drop their work. We require the `-memvc-claude-` substring
+ * (which ONLY memvc-spawned cwds contain) to confirm provenance.
+ */
+function isMemvcOrTmpProjectDir(name: string): boolean {
+  return name.includes("-memvc-claude-");
 }
 
 function parseClaudeJsonl(sourcePath: string, content: string): NormalizedSession {
