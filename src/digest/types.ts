@@ -1,3 +1,5 @@
+import type { SessionSignals } from "./session-signal.js";
+
 /**
  * Minimal shape the batcher needs from a session. Built from a
  * NormalizedSession or IndexEntry by the caller (Sprint 2.8 pipeline glue).
@@ -12,6 +14,13 @@ export interface SessionForBatching {
   endedAt: string;
   tokenEstimate: number;
 }
+
+/**
+ * SessionForBatching enriched with extracted signals for the threading
+ * LLM prompt. Built by pipeline.buildBatchingInput; consumed by threading.
+ * Batcher only reads SessionForBatching fields, so this is a strict superset.
+ */
+export interface EnrichedSessionForBatching extends SessionForBatching, SessionSignals {}
 
 /**
  * What the LLM returns per batch (one element per discovered thread).
@@ -30,4 +39,9 @@ export interface ThreadCandidate {
   title: string;
   skip?: boolean;
   reason?: string;
+  /** Set false by the LLM when this thread is judged trivial / not worth an
+   *  article. Equivalent to skip:true; pipeline.recordSkippedThreadCandidates
+   *  treats both as skip. Made explicit so threading prompt can require LLM
+   *  to mention every session (no silent drops). */
+  worthWriting?: boolean;
 }

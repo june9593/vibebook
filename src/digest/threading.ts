@@ -1,5 +1,5 @@
 import type { LlmRunner } from "./runner.js";
-import type { ThreadCandidate, SessionForBatching } from "./types.js";
+import type { ThreadCandidate, EnrichedSessionForBatching } from "./types.js";
 import type { Reporter } from "./reporter.js";
 import { loadPromptAsset } from "./prompt-loader.js";
 import { mapWithConcurrency } from "./concurrency.js";
@@ -169,6 +169,11 @@ function asThreadCandidates(data: unknown, batchIndex: number): ThreadCandidate[
         throw new Error(`threading batch ${batchIndex}: bad shape — sessionIds must be string[]`);
       }
     }
+    if (c.worthWriting !== undefined && typeof c.worthWriting !== "boolean") {
+      throw new Error(
+        `threading batch ${batchIndex}: bad shape — element ${i} worthWriting must be boolean if present`,
+      );
+    }
   }
   return data as ThreadCandidate[];
 }
@@ -196,7 +201,7 @@ export interface ThreadingResult {
 
 export async function runThreading(
   runner: LlmRunner,
-  batches: SessionForBatching[][],
+  batches: EnrichedSessionForBatching[][],
   concurrency = DEFAULT_THREADING_CONCURRENCY,
   maxAttempts = DEFAULT_THREADING_MAX_ATTEMPTS,
   reporter: Reporter,
@@ -225,8 +230,40 @@ export async function runThreading(
     }
   }
 
+  const mergedCandidates = mergeCandidates(perBatchCandidates);
+
+  // Compute which input sessionIds are NOT in any candidate output. These are
+  // LLM omissions — recover by force-creating one-session threads. This GUARANTEES
+  // no input session vanishes silently. (Sessions in failedBatches don't need
+  // recovery here — they will reappear in findNewSessionEntries on the next sync,
+  // per the soft-fail contract.)
+  const succeededBatchIndices = new Set(
+    outcomes.map((o, i) => o.ok ? i : -1).filter((i) => i >= 0),
+  );
+  const outputSids = new Set<string>();
+  for (const c of mergedCandidates) {
+    for (const sid of c.sessionIds) outputSids.add(sid);
+  }
+  const dropped: EnrichedSessionForBatching[] = [];
+  for (let i = 0; i < batches.length; i++) {
+    if (!succeededBatchIndices.has(i)) continue;
+    for (const s of batches[i]!) {
+      if (!outputSids.has(s.sessionId)) dropped.push(s);
+    }
+  }
+  if (dropped.length > 0) {
+    console.warn(`runThreading: LLM omitted ${dropped.length} session(s); auto-recovering as 1-session threads`);
+  }
+  const recoveredCandidates: ThreadCandidate[] = dropped.map((s) => ({
+    threadId: synthThreadId(s),
+    title: synthTitle(s),
+    sessionIds: [s.sessionId],
+    worthWriting: true,
+  }));
+  const finalCandidates = mergedCandidates.concat(recoveredCandidates);
+
   return {
-    candidates: mergeCandidates(perBatchCandidates),
+    candidates: finalCandidates,
     failedBatches,
   };
 
@@ -234,7 +271,7 @@ export async function runThreading(
    *  discriminated union; never throws. */
   async function processBatch(
     runner: LlmRunner,
-    batch: SessionForBatching[],
+    batch: EnrichedSessionForBatching[],
     batchIndex: number,
     maxAttempts: number,
   ): Promise<BatchOutcome> {
@@ -246,6 +283,9 @@ export async function runThreading(
           sessionId: s.sessionId,
           project: s.project,
           endedAt: s.endedAt,
+          title: s.title,
+          preview: s.preview,
+          insightScore: Number(s.insightScore.toFixed(2)),
         }))) },
         { outputFormat: "json" },
       );
@@ -270,4 +310,23 @@ export async function runThreading(
     }
     return { ok: false, error: lastError };
   }
+}
+
+/** Build a synthetic threadId from session signals. Used only for recovered
+ *  (LLM-omitted) sessions; the threadId must be a unique slug stable enough
+ *  to survive cross-batch merging. We use the first 8 chars of sessionId
+ *  + a kebab-case excerpt of the title so it reads OK in book/index.md. */
+function synthThreadId(s: EnrichedSessionForBatching): string {
+  const titleSlug = s.title
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 30);
+  const sidPart = s.sessionId.slice(0, 8);
+  return titleSlug ? `${titleSlug}-${sidPart}` : `recovered-${sidPart}`;
+}
+
+function synthTitle(s: EnrichedSessionForBatching): string {
+  const t = s.title.trim();
+  return t ? t.slice(0, 20) : "（自动恢复）";
 }

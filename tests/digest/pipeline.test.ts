@@ -125,14 +125,13 @@ describe("buildBatchingInput", () => {
     const e = ie({ relativePath: "raw_sessions/c/p/2026-04-15/x.md" });
     writeSessionMd(e.relativePath, body);
     const got = buildBatchingInput([e], repoRoot, null);
-    expect(got).toEqual([
-      {
-        sessionId: e.sessionId,
-        project: e.project,
-        endedAt: e.endedAt,
-        tokenEstimate: 10,
-      },
-    ]);
+    expect(got).toHaveLength(1);
+    expect(got[0]).toMatchObject({
+      sessionId: e.sessionId,
+      project: e.project,
+      endedAt: e.endedAt,
+      tokenEstimate: 10,
+    });
   });
 
   it("rounds up partial token estimates", () => {
@@ -183,6 +182,15 @@ describe("buildBatchingInput", () => {
   it("throws clearly when a session's .md is missing on disk", () => {
     const e = ie({ relativePath: "raw_sessions/c/p/2026-04-15/missing.md" });
     expect(() => buildBatchingInput([e], repoRoot, null)).toThrow(/missing\.md/);
+  });
+
+  it("buildBatchingInput attaches signals from extractSessionSignals", () => {
+    const e = ie({ relativePath: "raw_sessions/c/p/2026-04-15/x.md" });
+    writeSessionMd(e.relativePath, `# Disp\n\n## User\n\nfix bug, learn from architecture decision\n`);
+    const got = buildBatchingInput([e], repoRoot, null);
+    expect(got[0]!.title).toContain("fix bug");
+    expect(got[0]!.preview).toBeTruthy();
+    expect(got[0]!.insightScore).toBeGreaterThan(0);
   });
 });
 
@@ -248,6 +256,29 @@ describe("recordSkippedThreadCandidates", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/ghost/));
     warn.mockRestore();
   });
+
+  it("recordSkippedThreadCandidates treats worthWriting=false the same as skip:true", () => {
+    const idx = makeIndex([ie({ sessionId: "sid-1", project: "p" })]);
+    const book: BookIndex = { version: 1, threads: {}, chapters: {} };
+    recordSkippedThreadCandidates(
+      book,
+      [{ threadId: "t", title: "trivial", sessionIds: ["sid-1"], worthWriting: false, reason: "too short" }],
+      idx,
+    );
+    expect(book.threads["t"]!.skip).toBe(true);
+    expect(book.threads["t"]!.skipReason).toBe("too short");
+  });
+
+  it("recordSkippedThreadCandidates defaults reason to '不值得写' when worthWriting=false and no reason", () => {
+    const idx = makeIndex([ie({ sessionId: "sid-1", project: "p" })]);
+    const book: BookIndex = { version: 1, threads: {}, chapters: {} };
+    recordSkippedThreadCandidates(
+      book,
+      [{ threadId: "t", title: "trivial", sessionIds: ["sid-1"], worthWriting: false }],
+      idx,
+    );
+    expect(book.threads["t"]!.skipReason).toBe("不值得写");
+  });
 });
 
 // =====================================================================
@@ -296,6 +327,17 @@ describe("buildArticleInputs", () => {
       { threadId: "t", title: "", sessionIds: ["sid-1"], skip: true, reason: "x" },
     ];
     expect(buildArticleInputs(cands, idx, repoRoot, null)).toEqual([]);
+  });
+
+  it("buildArticleInputs treats worthWriting=false the same as skip:true (excludes)", () => {
+    const e = ie({ relativePath: "raw_sessions/c/p/x/y.md" });
+    writeSessionMd(e.relativePath, "## User\n\nx");
+    const idx = makeIndex([e]);
+    const got = buildArticleInputs(
+      [{ threadId: "t", title: "", sessionIds: ["sid-1"], worthWriting: false }],
+      idx, repoRoot, null,
+    );
+    expect(got).toEqual([]);
   });
 
   it("throws when a candidate's sessions span multiple projects", () => {

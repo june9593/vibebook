@@ -7,10 +7,11 @@ import {
   type BookEntry,
   upsertThread,
 } from "./book-index.js";
-import type { SessionForBatching, ThreadCandidate } from "./types.js";
+import type { EnrichedSessionForBatching, ThreadCandidate } from "./types.js";
 import { ARTICLE_VERSION, type ArticleInput } from "./article.js";
 import { decrypt } from "../crypto.js";
 import { isRealProjectPath } from "./project-filter.js";
+import { extractSessionSignals } from "./session-signal.js";
 
 /**
  * Read a session body from disk, decrypting if its path ends with .enc.
@@ -87,15 +88,19 @@ export function buildBatchingInput(
   entries: IndexEntry[],
   repoRoot: string,
   key: Buffer | null,
-): SessionForBatching[] {
-  const out: SessionForBatching[] = [];
+): EnrichedSessionForBatching[] {
+  const out: EnrichedSessionForBatching[] = [];
   for (const e of entries) {
     const body = readSessionBody(repoRoot, e.relativePath, key, "pipeline.ts");
+    const signals = extractSessionSignals(body);
     out.push({
       sessionId: e.sessionId,
       project: e.project,
       endedAt: e.endedAt,
       tokenEstimate: Math.ceil(body.length / 3.5),
+      title: signals.title,
+      preview: signals.preview,
+      insightScore: signals.insightScore,
     });
   }
   return out;
@@ -118,7 +123,8 @@ export function recordSkippedThreadCandidates(
   const nowIso = new Date().toISOString();
   const sessionLookup = sessionLookupBySid(indexFile);
   for (const c of candidates) {
-    if (!c.skip) continue;
+    const isSkip = c.skip === true || c.worthWriting === false;
+    if (!isSkip) continue;
     const firstSid = c.sessionIds[0];
     const ie = firstSid ? sessionLookup.get(firstSid) : undefined;
     if (firstSid === undefined || ie === undefined) {
@@ -127,6 +133,7 @@ export function recordSkippedThreadCandidates(
       );
     }
     const project = ie?.project ?? "unknown";
+    const reason = c.reason ?? (c.worthWriting === false ? "不值得写" : "");
     const entry: BookEntry = {
       threadId: c.threadId,
       project,
@@ -137,7 +144,7 @@ export function recordSkippedThreadCandidates(
       latestSourceSha: "",
       articleStatus: "ok",
       skip: true,
-      skipReason: c.reason ?? "",
+      skipReason: reason,
       updatedAt: nowIso,
     };
     upsertThread(bookIndex, entry);
@@ -163,7 +170,7 @@ export function buildArticleInputs(
 ): ArticleInput[] {
   const out: ArticleInput[] = [];
   for (const c of candidates) {
-    if (c.skip) continue;
+    if (c.skip || c.worthWriting === false) continue;
     const input = buildArticleInputForThread(
       c.threadId, c.title, c.sessionIds, indexFile, repoRoot, "pipeline.ts", key,
     );

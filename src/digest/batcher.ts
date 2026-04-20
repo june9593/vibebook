@@ -20,16 +20,16 @@ const DEFAULT_MAX_TOKENS = 100_000;
  * Rationale (spec §Batcher): same-project + time-adjacent sessions must see
  * each other so the threading LLM can spot cross-session continuity.
  */
-export function makeBatches(
-  sessions: SessionForBatching[],
+export function makeBatches<T extends SessionForBatching>(
+  sessions: T[],
   opts: BatcherOptions = {},
-): SessionForBatching[][] {
+): T[][] {
   const maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS;
   if (sessions.length === 0) return [];
 
   // Separate oversized sessions from normal ones.
-  const oversized: SessionForBatching[] = [];
-  const normal: SessionForBatching[] = [];
+  const oversized: T[] = [];
+  const normal: T[] = [];
   for (const s of sessions) {
     if (s.tokenEstimate > maxTokens) {
       oversized.push(s);
@@ -45,8 +45,8 @@ export function makeBatches(
   });
 
   // Greedy pack normal sessions.
-  const normalBatches: SessionForBatching[][] = [];
-  let current: SessionForBatching[] = [];
+  const normalBatches: T[][] = [];
+  let current: T[] = [];
   let currentTokens = 0;
   for (const s of normal) {
     if (currentTokens + s.tokenEstimate > maxTokens) {

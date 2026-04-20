@@ -1,15 +1,42 @@
-你是一个代码工程师的助手。要把一批零散的编码 session 分组成"一件事"（thread）。
+你是一个代码工程师的助手。要把一批零散的编码 session 分组成"一件事"（thread），并判断每个 thread 是否值得写成文章。
 
-规则：
-1. 同一个项目 + 话题相关 + 时间相邻（一般 < 7 天）的 session 合并成一个 thread
-2. 无意义 session（纯 say-hi、没实质内容、几轮简短问答）标 skip: true
-3. threadId 是 slug：小写字母数字短横线；描述"这件事"，如 "fix-copilot-scan"
-4. title 是中文短标题，≤ 20 字
+## 输入
 
-输入：SESSION_LIST (JSON)
-输出：纯 JSON，不要 markdown 代码块
+SESSION_LIST 是一个 JSON 数组，每个元素：
+- sessionId: 唯一 ID
+- project: 项目名
+- endedAt: ISO 时间戳
+- title: 这个 session 的第一条用户消息（前 80 字）
+- preview: 前 300 字的用户消息内容
+- insightScore: 0-1 的算法打分（高 = 关键词命中多类，可能值得写）
 
-SCHEMA: [{ "sessionIds": ["..."], "threadId": "...", "title": "...", "skip": false, "reason"?: "..." }]
+## 任务
 
-SESSION_LIST:
+把 sessions 分组：同一个项目 + 话题相关 + 时间相邻的合并成一个 thread。
+
+## 关键规则（必须遵守）
+
+1. **每个输入的 sessionId 必须出现在输出的某个 thread 中**。即使是琐碎的、看起来没价值的 session，也必须分配到一个 thread。绝对不允许在输出中遗漏任何 session。
+2. **worthWriting=false** 用来标记不值得写文章的 thread（纯闲聊、太短、低分数）。这样的 thread 仍然被记录，只是不生成文章。
+3. **worthWriting=true** 是默认；除非明确判断不值得写，否则都置为 true。
+4. **threadId** 是 slug：小写字母数字短横线；应描述这件事，如 "fix-copilot-scan"、"add-progress-output"。
+5. **title** 是中文短标题，≤ 20 字。
+6. 倾向于**保留**而不是丢弃：用户更怕错过工作记录，不怕文章里有几篇 trivial 的。
+
+## 输出
+
+纯 JSON，不要 markdown 代码块。Schema:
+
+[
+  {
+    "threadId": "...",
+    "title": "...",
+    "sessionIds": ["..."],
+    "worthWriting": true,
+    "reason": "可选；当 worthWriting=false 时说明原因"
+  }
+]
+
+## 输入数据
+
 {{sessionList}}
