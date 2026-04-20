@@ -8,6 +8,7 @@ import {
   buildBatchingInput,
   recordSkippedThreadCandidates,
   buildArticleInputs,
+  buildArticleInputForThread,
 } from "../../src/digest/pipeline.js";
 import { encrypt as encryptBuf, deriveKey } from "../../src/crypto.js";
 import type { IndexFile, IndexEntry, Tool } from "../../src/types.js";
@@ -340,16 +341,39 @@ describe("buildArticleInputs", () => {
     expect(got).toEqual([]);
   });
 
-  it("throws when a candidate's sessions span multiple projects", () => {
+  it("warns and drops the bad candidate when its sessions span multiple projects (soft-fail)", () => {
     const eA = ie({ sessionId: "a", project: "proj-a", relativePath: "raw_sessions/c/a/x/a.md" });
     const eB = ie({ sessionId: "b", project: "proj-b", relativePath: "raw_sessions/c/b/x/b.md" });
     writeSessionMd(eA.relativePath, "a");
     writeSessionMd(eB.relativePath, "b");
     const idx = makeIndex([eA, eB]);
     const cands: ThreadCandidate[] = [
-      { threadId: "mixed", title: "", sessionIds: ["a", "b"] },
+      { threadId: "mixed", project: "proj-a", title: "", sessionIds: ["a", "b"] },
     ];
-    expect(() => buildArticleInputs(cands, idx, repoRoot, null)).toThrow(/multiple projects/);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const got = buildArticleInputs(cands, idx, repoRoot, null);
+      expect(got).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("spans multiple projects"));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("buildArticleInputForThread soft-fails (returns null + warn) when sessions span multiple projects", () => {
+    const eA = ie({ sessionId: "a", project: "proj-a", relativePath: "raw_sessions/c/a/x/a.md" });
+    const eB = ie({ sessionId: "b", project: "proj-b", relativePath: "raw_sessions/c/b/x/b.md" });
+    writeSessionMd(eA.relativePath, "## User\n\na");
+    writeSessionMd(eB.relativePath, "## User\n\nb");
+    const idx = makeIndex([eA, eB]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const got = buildArticleInputForThread("mixed", "title", ["a", "b"], idx, repoRoot, "test", null);
+      expect(got).toBeNull();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("spans multiple projects"));
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("warns and drops only the bad candidate, keeping siblings", () => {

@@ -225,9 +225,10 @@ export function buildArticleInputForThread(
 
   const projects = new Set(entries.map((e) => e.project));
   if (projects.size > 1) {
-    throw new Error(
-      `${contextLabel}: thread ${threadId} spans multiple projects (${[...projects].join(", ")})`,
+    console.warn(
+      `${contextLabel}: thread ${threadId} spans multiple projects (${[...projects].join(", ")}); dropping this candidate (sessions will retry next sync)`,
     );
+    return null;
   }
   const project = entries[0]!.project;
 
