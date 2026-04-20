@@ -204,6 +204,12 @@ describe("runDigest — article phase failure isolation", () => {
 
     expect(r.articlesOk).toBe(1);
     expect(r.articlesFailed).toBe(1);
+    expect(r.articleFailures).toHaveLength(1);
+    expect(r.articleFailures[0]).toMatchObject({
+      threadId: expect.stringMatching(/t-bad/),
+      error: expect.any(String),
+    });
+    expect(r.articleFailures[0]!.error.length).toBeGreaterThan(0);
     expect(book.threads["t-bad"]!.articleStatus).toBe("failed");
     expect(book.threads["t-good"]!.articleStatus).toBe("ok");
     // Chapter was attempted (only ok articles included by chapter.ts).

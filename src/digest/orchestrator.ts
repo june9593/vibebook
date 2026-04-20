@@ -36,6 +36,8 @@ export interface DigestReport {
   articlesOk: number;
   articlesSkipped: number;
   articlesFailed: number;
+  /** Per-thread failure reasons (parallel to articlesFailed). */
+  articleFailures: { threadId: string; error: string }[];
   chaptersRewritten: string[];
   chaptersFailed: { project: string; error: string }[];
   tocFilesWritten: string[];
@@ -107,6 +109,7 @@ async function runDigestImpl(
     articlesOk: 0,
     articlesSkipped: 0,
     articlesFailed: 0,
+    articleFailures: [],
     chaptersRewritten: [],
     chaptersFailed: [],
     tocFilesWritten: [],
@@ -146,7 +149,10 @@ async function runDigestImpl(
       const res = await generateArticle(runner, repoRoot, input, bookIndex, reporter);
       if (res.status === "ok") report.articlesOk++;
       else if (res.status === "skipped") report.articlesSkipped++;
-      else report.articlesFailed++;
+      else {
+        report.articlesFailed++;
+        report.articleFailures.push({ threadId: input.threadId, error: res.error });
+      }
     }
 
     // -------------------------------------------------------------- chapter

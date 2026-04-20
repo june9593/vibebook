@@ -58,6 +58,11 @@ export async function digestCmd(opts: DigestOptions): Promise<void> {
   console.log(chalk.bold(
     `\n--redo: ${report.threadsRecovered} recovered / ${report.threadsNewlySkipped} newly-skipped / ${report.threadsStillFailed} still failed / ${report.threadsUnresolvable} unresolvable; ${report.chaptersRewritten.length} chapters rewritten`,
   ));
+  if (report.articleFailures.length > 0) {
+    for (const f of report.articleFailures) {
+      console.log(chalk.yellow(`    ! article ${f.threadId} failed: ${f.error.slice(0, 200)}`));
+    }
+  }
   if (report.chaptersFailed.length > 0) {
     for (const f of report.chaptersFailed) {
       console.log(chalk.red(`  ! chapter ${f.project} failed: ${f.error}`));
@@ -148,6 +153,11 @@ async function runDigestResetCmd(): Promise<void> {
   console.log(chalk.bold(
     `\n--reset complete: +${report.articlesOk} articles, ${report.threadsSkipped} skip, ${report.articlesFailed} failed; ${report.chaptersRewritten.length} chapters`,
   ));
+  if (report.articleFailures.length > 0) {
+    for (const f of report.articleFailures) {
+      console.log(chalk.yellow(`    ! article ${f.threadId} failed: ${f.error.slice(0, 200)}`));
+    }
+  }
 
   if (cfg.deviceBranch) {
     const git = await ensureRepo(cfg.repoPath, cfg.repoUrl);
