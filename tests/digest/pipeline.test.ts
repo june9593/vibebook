@@ -257,29 +257,6 @@ describe("recordSkippedThreadCandidates", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/ghost/));
     warn.mockRestore();
   });
-
-  it("recordSkippedThreadCandidates treats worthWriting=false the same as skip:true", () => {
-    const idx = makeIndex([ie({ sessionId: "sid-1", project: "p" })]);
-    const book: BookIndex = { version: 1, threads: {}, chapters: {} };
-    recordSkippedThreadCandidates(
-      book,
-      [{ threadId: "t", title: "trivial", sessionIds: ["sid-1"], worthWriting: false, reason: "too short" }],
-      idx,
-    );
-    expect(book.threads["t"]!.skip).toBe(true);
-    expect(book.threads["t"]!.skipReason).toBe("too short");
-  });
-
-  it("recordSkippedThreadCandidates defaults reason to '不值得写' when worthWriting=false and no reason", () => {
-    const idx = makeIndex([ie({ sessionId: "sid-1", project: "p" })]);
-    const book: BookIndex = { version: 1, threads: {}, chapters: {} };
-    recordSkippedThreadCandidates(
-      book,
-      [{ threadId: "t", title: "trivial", sessionIds: ["sid-1"], worthWriting: false }],
-      idx,
-    );
-    expect(book.threads["t"]!.skipReason).toBe("不值得写");
-  });
 });
 
 // =====================================================================
@@ -328,17 +305,6 @@ describe("buildArticleInputs", () => {
       { threadId: "t", title: "", sessionIds: ["sid-1"], skip: true, reason: "x" },
     ];
     expect(buildArticleInputs(cands, idx, repoRoot, null)).toEqual([]);
-  });
-
-  it("buildArticleInputs treats worthWriting=false the same as skip:true (excludes)", () => {
-    const e = ie({ relativePath: "raw_sessions/c/p/x/y.md" });
-    writeSessionMd(e.relativePath, "## User\n\nx");
-    const idx = makeIndex([e]);
-    const got = buildArticleInputs(
-      [{ threadId: "t", title: "", sessionIds: ["sid-1"], worthWriting: false }],
-      idx, repoRoot, null,
-    );
-    expect(got).toEqual([]);
   });
 
   it("warns and drops the bad candidate when its sessions span multiple projects (soft-fail)", () => {

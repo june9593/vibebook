@@ -123,7 +123,7 @@ export function recordSkippedThreadCandidates(
   const nowIso = new Date().toISOString();
   const sessionLookup = sessionLookupBySid(indexFile);
   for (const c of candidates) {
-    const isSkip = c.skip === true || c.worthWriting === false;
+    const isSkip = c.skip === true;
     if (!isSkip) continue;
     const firstSid = c.sessionIds[0];
     const ie = firstSid ? sessionLookup.get(firstSid) : undefined;
@@ -133,7 +133,7 @@ export function recordSkippedThreadCandidates(
       );
     }
     const project = ie?.project ?? "unknown";
-    const reason = c.reason ?? (c.worthWriting === false ? "不值得写" : "");
+    const reason = c.reason ?? "";
     const entry: BookEntry = {
       threadId: c.threadId,
       project,
@@ -170,7 +170,7 @@ export function buildArticleInputs(
 ): ArticleInput[] {
   const out: ArticleInput[] = [];
   for (const c of candidates) {
-    if (c.skip || c.worthWriting === false) continue;
+    if (c.skip) continue;
     const input = buildArticleInputForThread(
       c.threadId, c.title, c.sessionIds, indexFile, repoRoot, "pipeline.ts", key,
     );

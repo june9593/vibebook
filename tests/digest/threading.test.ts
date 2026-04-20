@@ -360,7 +360,7 @@ describe("runThreading dropped-session recovery", () => {
       {
         ok: true,
         text: JSON.stringify([
-          { threadId: "t1", title: "T1", sessionIds: ["s1"], worthWriting: true },
+          { threadId: "t1", title: "T1", sessionIds: ["s1"] },
         ]),
         durationMs: 1,
       },
@@ -467,11 +467,11 @@ describe("runThreading — cap thread size at 5 sessions", () => {
     expect(r.candidates[0]!.sessionIds).toEqual(sids);
   });
 
-  it("preserves project + title + worthWriting on each split", async () => {
+  it("preserves project + title on each split", async () => {
     const sids = Array.from({ length: 7 }, (_, i) => `s${i}`);
     const runner = fakeRunner([
       { ok: true, text: JSON.stringify([
-        { threadId: "feat", title: "功能", sessionIds: sids, project: "proj-a", worthWriting: true },
+        { threadId: "feat", title: "功能", sessionIds: sids, project: "proj-a" },
       ]), durationMs: 1 },
     ]);
     const r = await runThreading(
@@ -485,7 +485,6 @@ describe("runThreading — cap thread size at 5 sessions", () => {
     for (const c of feats) {
       expect(c.title).toBe("功能");
       expect(c.project).toBe("proj-a");
-      expect(c.worthWriting).toBe(true);
     }
   });
 });

@@ -44,9 +44,4 @@ export interface ThreadCandidate {
   title: string;
   skip?: boolean;
   reason?: string;
-  /** Set false by the LLM when this thread is judged trivial / not worth an
-   *  article. Equivalent to skip:true; pipeline.recordSkippedThreadCandidates
-   *  treats both as skip. Made explicit so threading prompt can require LLM
-   *  to mention every session (no silent drops). */
-  worthWriting?: boolean;
 }
