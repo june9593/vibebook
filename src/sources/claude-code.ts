@@ -23,6 +23,12 @@ export class ClaudeCodeAdapter implements SourceAdapter {
           // Skip our own scratch dirs and system tmpdirs — see isMemvcOrTmpProjectDir.
           // We only filter at the top level (entries directly under ~/.claude/projects/).
           if (dir === this.root && isMemvcOrTmpProjectDir(e.name)) continue;
+          // Skip Claude Code's own subagent transcript dirs at any depth.
+          // These appear as ~/.claude/projects/<proj>/<sessionId>/subagents/agent-*.jsonl
+          // and contain agentic prompt boilerplate ("You are implementing Task X")
+          // that pollutes raw_sessions with bogus session titles. They are NOT user
+          // sessions; they are sub-task transcripts spawned by an outer session.
+          if (e.name === "subagents") continue;
           stack.push(p);
         }
         else if (e.isFile() && e.name.endsWith(".jsonl")) {
