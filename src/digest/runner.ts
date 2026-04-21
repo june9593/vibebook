@@ -65,7 +65,7 @@ export function createRunner(cfg: RunnerConfig): LlmRunner {
         };
       }
       throw new Error(
-        "runner 'github-action' only works when run inside the GitHub Action (MEMVC_CI=1). For local digest runs, set runner to 'claude-cli'.",
+        "runner='github-action' delegates digest to GitHub Actions and is not callable locally. The local sync should skip the digest phase; if you reached this error, run `memvc init` and pick 'Local Claude CLI' for local digest, or set MEMVC_CI=1 (only inside the workflow).",
       );
     }
   }

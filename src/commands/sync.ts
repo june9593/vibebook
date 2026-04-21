@@ -182,6 +182,9 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
   } else if (!opts.runnerConfig) {
     digestStatus = "skipped-no-runner";
     console.log(chalk.yellow("Digest pipeline skipped: no runnerConfig provided."));
+  } else if (opts.runnerConfig.runner === "github-action" && process.env.MEMVC_CI !== "1") {
+    digestStatus = "skipped-flag";
+    console.log(chalk.cyan("\nDigest delegated to GitHub Action (runner='github-action'); will run in CI on next push."));
   } else {
     console.log(chalk.gray("\nRunning digest pipeline (phases 3-7)..."));
     const bookIndex = loadBookIndex(opts.repoPath);
