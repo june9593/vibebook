@@ -279,6 +279,8 @@ export function readConfigWithMigration(): Config {
 export async function syncCmd(opts: { noDigest?: boolean } = {}): Promise<void> {
   const cfg = readConfigWithMigration();
   const passphrase = cfg.encrypt ? getPassphrase() : undefined;
+  // Honor config.digestEnabled: treat digestEnabled=false like --no-digest.
+  const noDigest = opts.noDigest || cfg.digestEnabled === false;
   const r = await runSync({
     repoPath: cfg.repoPath,
     encrypt: cfg.encrypt,
@@ -287,7 +289,7 @@ export async function syncCmd(opts: { noDigest?: boolean } = {}): Promise<void> 
     push: true,
     repoUrl: cfg.repoUrl,
     deviceBranch: cfg.deviceBranch,
-    noDigest: opts.noDigest,
+    noDigest,
     runnerConfig: { runner: cfg.runner, runnerModel: cfg.runnerModel },
     threadingConcurrency: cfg.threadingConcurrency,
     threadingMaxAttempts: cfg.threadingMaxAttempts,
