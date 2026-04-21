@@ -48,6 +48,10 @@ describe("initCmd flag mode", () => {
     expect(cfg.encrypt).toBe(true);
     expect(cfg.digestEnabled).toBe(false);
     expect(readFileSync(join(tmpHome, ".memvc", "passphrase"), "utf8").trim()).toBe("abc");
+    // repo-salt.json is written into the repo so the GH Action can read it.
+    const saltFile = join(localPath, ".memvc", "repo-salt.json");
+    expect(existsSync(saltFile)).toBe(true);
+    expect(JSON.parse(readFileSync(saltFile, "utf8")).salt).toBe(cfg.salt);
   });
 
   it("flag mode default localPath is ./.memvc/repo under cwd", async () => {

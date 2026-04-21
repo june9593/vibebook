@@ -4,7 +4,7 @@ import { prompt, promptYesNo, promptChoice, promptHidden, closePrompts } from ".
 import { materializeRepoAtPath } from "../git-ops.js";
 import { writePassphraseFile } from "../passphrase-store.js";
 import {
-  freshSaltBase64, writeConfig, configExists,
+  freshSaltBase64, writeConfig, writeRepoSaltFile, configExists,
   DEFAULT_THREADING_CONCURRENCY, DEFAULT_THREADING_MAX_ATTEMPTS,
   type Config,
 } from "../config.js";
@@ -181,6 +181,10 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
     digestEnabled: a.digestEnabled,
   };
   writeConfig(cfg);
+  if (cfg.encrypt) {
+    writeRepoSaltFile(cfg.repoPath, cfg.salt);
+    console.log(chalk.gray(`  repo salt written to ${a.localPath}/.memvc/repo-salt.json (commit + push so CI can read it)`));
+  }
   console.log(chalk.green("\nok memvc initialized"));
   console.log(chalk.gray(`  config: ~/.memvc/config.json`));
 }

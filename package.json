@@ -4,6 +4,7 @@
   "description": "Memory of vibe coding — sync AI coding sessions to a private repo",
   "type": "module",
   "bin": { "memvc": "./dist/bin/memvc.js" },
+  "files": ["dist/", "assets/", "README.md"],
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
