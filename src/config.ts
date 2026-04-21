@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
+import { readPassphraseFile } from "./passphrase-store.js";
 
 const CONFIG_DIR = join(homedir(), ".memvc");
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
@@ -43,7 +44,11 @@ export function freshSaltBase64(): string {
 }
 
 export function getPassphrase(): string {
-  const p = process.env.MEMVC_PASSPHRASE;
-  if (!p) throw new Error("encryption is on — set MEMVC_PASSPHRASE env var");
-  return p;
+  const env = process.env.MEMVC_PASSPHRASE;
+  if (env) return env;
+  const file = readPassphraseFile();
+  if (file) return file;
+  throw new Error(
+    "encryption is on — set MEMVC_PASSPHRASE env var, or save a passphrase via `memvc init`",
+  );
 }
