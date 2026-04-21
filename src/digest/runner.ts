@@ -50,7 +50,23 @@ export function createRunner(cfg: RunnerConfig): LlmRunner {
         run: (prompt, vars, opts) =>
           runGithubModels(renderPrompt(prompt, vars), cfg.runnerModel, opts ?? {}),
       };
-    case "github-action":
-      throw new Error("github-action runner is not implemented yet");
+    case "github-action": {
+      // The "github-action" config value means "I'll run the digest from a GitHub
+      // Action, not locally". When MEMVC_CI=1 (set by the workflow), we transparently
+      // dispatch to the GitHub Models adapter, which authenticates via GITHUB_TOKEN.
+      //
+      // Local invocation should not pick this branch — `memvc init` only writes
+      // "github-action" if the user picked it in the wizard, and the wizard rejects
+      // it (see runWizard's Q6 loop).
+      if (process.env.MEMVC_CI === "1") {
+        return {
+          run: (prompt, vars, opts) =>
+            runGithubModels(renderPrompt(prompt, vars), cfg.runnerModel, opts ?? {}),
+        };
+      }
+      throw new Error(
+        "runner 'github-action' only works when run inside the GitHub Action (MEMVC_CI=1). For local digest runs, set runner to 'claude-cli'.",
+      );
+    }
   }
 }
