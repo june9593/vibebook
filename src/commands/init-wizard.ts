@@ -10,6 +10,7 @@ import {
 } from "../config.js";
 import { deviceBranchFromHostname } from "../device.js";
 import { checkBinary, runnerBinary, runnerInstallUrl } from "../runner-check.js";
+import { createRunner } from "../digest/runner.js";
 
 export interface WizardAnswers {
   repoUrl: string;
@@ -113,7 +114,7 @@ export async function runWizard(): Promise<WizardAnswers> {
  * Verify the chosen runner's binary is available, then optionally make a real
  * test call. Prints results; returns true iff binary check passed.
  */
-export async function verifyRunner(runner: string): Promise<boolean> {
+export async function verifyRunner(runner: string, model = ""): Promise<boolean> {
   const bin = runnerBinary(runner);
   if (!bin) return true; // nothing local to check
   console.log(chalk.gray(`\nVerifying runner '${runner}'...`));
@@ -126,10 +127,26 @@ export async function verifyRunner(runner: string): Promise<boolean> {
   }
   console.log(chalk.green(`  ok ${bin}: ${r.output.split("\n")[0]}`));
   const ping = await promptYesNo("  Test a real API call now? (sends 1-token ping)", false);
-  if (ping) {
-    console.log(chalk.gray("  (test call not yet implemented — skipping)"));
+  if (!ping) return true;
+  if (runner !== "claude-cli" && runner !== "anthropic-api" && runner !== "github-models") {
+    console.log(chalk.yellow(`  ping not supported for runner '${runner}' yet`));
+    return true;
   }
-  return true;
+  console.log(chalk.gray("  pinging..."));
+  try {
+    const llm = createRunner({ runner, runnerModel: model });
+    const res = await llm.run("Reply with the single word OK and nothing else.", {}, { timeoutMs: 30_000, outputFormat: "text" });
+    if (res.ok) {
+      const preview = res.text.trim().slice(0, 80).replace(/\s+/g, " ");
+      console.log(chalk.green(`  ok ping (${res.durationMs}ms): "${preview}"`));
+      return true;
+    }
+    console.log(chalk.yellow(`  ping failed (${res.durationMs}ms): ${res.error.slice(0, 200)}`));
+    return false;
+  } catch (e) {
+    console.log(chalk.yellow(`  ping threw: ${(e as Error).message}`));
+    return false;
+  }
 }
 
 /**
@@ -184,7 +201,7 @@ export async function runInitWizard(): Promise<void> {
   try {
     const answers = await runWizard();
     let runnerOk = true;
-    if (answers.digestEnabled) runnerOk = await verifyRunner(answers.runner);
+    if (answers.digestEnabled) runnerOk = await verifyRunner(answers.runner, answers.runnerModel);
     await applyWizardAnswers(answers);
     if (answers.digestEnabled && !runnerOk) {
       console.log(chalk.yellow(
