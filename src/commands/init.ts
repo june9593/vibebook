@@ -28,6 +28,7 @@ export async function initCmd(opts: InitOptions): Promise<void> {
     runnerModel: "",
     threadingConcurrency: DEFAULT_THREADING_CONCURRENCY,
     threadingMaxAttempts: DEFAULT_THREADING_MAX_ATTEMPTS,
+    digestEnabled: true,
   };
   writeConfig(cfg);
   console.log(chalk.green(`memvc initialized:`));

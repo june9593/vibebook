@@ -50,5 +50,7 @@ export function createRunner(cfg: RunnerConfig): LlmRunner {
         run: (prompt, vars, opts) =>
           runGithubModels(renderPrompt(prompt, vars), cfg.runnerModel, opts ?? {}),
       };
+    case "github-action":
+      throw new Error("github-action runner is not implemented yet");
   }
 }

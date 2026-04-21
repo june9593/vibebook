@@ -20,10 +20,11 @@ const Schema = z.object({
   encrypt: z.boolean().default(false),
   salt: z.string(),          // base64 per-repo salt for scrypt
   deviceBranch: z.string().default(""),
-  runner: z.enum(["claude-cli", "anthropic-api", "github-models"]).default("claude-cli"),
+  runner: z.enum(["claude-cli", "anthropic-api", "github-models", "github-action"]).default("claude-cli"),
   runnerModel: z.string().default(""),
   threadingConcurrency: z.number().int().positive().default(DEFAULT_THREADING_CONCURRENCY),
   threadingMaxAttempts: z.number().int().positive().default(DEFAULT_THREADING_MAX_ATTEMPTS),
+  digestEnabled: z.boolean().default(true),
 });
 export type Config = z.infer<typeof Schema>;
 
