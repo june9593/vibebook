@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable, Writable } from "node:stream";
 
 describe("defaultLocalPath", () => {
   it("returns ./.memvc/repo under cwd", async () => {
@@ -131,5 +132,53 @@ describe("verifyRunner", () => {
     }));
     const m = await import("../../src/commands/init-wizard.js");
     expect(await m.verifyRunner("claude-cli")).toBe(false);
+  });
+});
+
+describe("runWizard end-to-end transcript", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("walks through all 7 questions and returns expected answers", async () => {
+    const lines = [
+      "git@github.com:you/repo.git",  // Q1 repo URL
+      "",                              // Q2 path → default
+      "y",                             // Q3 encrypt
+      "secret123",                     // Q4 passphrase
+      "secret123",                     // Q4 confirm
+      "y",                             // Q5 digest
+      "1",                             // Q6 runner = claude-cli
+      "claude-sonnet-4-6",             // Q7 model
+    ];
+    const stdin = new Readable({ read() {} }) as Readable & { isTTY?: boolean };
+    stdin.isTTY = true;
+    let i = 0;
+    const stdout = new Writable({
+      write(chunk, _enc, cb) {
+        const s = chunk.toString();
+        // Feed next line whenever readline writes a prompt ending with ": ".
+        if (s.endsWith(": ") && i < lines.length) {
+          const line = lines[i++]!;
+          setImmediate(() => stdin.push(line + "\n"));
+        }
+        cb();
+      },
+    }) as Writable & { isTTY?: boolean; columns?: number };
+    stdout.isTTY = true;
+    stdout.columns = 80;
+    vi.stubGlobal("process", { ...process, stdin, stdout });
+    vi.resetModules();
+    const m = await import("../../src/commands/init-wizard.js");
+    const { closePrompts } = await import("../../src/prompts.js");
+    const a = await m.runWizard();
+    closePrompts();
+    expect(a.repoUrl).toBe("git@github.com:you/repo.git");
+    expect(a.encrypt).toBe(true);
+    expect(a.passphraseEntered).toBe("secret123");
+    expect(a.digestEnabled).toBe(true);
+    expect(a.runner).toBe("claude-cli");
+    expect(a.runnerModel).toBe("claude-sonnet-4-6");
   });
 });

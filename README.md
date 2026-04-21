@@ -9,8 +9,22 @@ via a private Git repo. Manual, transparent, encryption-optional.
 
 ## Setup
 
-    memvc init git@github.com:you/your-memory-repo.git
-    # optional: --encrypt  (then export MEMVC_PASSPHRASE=...)
+Run the interactive wizard:
+
+    memvc init
+
+The wizard asks:
+1. **Repo URL** — your private memory repo (will be cloned if not present)
+2. **Local path** — defaults to `./.memvc/repo`
+3. **Encrypt?** — y/n; if y, asks for a passphrase saved to `~/.memvc/passphrase` (mode 0600)
+4. **Digest into a book?** — y/n
+5. **Runner** — local Claude CLI today; GitHub Action coming soon
+6. **Model** — blank for runner default
+7. **Verify** — checks `claude --version`; offers a real test call
+
+Flag mode (CI-friendly): pass any of `--local-path / --encrypt / --no-digest / --device / --passphrase` (or a positional `<repoUrl>`) and the wizard is bypassed.
+
+    memvc init git@github.com:you/your-memory-repo.git --encrypt --passphrase secret
 
 ## Daily use
 

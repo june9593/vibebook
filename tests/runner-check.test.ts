@@ -15,7 +15,7 @@ describe("checkBinary", () => {
   });
 
   it("returns ok:false on non-zero exit", async () => {
-    const r = await checkBinary("node", ["-e", "process.exit(7)"]);
+    const r = await checkBinary("node", ["-e", "process.exit(7)"], 30_000);
     expect(r.ok).toBe(false);
     expect(r.hint).toContain("exited with 7");
   });
