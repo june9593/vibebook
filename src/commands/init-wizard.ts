@@ -86,21 +86,14 @@ export async function runWizard(): Promise<WizardAnswers> {
   let runner: WizardAnswers["runner"] = "claude-cli";
   let runnerModel = "";
   if (digestEnabled) {
-    for (;;) {
-      runner = await promptChoice(
-        chalk.cyan("Q6") + " Runner",
-        [
-          { value: "claude-cli", label: "Local Claude CLI", description: "needs `claude` on PATH" },
-          { value: "github-action", label: "GitHub Action (coming soon)", description: "no local install; runs in CI" },
-        ],
-        0,
-      );
-      if (runner === "github-action") {
-        console.log(chalk.yellow("  GitHub Action runner is not implemented yet — please pick another."));
-        continue;
-      }
-      break;
-    }
+    runner = await promptChoice(
+      chalk.cyan("Q6") + " Runner",
+      [
+        { value: "claude-cli", label: "Local Claude CLI", description: "needs `claude` on PATH" },
+        { value: "github-action", label: "GitHub Action", description: "runs digest in CI via GitHub Models (free); see `memvc workflow init`" },
+      ],
+      0,
+    );
     runnerModel = await prompt(
       chalk.cyan("Q7") + " Model name (blank = runner default)",
       "",
@@ -187,6 +180,9 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
   }
   console.log(chalk.green("\nok memvc initialized"));
   console.log(chalk.gray(`  config: ~/.memvc/config.json`));
+  if (a.runner === "github-action") {
+    console.log(chalk.cyan("  next: run `memvc workflow init` to set up the GitHub Action that runs digest in CI"));
+  }
 }
 
 /** Top-level entry — composes wizard + verify + apply, with cleanup. */
