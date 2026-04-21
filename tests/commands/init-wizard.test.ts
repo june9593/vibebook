@@ -143,6 +143,7 @@ describe("runWizard end-to-end transcript", () => {
 
   it("walks through all 7 questions and returns expected answers", async () => {
     const lines = [
+      "y",                             // Q0 sync to remote
       "git@github.com:you/repo.git",  // Q1 repo URL
       "",                              // Q2 path → default
       "y",                             // Q3 encrypt
@@ -180,5 +181,39 @@ describe("runWizard end-to-end transcript", () => {
     expect(a.digestEnabled).toBe(true);
     expect(a.runner).toBe("claude-cli");
     expect(a.runnerModel).toBe("claude-sonnet-4-6");
+  });
+
+  it("local-only mode (Q0=n) skips repo URL + encryption questions", async () => {
+    const lines = [
+      "n",                              // Q0 sync to remote → no
+      "y",                              // Q5 digest
+      "",                               // Q7 model (Q6 auto since only one runner)
+    ];
+    const stdin = new Readable({ read() {} }) as Readable & { isTTY?: boolean };
+    stdin.isTTY = true;
+    let i = 0;
+    const stdout = new Writable({
+      write(chunk, _enc, cb) {
+        const s = chunk.toString();
+        if (s.endsWith(": ") && i < lines.length) {
+          const line = lines[i++]!;
+          setImmediate(() => stdin.push(line + "\n"));
+        }
+        cb();
+      },
+    }) as Writable & { isTTY?: boolean; columns?: number };
+    stdout.isTTY = true;
+    stdout.columns = 80;
+    vi.stubGlobal("process", { ...process, stdin, stdout });
+    vi.resetModules();
+    const m = await import("../../src/commands/init-wizard.js");
+    const { closePrompts } = await import("../../src/prompts.js");
+    const a = await m.runWizard();
+    closePrompts();
+    expect(a.repoUrl).toBe("");
+    expect(a.encrypt).toBe(false);
+    expect(a.passphraseEntered).toBeUndefined();
+    expect(a.digestEnabled).toBe(true);
+    expect(a.runner).toBe("claude-cli");
   });
 });

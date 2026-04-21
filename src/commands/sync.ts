@@ -169,6 +169,8 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
         console.log(chalk.yellow("Commit done, push failed or skipped."));
       }
     }
+  } else if (opts.push && !opts.repoUrl) {
+    console.log(chalk.gray("Local-only mode (no remote URL configured); skipping commit/push."));
   }
 
   // -------------------- Phases 3-7 (digest) + phase 8 (book push) --------------------

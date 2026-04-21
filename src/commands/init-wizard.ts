@@ -38,42 +38,55 @@ export function defaultLocalPath(): string {
 export async function runWizard(): Promise<WizardAnswers> {
   console.log(chalk.bold("\nmemvc init wizard\n"));
 
-  // Q1: repo URL
-  const repoUrl = await prompt(
-    chalk.cyan("Q1") + " Private git repo URL (e.g. git@github.com:you/work-memory.git)",
-  );
-  if (!repoUrl) throw new Error("repo URL is required");
-
-  // Q2: local path
-  const dflt = defaultLocalPath();
-  const localPath = await prompt(
-    chalk.cyan("Q2") + ` Where should the repo live locally?`,
-    dflt,
-  );
-
-  // Q3: encrypt
-  const encrypt = await promptYesNo(
-    chalk.cyan("Q3") + " Encrypt raw session files before commit?",
+  // Q0: sync to GitHub?
+  const syncToRemote = await promptYesNo(
+    chalk.cyan("Q0") + " Sync to a remote git repo (GitHub etc.)? Choose 'no' for local-only.",
     true,
   );
 
-  // Q4: passphrase (only if encrypt)
+  let repoUrl = "";
+  let localPath = defaultLocalPath();
+  let encrypt = false;
   let passphraseEntered: string | undefined;
-  if (encrypt) {
-    for (;;) {
-      const pp = await promptHidden(chalk.cyan("Q4") + " Passphrase (will be saved to ~/.memvc/passphrase, mode 0600)");
-      if (!pp) {
-        const skip = await promptYesNo("  Skip storing? You'll need to set MEMVC_PASSPHRASE before sync", false);
-        if (skip) break;
-        continue;
+
+  if (syncToRemote) {
+    // Q1: repo URL
+    repoUrl = await prompt(
+      chalk.cyan("Q1") + " Private git repo URL (e.g. git@github.com:you/work-memory.git)",
+    );
+    if (!repoUrl) throw new Error("repo URL is required");
+
+    // Q2: local path
+    localPath = await prompt(
+      chalk.cyan("Q2") + ` Where should the repo live locally?`,
+      localPath,
+    );
+
+    // Q3: encrypt
+    encrypt = await promptYesNo(
+      chalk.cyan("Q3") + " Encrypt raw session files before commit?",
+      true,
+    );
+
+    // Q4: passphrase (only if encrypt)
+    if (encrypt) {
+      for (;;) {
+        const pp = await promptHidden(chalk.cyan("Q4") + " Passphrase (will be saved to ~/.memvc/passphrase, mode 0600)");
+        if (!pp) {
+          const skip = await promptYesNo("  Skip storing? You'll need to set MEMVC_PASSPHRASE before sync", false);
+          if (skip) break;
+          continue;
+        }
+        const pp2 = await promptHidden("  Confirm passphrase");
+        if (pp === pp2) {
+          passphraseEntered = pp;
+          break;
+        }
+        console.log(chalk.yellow("  passphrases didn't match, try again"));
       }
-      const pp2 = await promptHidden("  Confirm passphrase");
-      if (pp === pp2) {
-        passphraseEntered = pp;
-        break;
-      }
-      console.log(chalk.yellow("  passphrases didn't match, try again"));
     }
+  } else {
+    console.log(chalk.gray("  local-only mode: no remote URL, no encryption, no push."));
   }
 
   // Q5: digest enabled
@@ -86,14 +99,19 @@ export async function runWizard(): Promise<WizardAnswers> {
   let runner: WizardAnswers["runner"] = "claude-cli";
   let runnerModel = "";
   if (digestEnabled) {
-    runner = await promptChoice(
-      chalk.cyan("Q6") + " Runner",
-      [
-        { value: "claude-cli", label: "Local Claude CLI", description: "needs `claude` on PATH" },
-        { value: "github-action", label: "GitHub Action", description: "runs digest in CI via GitHub Models (free); see `memvc workflow init`" },
-      ],
-      0,
-    );
+    const runnerOptions: { value: WizardAnswers["runner"]; label: string; description?: string }[] = [
+      { value: "claude-cli", label: "Local Claude CLI", description: "needs `claude` on PATH" },
+    ];
+    if (syncToRemote) {
+      runnerOptions.push({
+        value: "github-action",
+        label: "GitHub Action",
+        description: "runs digest in CI via GitHub Models (free); see `memvc workflow init`",
+      });
+    }
+    runner = runnerOptions.length === 1
+      ? runnerOptions[0]!.value
+      : await promptChoice(chalk.cyan("Q6") + " Runner", runnerOptions, 0);
     runnerModel = await prompt(
       chalk.cyan("Q7") + " Model name (blank = runner default)",
       "",
@@ -147,15 +165,29 @@ export async function verifyRunner(runner: string, model = ""): Promise<boolean>
  * separated so wizard logic stays unit-testable.
  */
 export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
-  const mat = await materializeRepoAtPath(a.localPath, a.repoUrl);
-  if (mat.kind === "existing" && mat.existingRemote && mat.existingRemote !== a.repoUrl) {
-    console.log(chalk.yellow(
-      `  warning: ${a.localPath} already has remote '${mat.existingRemote}', not '${a.repoUrl}'. Using existing.`,
-    ));
-  } else if (mat.kind === "cloned") {
-    console.log(chalk.gray(`  cloned ${a.repoUrl} -> ${a.localPath}`));
+  if (a.repoUrl) {
+    const mat = await materializeRepoAtPath(a.localPath, a.repoUrl);
+    if (mat.kind === "existing" && mat.existingRemote && mat.existingRemote !== a.repoUrl) {
+      console.log(chalk.yellow(
+        `  warning: ${a.localPath} already has remote '${mat.existingRemote}', not '${a.repoUrl}'. Using existing.`,
+      ));
+    } else if (mat.kind === "cloned") {
+      console.log(chalk.gray(`  cloned ${a.repoUrl} -> ${a.localPath}`));
+    } else {
+      console.log(chalk.gray(`  using existing repo at ${a.localPath}`));
+    }
   } else {
-    console.log(chalk.gray(`  using existing repo at ${a.localPath}`));
+    // Local-only mode: ensure the path exists as a plain git repo (no remote).
+    const { mkdirSync, existsSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { simpleGit } = await import("simple-git");
+    mkdirSync(a.localPath, { recursive: true });
+    if (!existsSync(join(a.localPath, ".git"))) {
+      await simpleGit(a.localPath).init();
+      console.log(chalk.gray(`  initialized local-only git repo at ${a.localPath}`));
+    } else {
+      console.log(chalk.gray(`  using existing repo at ${a.localPath}`));
+    }
   }
   if (a.encrypt && a.passphraseEntered) {
     writePassphraseFile(a.passphraseEntered);
@@ -180,6 +212,9 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
   }
   console.log(chalk.green("\nok memvc initialized"));
   console.log(chalk.gray(`  config: ~/.memvc/config.json`));
+  if (!a.repoUrl) {
+    console.log(chalk.cyan(`  local-only mode: sessions stay on this machine. To enable sync later, edit ~/.memvc/config.json and set "repoUrl".`));
+  }
   if (a.runner === "github-action") {
     console.log(chalk.cyan("  next: run `memvc workflow init` to set up the GitHub Action that runs digest in CI"));
   }
