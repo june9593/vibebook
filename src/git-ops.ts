@@ -86,15 +86,47 @@ export async function ensureDeviceBranch(git: SimpleGit, branch: string): Promis
   await git.raw(["rm", "-rf", "--cached", "--ignore-unmatch", "."]);
 }
 
-function pushWithProgress(cwd: string, branch: string): Promise<boolean> {
+export interface PushResult {
+  ok: boolean;
+  /** True iff stderr matched GitHub's push-protection / secret-scanning markers
+   *  (GH013 / "push protection"). Only meaningful when ok=false. */
+  secretBlocked: boolean;
+  /** Tail of stderr (last ~4KB), useful for surfacing the reason. */
+  stderrTail: string;
+}
+
+const SECRET_BLOCK_RE = /GH013|push protection|secret-scanning/i;
+
+function pushWithProgress(cwd: string, branch: string): Promise<PushResult> {
   return new Promise((resolve) => {
+    const errBuf: string[] = [];
+    let bufLen = 0;
     const p = spawn(
       "git",
       ["push", "--progress", "--set-upstream", "origin", branch],
-      { cwd, stdio: ["ignore", "inherit", "inherit"] },
+      { cwd, stdio: ["ignore", "inherit", "pipe"] },
     );
-    p.on("error", () => resolve(false));
-    p.on("close", (code) => resolve(code === 0));
+    p.stderr.on("data", (chunk: Buffer) => {
+      // Tee to both terminal (so live progress still shows) AND buffer (so we
+      // can scan for GitHub push-protection markers after exit).
+      process.stderr.write(chunk);
+      const s = chunk.toString();
+      errBuf.push(s);
+      bufLen += s.length;
+      if (bufLen > 8192) {
+        const drop = errBuf.shift();
+        if (drop) bufLen -= drop.length;
+      }
+    });
+    p.on("error", () => resolve({ ok: false, secretBlocked: false, stderrTail: errBuf.join("") }));
+    p.on("close", (code) => {
+      const tail = errBuf.join("");
+      resolve({
+        ok: code === 0,
+        secretBlocked: code !== 0 && SECRET_BLOCK_RE.test(tail),
+        stderrTail: tail.slice(-4096),
+      });
+    });
   });
 }
 
@@ -104,7 +136,7 @@ export async function commitAndPush(
   paths: string[],
   branch: string,
   onProgress?: (stage: string) => void,
-): Promise<{ committed: boolean; pushed: boolean }> {
+): Promise<{ committed: boolean; pushed: boolean; pushResult?: PushResult }> {
   if (paths.length === 0) return { committed: false, pushed: false };
   onProgress?.(`git add (${paths.length} paths)...`);
   await git.add(paths);
@@ -114,6 +146,6 @@ export async function commitAndPush(
   await git.commit(message);
   onProgress?.(`git push origin ${branch} (live progress below):`);
   const cwd = await git.revparse(["--show-toplevel"]).then((s) => s.trim());
-  const ok = await pushWithProgress(cwd, branch);
-  return { committed: true, pushed: ok };
+  const r = await pushWithProgress(cwd, branch);
+  return { committed: true, pushed: r.ok, pushResult: r };
 }

@@ -142,7 +142,33 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
       (stage) => console.log(chalk.gray(`  ${stage}`)),
     );
     committed = r.committed; pushed = r.pushed;
-    if (committed && !pushed) console.log(chalk.yellow("Commit done, push failed or skipped."));
+    if (committed && !pushed) {
+      if (r.pushResult?.secretBlocked) {
+        console.log(chalk.red(
+          "\n  Push blocked by GitHub secret-scanning (GH013). Your raw_sessions contain something that looks like a real secret (token, API key) — typically because past AI conversations included one verbatim.",
+        ));
+        console.log(chalk.cyan(
+          "  Tip: enable encryption to scrub secrets from future syncs — set `encrypt: true` in ~/.memvc/config.json, save a passphrase to ~/.memvc/passphrase, then delete raw_sessions/ + .memvc/index.json and re-sync.",
+        ));
+        console.log(chalk.gray(
+          "  Or unblock manually via the GitHub URL above (not recommended for real tokens).",
+        ));
+        const { promptYesNo, closePrompts } = await import("../prompts.js");
+        const cont = await promptYesNo("\n  Continue with digest phase? (you can `git push` manually later)", true);
+        closePrompts();
+        if (!cont) {
+          console.log(chalk.gray("Aborted."));
+          return {
+            newCount, skippedCount, pathsWritten,
+            committed, pushed,
+            digestStatus: "not-attempted",
+            digestCommitted: false, digestPushed: false,
+          };
+        }
+      } else {
+        console.log(chalk.yellow("Commit done, push failed or skipped."));
+      }
+    }
   }
 
   // -------------------- Phases 3-7 (digest) + phase 8 (book push) --------------------
