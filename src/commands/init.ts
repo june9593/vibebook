@@ -1,4 +1,4 @@
-import { writeConfig, freshSaltBase64, DEFAULT_THREADING_CONCURRENCY, DEFAULT_THREADING_MAX_ATTEMPTS, type Config } from "../config.js";
+import { writeConfig, writeRepoSaltFile, freshSaltBase64, DEFAULT_THREADING_CONCURRENCY, DEFAULT_THREADING_MAX_ATTEMPTS, type Config } from "../config.js";
 import { materializeRepoAtPath } from "../git-ops.js";
 import { writePassphraseFile } from "../passphrase-store.js";
 import { deviceBranchFromHostname } from "../device.js";
@@ -57,6 +57,9 @@ export async function initCmd(opts: InitOptions): Promise<void> {
     digestEnabled: opts.digestEnabled !== false,
   };
   writeConfig(cfg);
+  if (cfg.encrypt) {
+    writeRepoSaltFile(cfg.repoPath, cfg.salt);
+  }
   console.log(chalk.green(`memvc initialized:`));
   console.log(`  repo: ${localPath}`);
   console.log(`  remote: ${opts.repoUrl}`);

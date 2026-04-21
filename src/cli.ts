@@ -44,6 +44,18 @@ export async function run(argv: string[]) {
       await digestCmd({ redo: opts.redo, reset: opts.reset });
     });
   program
+    .command("workflow")
+    .description("Manage the GitHub Action that runs digest in CI")
+    .addCommand(
+      new Command("init")
+        .description("Write .github/workflows/memvc-digest.yml into the configured memvc repo")
+        .option("--force", "overwrite if file already exists")
+        .action(async (opts: { force?: boolean }) => {
+          const { workflowInitCmd } = await import("./commands/workflow.js");
+          await workflowInitCmd({ force: opts.force });
+        }),
+    );
+  program
     .command("list")
     .description("List synced sessions")
     .option("--tool <name>", "filter by claude|copilot")

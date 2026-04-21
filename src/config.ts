@@ -44,6 +44,17 @@ export function freshSaltBase64(): string {
   return randomBytes(16).toString("base64");
 }
 
+/**
+ * Write `<repoPath>/.memvc/repo-salt.json` so the GitHub Action workflow can
+ * read the salt without having access to `~/.memvc/config.json`. The salt is
+ * not sensitive — security relies on the passphrase. Safe to commit.
+ */
+export function writeRepoSaltFile(repoPath: string, salt: string): void {
+  const dir = join(repoPath, ".memvc");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "repo-salt.json"), JSON.stringify({ salt }, null, 2) + "\n");
+}
+
 export function getPassphrase(): string {
   const env = process.env.MEMVC_PASSPHRASE;
   if (env) return env;
