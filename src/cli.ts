@@ -4,14 +4,26 @@ export async function run(argv: string[]) {
   const program = new Command();
   program.name("memvc").description("Memory of vibe coding").version("0.1.0");
   program
-    .command("init <repoUrl>")
-    .description("Initialize memvc with a private repo")
-    .option("--local-path <path>", "local checkout path (default ~/memvc-repo)")
+    .command("init [repoUrl]")
+    .description("Initialize memvc. Run with no arguments for the interactive wizard, or pass a repoUrl + flags for non-interactive setup.")
+    .option("--local-path <path>", "local checkout path (default ./.memvc/repo)")
     .option("--encrypt", "encrypt raw files before commit")
+    .option("--no-digest", "skip the digest pipeline (raw push only)")
     .option("--device <name>", "device branch name (default: sanitized os.hostname())")
-    .action(async (repoUrl: string, opts: { localPath?: string; encrypt?: boolean; device?: string }) => {
+    .option("--passphrase <pp>", "save passphrase to ~/.memvc/passphrase (only with --encrypt)")
+    .action(async (
+      repoUrl: string | undefined,
+      opts: { localPath?: string; encrypt?: boolean; digest?: boolean; device?: string; passphrase?: string },
+    ) => {
       const { initCmd } = await import("./commands/init.js");
-      await initCmd({ repoUrl, localPath: opts.localPath, encrypt: opts.encrypt, device: opts.device });
+      await initCmd({
+        repoUrl,
+        localPath: opts.localPath,
+        encrypt: opts.encrypt,
+        digestEnabled: opts.digest !== false,
+        device: opts.device,
+        passphrase: opts.passphrase,
+      });
     });
   program
     .command("sync")

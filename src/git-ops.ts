@@ -1,14 +1,57 @@
 import { simpleGit, SimpleGit } from "simple-git";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 
-export async function ensureRepo(localPath: string, repoUrl: string): Promise<SimpleGit> {
+export interface MaterializeResult {
+  /** "cloned" = brand-new clone; "existing" = used existing checkout;
+   *  "init" = empty dir made into a git repo with origin set. */
+  kind: "cloned" | "existing" | "init";
+  /** When "existing", this is the URL of `origin` already in that repo —
+   *  may differ from repoUrl, in which case caller should warn the user. */
+  existingRemote?: string;
+}
+
+/**
+ * Make sure `localPath` contains the repo at `repoUrl`.
+ *
+ * - If `localPath` doesn't exist OR exists-and-empty → `git clone repoUrl
+ *   localPath`. Returns kind:"cloned".
+ * - If `localPath` exists and contains `.git` → reuse. Returns kind:"existing"
+ *   with `existingRemote` so the wizard can warn on URL mismatch. Does NOT
+ *   change the existing remote.
+ * - If `localPath` exists, non-empty, no `.git` → throw with a friendly
+ *   message; refuse to scribble inside an unrelated dir.
+ */
+export async function materializeRepoAtPath(
+  localPath: string,
+  repoUrl: string,
+): Promise<MaterializeResult> {
   if (!existsSync(localPath)) {
     mkdirSync(localPath, { recursive: true });
-    const git = simpleGit();
-    await git.clone(repoUrl, localPath);
+    await simpleGit().clone(repoUrl, localPath);
+    return { kind: "cloned" };
   }
+  const entries = readdirSync(localPath);
+  if (entries.length === 0) {
+    await simpleGit().clone(repoUrl, localPath);
+    return { kind: "cloned" };
+  }
+  if (entries.includes(".git")) {
+    const git = simpleGit(localPath);
+    let remote = "";
+    try {
+      remote = (await git.getConfig("remote.origin.url")).value ?? "";
+    } catch { /* no remote configured */ }
+    return { kind: "existing", existingRemote: remote };
+  }
+  throw new Error(
+    `${localPath} is not empty and is not a git repo. Pick another path or empty this one first.`,
+  );
+}
+
+export async function ensureRepo(localPath: string, repoUrl: string): Promise<SimpleGit> {
+  await materializeRepoAtPath(localPath, repoUrl);
   const git = simpleGit(localPath);
   if (!existsSync(join(localPath, ".git"))) {
     await git.init();

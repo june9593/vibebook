@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
+import { readPassphraseFile } from "./passphrase-store.js";
 
 const CONFIG_DIR = join(homedir(), ".memvc");
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
@@ -19,10 +20,11 @@ const Schema = z.object({
   encrypt: z.boolean().default(false),
   salt: z.string(),          // base64 per-repo salt for scrypt
   deviceBranch: z.string().default(""),
-  runner: z.enum(["claude-cli", "anthropic-api", "github-models"]).default("claude-cli"),
+  runner: z.enum(["claude-cli", "anthropic-api", "github-models", "github-action"]).default("claude-cli"),
   runnerModel: z.string().default(""),
   threadingConcurrency: z.number().int().positive().default(DEFAULT_THREADING_CONCURRENCY),
   threadingMaxAttempts: z.number().int().positive().default(DEFAULT_THREADING_MAX_ATTEMPTS),
+  digestEnabled: z.boolean().default(true),
 });
 export type Config = z.infer<typeof Schema>;
 
@@ -43,7 +45,11 @@ export function freshSaltBase64(): string {
 }
 
 export function getPassphrase(): string {
-  const p = process.env.MEMVC_PASSPHRASE;
-  if (!p) throw new Error("encryption is on — set MEMVC_PASSPHRASE env var");
-  return p;
+  const env = process.env.MEMVC_PASSPHRASE;
+  if (env) return env;
+  const file = readPassphraseFile();
+  if (file) return file;
+  throw new Error(
+    "encryption is on — set MEMVC_PASSPHRASE env var, or save a passphrase via `memvc init`",
+  );
 }
