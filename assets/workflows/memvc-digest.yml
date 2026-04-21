@@ -64,6 +64,11 @@ jobs:
           # Salt is written by `memvc init` to <repoPath>/.memvc/repo-salt.json
           # and committed (the salt is not sensitive — security relies on the
           # passphrase). jq is preinstalled on ubuntu-latest GH runners.
+          if [ "$ENCRYPT" = "true" ] && [ ! -f "$REPO_PATH/.memvc/repo-salt.json" ]; then
+            echo "ERROR: encryption is on (MEMVC_PASSPHRASE secret set) but $REPO_PATH/.memvc/repo-salt.json is missing."
+            echo "       Run \`memvc init\` locally to regenerate it, then commit and push .memvc/repo-salt.json."
+            exit 1
+          fi
           SALT="$(jq -r .salt $REPO_PATH/.memvc/repo-salt.json 2>/dev/null || echo placeholder)"
           cat > ~/.memvc/config.json <<JSON
           {
