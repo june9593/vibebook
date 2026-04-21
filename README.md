@@ -61,3 +61,24 @@ Override the auto-derived name:
 Existing repos initialized before v0.2 will auto-migrate on the next `memvc sync`:
 the local `main` branch is renamed to `<device>`, and a fresh unborn `main` is left
 for you to use as a merge target.
+
+## Run digest in GitHub Actions
+
+If you'd rather not burn local Claude credits / cycles, memvc can run the digest pipeline inside a GitHub Action using **GitHub Models** (free for personal accounts) as the LLM.
+
+```bash
+# One-time setup inside your memvc repo:
+memvc workflow init
+cd ~/memvc-repo  # or wherever your memvc repo lives
+git add .github/workflows/memvc-digest.yml
+git commit -m "add memvc digest workflow"
+git push
+```
+
+If your config has `encrypt: true`, also set the **MEMVC_PASSPHRASE** repo secret (Settings → Secrets and variables → Actions → New repository secret). The salt is auto-written to `.memvc/repo-salt.json` during `memvc init` and is safe to commit (security relies on the passphrase, not the salt).
+
+The workflow runs on:
+- Every `push` to a device branch (default patterns: `*.lan`, `*-pro`, `*-mbp`, `*-MBP*`, `*-pc`, `*-laptop`). Edit the workflow if your hostname doesn't match.
+- Manual `workflow_dispatch` from the **Actions** tab.
+
+It uses model `openai/gpt-4o-mini` by default — change `runnerModel` in the workflow if you want a different one (see [GitHub Models catalog](https://github.com/marketplace?type=models)).
