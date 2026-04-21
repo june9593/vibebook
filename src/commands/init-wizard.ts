@@ -183,8 +183,14 @@ export async function runInitWizard(): Promise<void> {
   }
   try {
     const answers = await runWizard();
-    if (answers.digestEnabled) await verifyRunner(answers.runner);
+    let runnerOk = true;
+    if (answers.digestEnabled) runnerOk = await verifyRunner(answers.runner);
     await applyWizardAnswers(answers);
+    if (answers.digestEnabled && !runnerOk) {
+      console.log(chalk.yellow(
+        `  note: digest will fail until '${answers.runner}' is installed; install it then run \`memvc sync\`.`,
+      ));
+    }
   } finally {
     closePrompts();
   }
