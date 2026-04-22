@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { readPassphraseFile } from "./passphrase-store.js";
 
-const CONFIG_DIR = join(homedir(), ".memvc");
+const CONFIG_DIR = join(homedir(), ".vibebook");
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 
 /** Default cap on concurrent runner calls during the threading phase. */
@@ -31,7 +31,7 @@ export type Config = z.infer<typeof Schema>;
 export function configExists(): boolean { return existsSync(CONFIG_PATH); }
 
 export function readConfig(): Config {
-  if (!existsSync(CONFIG_PATH)) throw new Error("memvc not initialized. Run `memvc init <repoUrl>`.");
+  if (!existsSync(CONFIG_PATH)) throw new Error("vibebook not initialized. Run `vibebook init <repoUrl>`.");
   return Schema.parse(JSON.parse(readFileSync(CONFIG_PATH, "utf8")));
 }
 
@@ -46,8 +46,13 @@ export function freshSaltBase64(): string {
 
 /**
  * Write `<repoPath>/.memvc/repo-salt.json` so the GitHub Action workflow can
- * read the salt without having access to `~/.memvc/config.json`. The salt is
- * not sensitive — security relies on the passphrase. Safe to commit.
+ * read the salt without having access to `~/.vibebook/config.json`. The salt
+ * is not sensitive — security relies on the passphrase. Safe to commit.
+ *
+ * NOTE: the in-repo data dir is intentionally still `.memvc/` (not `.vibebook/`)
+ * for backwards compatibility with existing user memory repos. Renaming would
+ * break every previously-initialized `<repoPath>/.memvc/{index,repo-salt,index.book}.json`.
+ * Only the user-home config dir was renamed (~/.memvc → ~/.vibebook).
  */
 export function writeRepoSaltFile(repoPath: string, salt: string): void {
   const dir = join(repoPath, ".memvc");
@@ -56,11 +61,11 @@ export function writeRepoSaltFile(repoPath: string, salt: string): void {
 }
 
 export function getPassphrase(): string {
-  const env = process.env.MEMVC_PASSPHRASE;
+  const env = process.env.VIBEBOOK_PASSPHRASE;
   if (env) return env;
   const file = readPassphraseFile();
   if (file) return file;
   throw new Error(
-    "encryption is on — set MEMVC_PASSPHRASE env var, or save a passphrase via `memvc init`",
+    "encryption is on — set VIBEBOOK_PASSPHRASE env var, or save a passphrase via `vibebook init`",
   );
 }

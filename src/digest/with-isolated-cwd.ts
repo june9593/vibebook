@@ -19,7 +19,7 @@ export async function withIsolatedCwd<T>(
   runner: LlmRunner,
   callback: (wrappedRunner: LlmRunner) => Promise<T>,
 ): Promise<T> {
-  const isolatedCwd = mkdtempSync(join(tmpdir(), "memvc-claude-"));
+  const isolatedCwd = mkdtempSync(join(tmpdir(), "vibebook-claude-"));
   const wrappedRunner: LlmRunner = {
     run: (prompt, vars, opts = {}) => runner.run(prompt, vars, { ...opts, cwd: isolatedCwd }),
   };
@@ -56,8 +56,8 @@ export async function withIsolatedCwd<T>(
  * Mirrors Claude CLI's directory-naming scheme for ~/.claude/projects/<X>/.
  *
  * From observation, Claude CLI uses the absolute cwd path with `/` replaced
- * by `-` (so `/var/folders/.../T/memvc-claude-AbCdEf` becomes
- * `-var-folders-...-T-memvc-claude-AbCdEf`). If this turns out to be wrong on
+ * by `-` (so `/var/folders/.../T/vibebook-claude-AbCdEf` becomes
+ * `-var-folders-...-T-vibebook-claude-AbCdEf`). If this turns out to be wrong on
  * a future Claude CLI version, the cleanup just no-ops (existsSync returns
  * false), which is the safe failure mode.
  *

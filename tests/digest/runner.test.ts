@@ -30,9 +30,9 @@ describe("anthropic-api runner stub", () => {
 describe("github-models runner stub", () => {
   it("returns ok:false with a clear error when GITHUB_TOKEN is missing", async () => {
     const prevToken = process.env.GITHUB_TOKEN;
-    const prevAlt = process.env.MEMVC_GITHUB_TOKEN;
+    const prevAlt = process.env.VIBEBOOK_GITHUB_TOKEN;
     delete process.env.GITHUB_TOKEN;
-    delete process.env.MEMVC_GITHUB_TOKEN;
+    delete process.env.VIBEBOOK_GITHUB_TOKEN;
     try {
       const r = createRunner({ runner: "github-models", runnerModel: "" });
       const res = await r.run("hello", {});
@@ -40,7 +40,7 @@ describe("github-models runner stub", () => {
       if (!res.ok) expect(res.error).toMatch(/no GITHUB_TOKEN/i);
     } finally {
       if (prevToken !== undefined) process.env.GITHUB_TOKEN = prevToken;
-      if (prevAlt !== undefined) process.env.MEMVC_GITHUB_TOKEN = prevAlt;
+      if (prevAlt !== undefined) process.env.VIBEBOOK_GITHUB_TOKEN = prevAlt;
     }
   });
 });
@@ -165,19 +165,19 @@ describe("createRunner — github-action dispatch", () => {
     vi.unstubAllEnvs();
   });
 
-  it("throws when not in CI (MEMVC_CI != '1')", () => {
+  it("throws when not in CI (VIBEBOOK_CI != '1')", () => {
     expect(() => createRunner({ runner: "github-action", runnerModel: "" }))
-      .toThrow(/MEMVC_CI=1/);
+      .toThrow(/VIBEBOOK_CI=1/);
   });
 
-  it("returns a runner when MEMVC_CI='1'", () => {
-    vi.stubEnv("MEMVC_CI", "1");
+  it("returns a runner when VIBEBOOK_CI='1'", () => {
+    vi.stubEnv("VIBEBOOK_CI", "1");
     const r = createRunner({ runner: "github-action", runnerModel: "openai/gpt-4o-mini" });
     expect(typeof r.run).toBe("function");
   });
 
   it("dispatches to github-models with rendered prompt", async () => {
-    vi.stubEnv("MEMVC_CI", "1");
+    vi.stubEnv("VIBEBOOK_CI", "1");
     vi.stubEnv("GITHUB_TOKEN", "tok");
     const captured: { url?: string; body?: string } = {};
     const origFetch = globalThis.fetch;

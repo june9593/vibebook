@@ -20,9 +20,9 @@ export class ClaudeCodeAdapter implements SourceAdapter {
       for (const e of entries) {
         const p = join(dir, e.name);
         if (e.isDirectory()) {
-          // Skip our own scratch dirs and system tmpdirs — see isMemvcOrTmpProjectDir.
+          // Skip our own scratch dirs and system tmpdirs — see isVibebookOrTmpProjectDir.
           // We only filter at the top level (entries directly under ~/.claude/projects/).
-          if (dir === this.root && isMemvcOrTmpProjectDir(e.name)) continue;
+          if (dir === this.root && isVibebookOrTmpProjectDir(e.name)) continue;
           // Skip Claude Code's own subagent transcript dirs at any depth.
           // These appear as ~/.claude/projects/<proj>/<sessionId>/subagents/agent-*.jsonl
           // and contain agentic prompt boilerplate ("You are implementing Task X")
@@ -48,14 +48,14 @@ export class ClaudeCodeAdapter implements SourceAdapter {
 }
 
 /**
- * Skip Claude project directories that correspond to memvc's own scratch
+ * Skip Claude project directories that correspond to vibebook's own scratch
  * subprocesses. We deliberately do NOT filter by tmpdir-prefix alone —
  * developers may legitimately run `claude` in /tmp/experiment etc., and we
- * shouldn't silently drop their work. We require the `-memvc-claude-` substring
- * (which ONLY memvc-spawned cwds contain) to confirm provenance.
+ * shouldn't silently drop their work. We require the `-vibebook-claude-` substring
+ * (which ONLY vibebook-spawned cwds contain) to confirm provenance.
  */
-function isMemvcOrTmpProjectDir(name: string): boolean {
-  return name.includes("-memvc-claude-");
+function isVibebookOrTmpProjectDir(name: string): boolean {
+  return name.includes("-vibebook-claude-");
 }
 
 function parseClaudeJsonl(sourcePath: string, content: string): NormalizedSession {

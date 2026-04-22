@@ -100,9 +100,9 @@ describe("runGithubModels", () => {
     if (!r.ok) expect(r.error).toContain("timeout");
   });
 
-  it("falls back to MEMVC_GITHUB_TOKEN when GITHUB_TOKEN missing", async () => {
+  it("falls back to VIBEBOOK_GITHUB_TOKEN when GITHUB_TOKEN missing", async () => {
     vi.unstubAllEnvs();
-    vi.stubEnv("MEMVC_GITHUB_TOKEN", "fallback-tok");
+    vi.stubEnv("VIBEBOOK_GITHUB_TOKEN", "fallback-tok");
     mockFetch(() => new Response(
       JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
       { status: 200 },

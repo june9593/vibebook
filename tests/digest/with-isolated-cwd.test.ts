@@ -15,7 +15,7 @@ describe("withIsolatedCwd", () => {
     await withIsolatedCwd(runner, async (wrapped) => {
       await wrapped.run("p", {}, { outputFormat: "text" });
     });
-    expect(captured).toMatch(/memvc-claude-/);
+    expect(captured).toMatch(/vibebook-claude-/);
   });
 
   it("cleans up the tmp cwd after callback resolves", async () => {
@@ -46,19 +46,19 @@ describe("withIsolatedCwd", () => {
     });
     expect(captured.outputFormat).toBe("json");
     expect(captured.timeoutMs).toBe(5000);
-    expect(captured.cwd).toMatch(/memvc-claude-/);
+    expect(captured.cwd).toMatch(/vibebook-claude-/);
   });
 
   it("claudeProjectHash mirrors slash-replacement scheme", () => {
-    expect(_claudeProjectHashForTests("/var/folders/x/T/memvc-claude-Ab")).toBe(
-      "-var-folders-x-T-memvc-claude-Ab",
+    expect(_claudeProjectHashForTests("/var/folders/x/T/vibebook-claude-Ab")).toBe(
+      "-var-folders-x-T-vibebook-claude-Ab",
     );
   });
 
   it("claudeProjectHash for a /private/var/folders path produces a -private-var-folders-... hash on macOS-style realpath", () => {
     // Simulate what realpath would have returned for an unresolved /var path.
-    expect(_claudeProjectHashForTests("/private/var/folders/zm/x/T/memvc-claude-Ab")).toBe(
-      "-private-var-folders-zm-x-T-memvc-claude-Ab",
+    expect(_claudeProjectHashForTests("/private/var/folders/zm/x/T/vibebook-claude-Ab")).toBe(
+      "-private-var-folders-zm-x-T-vibebook-claude-Ab",
     );
   });
 });

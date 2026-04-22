@@ -2,15 +2,15 @@ import { Command } from "commander";
 
 export async function run(argv: string[]) {
   const program = new Command();
-  program.name("memvc").description("Memory of vibe coding").version("0.1.0");
+  program.name("vibebook").description("Vibe coding memory book").version("0.1.0");
   program
     .command("init [repoUrl]")
-    .description("Initialize memvc. Run with no arguments for the interactive wizard, or pass a repoUrl + flags for non-interactive setup.")
+    .description("Initialize vibebook. Run with no arguments for the interactive wizard, or pass a repoUrl + flags for non-interactive setup.")
     .option("--local-path <path>", "local checkout path (default ./.memvc/repo)")
     .option("--encrypt", "encrypt raw files before commit")
     .option("--no-digest", "skip the digest pipeline (raw push only)")
     .option("--device <name>", "device branch name (default: sanitized os.hostname())")
-    .option("--passphrase <pp>", "save passphrase to ~/.memvc/passphrase (only with --encrypt)")
+    .option("--passphrase <pp>", "save passphrase to ~/.vibebook/passphrase (only with --encrypt)")
     .action(async (
       repoUrl: string | undefined,
       opts: { localPath?: string; encrypt?: boolean; digest?: boolean; device?: string; passphrase?: string },
@@ -48,7 +48,7 @@ export async function run(argv: string[]) {
     .description("Manage the GitHub Action that runs digest in CI")
     .addCommand(
       new Command("init")
-        .description("Write .github/workflows/memvc-digest.yml into the configured memvc repo")
+        .description("Write .github/workflows/vibebook-digest.yml into the configured vibebook repo")
         .option("--force", "overwrite if file already exists")
         .action(async (opts: { force?: boolean }) => {
           const { workflowInitCmd } = await import("./commands/workflow.js");

@@ -14,21 +14,21 @@ import { readConfig } from "../config.js";
 function templatePath(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    resolve(here, "..", "..", "assets", "workflows", "memvc-digest.yml"),         // src/commands/
-    resolve(here, "..", "..", "..", "assets", "workflows", "memvc-digest.yml"),   // dist/src/commands/
-    resolve(here, "..", "..", "..", "..", "assets", "workflows", "memvc-digest.yml"),
+    resolve(here, "..", "..", "assets", "workflows", "vibebook-digest.yml"),         // src/commands/
+    resolve(here, "..", "..", "..", "assets", "workflows", "vibebook-digest.yml"),   // dist/src/commands/
+    resolve(here, "..", "..", "..", "..", "assets", "workflows", "vibebook-digest.yml"),
   ];
   for (const c of candidates) {
     if (existsSync(c)) return c;
   }
   throw new Error(
-    `memvc workflow template not found. Tried:\n  ${candidates.join("\n  ")}\nIf you installed memvc from npm, please file an issue — the assets/ dir wasn't bundled.`,
+    `vibebook workflow template not found. Tried:\n  ${candidates.join("\n  ")}\nIf you installed vibebook from npm, please file an issue — the assets/ dir wasn't bundled.`,
   );
 }
 
 export async function workflowInitCmd(opts: { force?: boolean } = {}): Promise<void> {
   const cfg = readConfig();
-  const target = join(cfg.repoPath, ".github", "workflows", "memvc-digest.yml");
+  const target = join(cfg.repoPath, ".github", "workflows", "vibebook-digest.yml");
   if (existsSync(target) && !opts.force) {
     console.log(chalk.yellow(`workflow already exists: ${target}`));
     console.log(chalk.gray("  re-run with --force to overwrite"));
@@ -40,11 +40,11 @@ export async function workflowInitCmd(opts: { force?: boolean } = {}): Promise<v
   console.log(chalk.green(`workflow written: ${target}`));
   console.log(chalk.gray("\nNext steps:"));
   console.log(chalk.gray(`  1. cd ${cfg.repoPath}`));
-  console.log(chalk.gray("  2. git add .github/workflows/memvc-digest.yml && git commit -m 'add memvc digest workflow' && git push"));
+  console.log(chalk.gray("  2. git add .github/workflows/vibebook-digest.yml && git commit -m 'add vibebook digest workflow' && git push"));
   if (cfg.encrypt) {
-    console.log(chalk.cyan("  3. Set repo secret MEMVC_PASSPHRASE in GitHub Settings -> Secrets and variables -> Actions -> 'New repository secret'"));
+    console.log(chalk.cyan("  3. Set repo secret VIBEBOOK_PASSPHRASE in GitHub Settings -> Secrets and variables -> Actions -> 'New repository secret'"));
   } else {
     console.log(chalk.gray("  3. (encryption is off; no secret needed - but anyone with repo access can read raw_sessions)"));
   }
-  console.log(chalk.gray("  4. Trigger: push a device branch, OR run from the Actions tab -> 'memvc digest' -> 'Run workflow'"));
+  console.log(chalk.gray("  4. Trigger: push a device branch, OR run from the Actions tab -> 'vibebook digest' -> 'Run workflow'"));
 }
