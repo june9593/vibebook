@@ -2,5 +2,7 @@ node_modules
 dist
 .memvc-local
 *.log
+*.tgz
 .DS_Store
-.claude/settings.local.json
+.claude/
+tmp/

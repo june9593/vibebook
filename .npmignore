@@ -1,0 +1,19 @@
+# Belt-and-suspenders: package.json `files` is the primary allowlist
+# (only dist/, assets/, README.md, LICENSE go to npm). This file blocks
+# common offenders if `files` is ever loosened or removed.
+.claude/
+.github/
+docs/
+tests/
+plans/
+tmp/
+*.tgz
+*.log
+.DS_Store
+src/
+bin/
+tsconfig.json
+vitest.config.ts
+.gitignore
+.npmignore
+.memvc-local/
