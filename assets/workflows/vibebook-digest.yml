@@ -97,6 +97,14 @@ jobs:
             chmod 600 ~/.vibebook/passphrase
           fi
 
+      - name: Configure git identity
+        # Required by `vibebook digest` (which makes a commit when the digest
+        # produces changes) AND by the final `git push` step. Set once here
+        # so any commit-producing step downstream just works.
+        run: |
+          git config user.name  "vibebook-bot"
+          git config user.email "vibebook-bot@users.noreply.github.com"
+
       - name: Run digest
         env:
           VIBEBOOK_CI: "1"
@@ -104,7 +112,4 @@ jobs:
         run: vibebook digest --redo
 
       - name: Push book commit
-        run: |
-          git config user.name  "vibebook-bot"
-          git config user.email "vibebook-bot@users.noreply.github.com"
-          git push origin HEAD:${{ inputs.branch || github.ref_name }}
+        run: git push origin HEAD:${{ inputs.branch || github.ref_name }}
