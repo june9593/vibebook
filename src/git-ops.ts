@@ -149,3 +149,61 @@ export async function commitAndPush(
   const r = await pushWithProgress(cwd, branch);
   return { committed: true, pushed: r.ok, pushResult: r };
 }
+
+/**
+ * Bring the local device branch in sync with origin before we try to push,
+ * so the GitHub Action's auto-commits don't cause non-fast-forward push
+ * failures on the next `vibebook sync` / `digest` run.
+ *
+ * Sequence:
+ *   1. fetch origin
+ *   2. if no remote tracking ref exists → skip (fresh branch, nothing to pull)
+ *   3. try `pull --rebase --autostash` — handles both fast-forward and
+ *      diverged-history cases, and auto-stashes any unstaged digest output
+ *      sitting in the working tree
+ *   4. on rebase conflict: abort cleanly and throw a friendly error pointing
+ *      the user at the repo path. We deliberately do NOT try to auto-resolve
+ *      (digest output + rebased remote changes are too risky to merge blindly)
+ *
+ * Caller is expected to handle the thrown error — surface the path to the
+ * user and skip push for this run.
+ */
+export async function fastForwardBranch(
+  git: SimpleGit,
+  branch: string,
+  onProgress?: (stage: string) => void,
+): Promise<{ pulled: boolean; reason?: "no-tracking" | "no-remote" }> {
+  let hasRemote = false;
+  try {
+    const remotes = await git.getRemotes(false);
+    hasRemote = remotes.some((r) => r.name === "origin");
+  } catch { /* ignore */ }
+  if (!hasRemote) return { pulled: false, reason: "no-remote" };
+
+  onProgress?.(`git fetch origin...`);
+  try { await git.fetch("origin", branch); } catch { /* upstream branch may not exist yet */ }
+
+  // Check whether origin/<branch> ref exists locally after the fetch.
+  let hasUpstream = false;
+  try {
+    const refs = await git.branch(["-r"]);
+    hasUpstream = refs.all.includes(`origin/${branch}`);
+  } catch { /* ignore */ }
+  if (!hasUpstream) return { pulled: false, reason: "no-tracking" };
+
+  onProgress?.(`git pull --rebase --autostash origin ${branch}...`);
+  try {
+    await git.raw(["pull", "--rebase", "--autostash", "origin", branch]);
+    return { pulled: true };
+  } catch (err) {
+    // Rebase conflict (or autostash-pop conflict). Clean up so we leave the
+    // working tree in a sane state, then throw with actionable guidance.
+    try { await git.raw(["rebase", "--abort"]); } catch { /* not in rebase */ }
+    try { await git.raw(["stash", "pop"]); } catch { /* nothing to pop */ }
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Could not fast-forward / rebase '${branch}' onto origin/${branch}. ` +
+      `Resolve manually in the repo, then re-run. Original error:\n${msg}`,
+    );
+  }
+}

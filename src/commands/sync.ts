@@ -11,7 +11,7 @@ import { writeSession } from "../writer.js";
 import { deriveKey, encrypt } from "../crypto.js";
 import { readConfig, writeConfig, writeRepoSaltFile, getPassphrase, DEFAULT_THREADING_CONCURRENCY, DEFAULT_THREADING_MAX_ATTEMPTS, type Config } from "../config.js";
 import { deviceBranchFromHostname } from "../device.js";
-import { ensureRepo, commitAndPush, ensureDeviceBranch } from "../git-ops.js";
+import { ensureRepo, commitAndPush, ensureDeviceBranch, fastForwardBranch } from "../git-ops.js";
 import { migrateLegacyMainToDevice, migrateLegacyDataDir, migratedDataDirPaths } from "../migrate.js";
 import { loadBookIndex, saveBookIndex } from "../digest/book-index.js";
 import { createRunner } from "../digest/runner.js";
@@ -157,6 +157,26 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     try { await git.fetch(); } catch { /* remote may be empty / offline */ }
     console.log(chalk.gray(`Ensuring branch '${opts.deviceBranch}' is checked out...`));
     await ensureDeviceBranch(git, opts.deviceBranch);
+    // Pull --rebase --autostash before committing, so CI's auto-commits on
+    // origin/<device> don't cause non-fast-forward push failures.
+    try {
+      const ff = await fastForwardBranch(git, opts.deviceBranch, (s) => console.log(chalk.gray(`  ${s}`)));
+      if (!ff.pulled && ff.reason === "no-tracking") {
+        console.log(chalk.gray(`  no remote ${opts.deviceBranch} yet — first push will create it`));
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(chalk.red(`! could not sync local branch with origin: ${msg}`));
+      console.log(chalk.cyan(`  Skipping push. Resolve in ${opts.repoPath} and re-run \`vibebook sync\`.`));
+      // Bail before commit — we don't want to leave an orphaned local commit
+      // that the user can't push.
+      return {
+        newCount, skippedCount, pathsWritten,
+        committed: false, pushed: false,
+        digestStatus: "not-attempted",
+        digestCommitted: false, digestPushed: false,
+      };
+    }
     const all = [...pathsWritten, indexPath];
     if (saltJustWritten) all.push(saltRelPath);
     if (dataDirMig.migrated && dataDirMig.viaGit) {

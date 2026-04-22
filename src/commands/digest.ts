@@ -4,7 +4,7 @@ import { rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { getPassphrase, type Config } from "../config.js";
 import { readConfigWithMigration } from "./sync.js";
-import { ensureRepo, commitAndPush, ensureDeviceBranch } from "../git-ops.js";
+import { ensureRepo, commitAndPush, ensureDeviceBranch, fastForwardBranch } from "../git-ops.js";
 import { loadIndex } from "../index-store.js";
 import { loadBookIndex, saveBookIndex } from "../digest/book-index.js";
 import { createRunner, type LlmRunner } from "../digest/runner.js";
@@ -80,6 +80,7 @@ export async function digestCmd(opts: DigestOptions): Promise<void> {
     const git = await ensureRepo(cfg.repoPath, cfg.repoUrl);
     try { await git.fetch(); } catch { /* may be offline */ }
     await ensureDeviceBranch(git, cfg.deviceBranch);
+    if (!(await tryFastForward(git, cfg.deviceBranch, cfg.repoPath))) return;
     const paths = existingPaths(cfg.repoPath, [
       BOOK_INDEX_REL,
       ...report.tocFilesWritten,
@@ -148,6 +149,29 @@ function existingPaths(repoRoot: string, paths: string[]): string[] {
 }
 
 /**
+ * Wrap fastForwardBranch with a friendly red error message and a true/false
+ * "should we proceed with the push?" return. Used by all 3 digest entrypoints.
+ *
+ * Returns false when the rebase fails (conflict) — caller should bail before
+ * commit so we don't strand a local commit the user can't push.
+ */
+async function tryFastForward(
+  git: import("simple-git").SimpleGit,
+  branch: string,
+  repoPath: string,
+): Promise<boolean> {
+  try {
+    await fastForwardBranch(git, branch, (s) => console.log(chalk.gray(`  ${s}`)));
+    return true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(chalk.red(`! could not sync local branch with origin: ${msg}`));
+    console.log(chalk.cyan(`  Skipping push. Resolve in ${repoPath} and re-run.`));
+    return false;
+  }
+}
+
+/**
  * `vibebook digest` (no flag) entrypoint: runs the full digest pipeline
  * (phases 3-7) over the existing index.json + book index, then commits/pushes.
  *
@@ -185,6 +209,7 @@ async function runDigestNoFlagCmd(): Promise<void> {
     const git = await ensureRepo(cfg.repoPath, cfg.repoUrl);
     try { await git.fetch(); } catch { /* ok if offline */ }
     await ensureDeviceBranch(git, cfg.deviceBranch);
+    if (!(await tryFastForward(git, cfg.deviceBranch, cfg.repoPath))) return;
     const paths = existingPaths(cfg.repoPath, [
       BOOK_INDEX_REL,
       ...report.tocFilesWritten,
@@ -240,6 +265,7 @@ async function runDigestResetCmd(): Promise<void> {
     const git = await ensureRepo(cfg.repoPath, cfg.repoUrl);
     try { await git.fetch(); } catch { /* ok if offline */ }
     await ensureDeviceBranch(git, cfg.deviceBranch);
+    if (!(await tryFastForward(git, cfg.deviceBranch, cfg.repoPath))) return;
     const paths = existingPaths(cfg.repoPath, [
       BOOK_INDEX_REL,
       ...report.tocFilesWritten,
