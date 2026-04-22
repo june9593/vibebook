@@ -1,6 +1,6 @@
 {
   "name": "vibebook",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Vibe coding memory book — sync AI coding sessions to a private repo",
   "type": "module",
   "license": "MIT",
@@ -10,9 +10,24 @@
   },
   "homepage": "https://github.com/june9593/vibebook",
   "bugs": "https://github.com/june9593/vibebook/issues",
-  "keywords": ["memory", "ai", "claude", "copilot", "sessions", "digest", "vibe-coding", "vibebook"],
-  "bin": { "vibebook": "./dist/bin/vibebook.js" },
-  "files": ["dist/", "assets/", "README.md"],
+  "keywords": [
+    "memory",
+    "ai",
+    "claude",
+    "copilot",
+    "sessions",
+    "digest",
+    "vibe-coding",
+    "vibebook"
+  ],
+  "bin": {
+    "vibebook": "./dist/bin/vibebook.js"
+  },
+  "files": [
+    "dist/",
+    "assets/",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
@@ -33,5 +48,7 @@
     "vitest": "^2.1.0",
     "@types/node": "^22.0.0"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }
