@@ -99,8 +99,9 @@ describe("verifyRunner", () => {
       const real = await vi.importActual<typeof import("../../src/runner-check.js")>("../../src/runner-check.js");
       return {
         ...real,
-        runnerBinary: () => "node",
-        runnerInstallUrl: () => "https://nodejs.org",
+        runnerBinary: () => "fake-but-mocked",
+        runnerInstallUrl: () => "https://example.com",
+        checkBinary: async () => ({ ok: true, output: "v99.0.0\n" }),
       };
     });
     vi.doMock("../../src/prompts.js", () => ({
@@ -112,7 +113,7 @@ describe("verifyRunner", () => {
     }));
     const m2 = await import("../../src/commands/init-wizard.js");
     expect(await m2.verifyRunner("claude-cli")).toBe(true);
-  }, 35_000);
+  });
 
   it("returns false for missing binary", async () => {
     vi.doMock("../../src/runner-check.js", async () => {
