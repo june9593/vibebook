@@ -18,7 +18,7 @@ describe("checkBinary", () => {
     const r = await checkBinary("node", ["-e", "process.exit(7)"], 30_000);
     expect(r.ok).toBe(false);
     expect(r.hint).toContain("exited with 7");
-  });
+  }, 35_000);
 
   it("times out long-running command", async () => {
     const r = await checkBinary("node", ["-e", "setTimeout(()=>{}, 30000)"], 200);
