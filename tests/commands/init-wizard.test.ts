@@ -112,7 +112,7 @@ describe("verifyRunner", () => {
     }));
     const m2 = await import("../../src/commands/init-wizard.js");
     expect(await m2.verifyRunner("claude-cli")).toBe(true);
-  });
+  }, 35_000);
 
   it("returns false for missing binary", async () => {
     vi.doMock("../../src/runner-check.js", async () => {

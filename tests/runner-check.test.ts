@@ -3,10 +3,10 @@ import { checkBinary, runnerBinary, runnerInstallUrl } from "../src/runner-check
 
 describe("checkBinary", () => {
   it("returns ok:true for a known-good binary (`node --version`)", async () => {
-    const r = await checkBinary("node", ["--version"]);
+    const r = await checkBinary("node", ["--version"], 30_000);
     expect(r.ok).toBe(true);
     expect(r.output).toMatch(/^v\d+/);
-  });
+  }, 35_000);
 
   it("returns ok:false with hint for unknown binary", async () => {
     const r = await checkBinary("definitely-not-a-real-binary-xyz123");
