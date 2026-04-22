@@ -15,7 +15,7 @@ Run the interactive wizard:
 
 The wizard asks:
 1. **Repo URL** — your private memory repo (will be cloned if not present)
-2. **Local path** — defaults to `./.memvc/repo`
+2. **Local path** — defaults to `./.vibebook/repo`
 3. **Encrypt?** — y/n; if y, asks for a passphrase saved to `~/.vibebook/passphrase` (mode 0600)
 4. **Digest into a book?** — y/n
 5. **Runner** — local Claude CLI today; GitHub Action coming soon
@@ -38,12 +38,13 @@ Flag mode (CI-friendly): pass any of `--local-path / --encrypt / --no-digest / -
       raw_sessions/
         <tool>/<project>/<YYYY-MM-DD>/<slug>__<shortId>.raw.json
         <tool>/<project>/<YYYY-MM-DD>/<slug>__<shortId>.md
-      .memvc/index.json
+      .vibebook/index.json
       summaries/     (future: hand-written or LLM-generated digests)
       decisions/     (future: ADRs)
 
-> Note: the in-repo data dir is `.memvc/` (not `.vibebook/`) for backwards
-> compatibility with existing memory repos initialized before the rename.
+> Note: legacy repos initialized before v0.2 had this dir as `.memvc/`. The
+> first `vibebook sync` run on such a repo automatically renames it via
+> `git mv` (preserving history) and stages the rename in the next commit.
 
 ## Security
 
@@ -78,7 +79,7 @@ git commit -m "add vibebook digest workflow"
 git push
 ```
 
-If your config has `encrypt: true`, also set the **VIBEBOOK_PASSPHRASE** repo secret (Settings → Secrets and variables → Actions → New repository secret). The salt is auto-written to `.memvc/repo-salt.json` during `vibebook init` and is safe to commit (security relies on the passphrase, not the salt).
+If your config has `encrypt: true`, also set the **VIBEBOOK_PASSPHRASE** repo secret (Settings → Secrets and variables → Actions → New repository secret). The salt is auto-written to `.vibebook/repo-salt.json` during `vibebook init` (or backfilled by `vibebook sync` on legacy repos) and is safe to commit (security relies on the passphrase, not the salt).
 
 The workflow runs on:
 - Every `push` to a device branch (default patterns: `*.lan`, `*-pro`, `*-mbp`, `*-MBP*`, `*-pc`, `*-laptop`). Edit the workflow if your hostname doesn't match.

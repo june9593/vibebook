@@ -34,7 +34,7 @@ export async function initCmd(opts: InitOptions): Promise<void> {
   if (!opts.repoUrl) {
     throw new Error("repoUrl is required in flag mode (or run `vibebook init` with no args for the wizard)");
   }
-  const localPath = opts.localPath ?? join(process.cwd(), ".memvc", "repo");
+  const localPath = opts.localPath ?? join(process.cwd(), ".vibebook", "repo");
   const mat = await materializeRepoAtPath(localPath, opts.repoUrl);
   if (mat.kind === "existing" && mat.existingRemote && mat.existingRemote !== opts.repoUrl) {
     console.log(chalk.yellow(

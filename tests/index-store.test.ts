@@ -52,7 +52,7 @@ describe("index-store", () => {
     const idx = loadIndex(dir);
     upsertEntry(idx, entry);
     saveIndex(dir, idx);
-    const raw = readFileSync(join(dir, ".memvc", "index.json"), "utf8");
+    const raw = readFileSync(join(dir, ".vibebook", "index.json"), "utf8");
     expect(raw).toContain("\n");
     expect(raw).toContain('"version": 1');
   });

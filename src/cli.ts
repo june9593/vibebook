@@ -6,7 +6,7 @@ export async function run(argv: string[]) {
   program
     .command("init [repoUrl]")
     .description("Initialize vibebook. Run with no arguments for the interactive wizard, or pass a repoUrl + flags for non-interactive setup.")
-    .option("--local-path <path>", "local checkout path (default ./.memvc/repo)")
+    .option("--local-path <path>", "local checkout path (default ./.vibebook/repo)")
     .option("--encrypt", "encrypt raw files before commit")
     .option("--no-digest", "skip the digest pipeline (raw push only)")
     .option("--device <name>", "device branch name (default: sanitized os.hostname())")
@@ -38,7 +38,7 @@ export async function run(argv: string[]) {
     .command("digest")
     .description("Digest pipeline operations: --redo retries failed; --reset wipes book/ and re-runs from scratch")
     .option("--redo", "retry all failed threads and force-rewrite every chapter")
-    .option("--reset", "DESTRUCTIVE: wipe book/ + .memvc/index.book.json, then run digest from scratch")
+    .option("--reset", "DESTRUCTIVE: wipe book/ + .vibebook/index.book.json, then run digest from scratch")
     .action(async (opts: { redo?: boolean; reset?: boolean }) => {
       const { digestCmd } = await import("./commands/digest.js");
       await digestCmd({ redo: opts.redo, reset: opts.reset });

@@ -49,12 +49,12 @@ describe("initCmd flag mode", () => {
     expect(cfg.digestEnabled).toBe(false);
     expect(readFileSync(join(tmpHome, ".vibebook", "passphrase"), "utf8").trim()).toBe("abc");
     // repo-salt.json is written into the repo so the GH Action can read it.
-    const saltFile = join(localPath, ".memvc", "repo-salt.json");
+    const saltFile = join(localPath, ".vibebook", "repo-salt.json");
     expect(existsSync(saltFile)).toBe(true);
     expect(JSON.parse(readFileSync(saltFile, "utf8")).salt).toBe(cfg.salt);
   });
 
-  it("flag mode default localPath is ./.memvc/repo under cwd", async () => {
+  it("flag mode default localPath is ./.vibebook/repo under cwd", async () => {
     const cwd = realpathSync(mkdtempSync(join(tmpdir(), "vibebook-cwd-")));
     const orig = process.cwd();
     process.chdir(cwd);
@@ -62,8 +62,8 @@ describe("initCmd flag mode", () => {
       const { initCmd } = await import("../../src/commands/init.js");
       await initCmd({ repoUrl: originUrl });
       const cfg = JSON.parse(readFileSync(join(tmpHome, ".vibebook", "config.json"), "utf8"));
-      expect(cfg.repoPath).toBe(join(cwd, ".memvc", "repo"));
-      expect(existsSync(join(cwd, ".memvc", "repo", ".git"))).toBe(true);
+      expect(cfg.repoPath).toBe(join(cwd, ".vibebook", "repo"));
+      expect(existsSync(join(cwd, ".vibebook", "repo", ".git"))).toBe(true);
     } finally {
       process.chdir(orig);
       rmSync(cwd, { recursive: true, force: true });

@@ -1,11 +1,10 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { IndexFile, IndexEntry, Tool } from "./types.js";
-
-const REL = ".memvc/index.json";
+import { INDEX_REL, dataDirAbs } from "./repo-data-dir.js";
 
 export function loadIndex(repoRoot: string): IndexFile {
-  const p = join(repoRoot, REL);
+  const p = join(repoRoot, INDEX_REL);
   if (!existsSync(p)) return { version: 1, entries: {} };
   const parsed = JSON.parse(readFileSync(p, "utf8")) as IndexFile;
   if (parsed.version !== 1) throw new Error(`unsupported index version: ${parsed.version}`);
@@ -13,8 +12,8 @@ export function loadIndex(repoRoot: string): IndexFile {
 }
 
 export function saveIndex(repoRoot: string, idx: IndexFile): void {
-  const p = join(repoRoot, REL);
-  mkdirSync(join(repoRoot, ".memvc"), { recursive: true });
+  const p = join(repoRoot, INDEX_REL);
+  mkdirSync(dataDirAbs(repoRoot), { recursive: true });
   writeFileSync(p, JSON.stringify(idx, null, 2) + "\n");
 }
 

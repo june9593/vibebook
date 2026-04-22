@@ -1,8 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-
-const REL = ".memvc/index.book.json";
+import { BOOK_INDEX_REL, dataDirAbs } from "../repo-data-dir.js";
 
 export interface BookEntry {
   threadId: string;
@@ -32,7 +31,7 @@ export interface BookIndex {
 }
 
 export function loadBookIndex(repoRoot: string): BookIndex {
-  const p = join(repoRoot, REL);
+  const p = join(repoRoot, BOOK_INDEX_REL);
   if (!existsSync(p)) return { version: 1, threads: {}, chapters: {} };
   const parsed = JSON.parse(readFileSync(p, "utf8")) as BookIndex;
   if (parsed.version !== 1) throw new Error(`unsupported book index version: ${parsed.version}`);
@@ -46,9 +45,8 @@ export function loadBookIndex(repoRoot: string): BookIndex {
 }
 
 export function saveBookIndex(repoRoot: string, idx: BookIndex): void {
-  const dir = join(repoRoot, ".memvc");
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(repoRoot, REL), JSON.stringify(idx, null, 2) + "\n");
+  mkdirSync(dataDirAbs(repoRoot), { recursive: true });
+  writeFileSync(join(repoRoot, BOOK_INDEX_REL), JSON.stringify(idx, null, 2) + "\n");
 }
 
 export function upsertThread(idx: BookIndex, entry: BookEntry): void {

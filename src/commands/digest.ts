@@ -12,11 +12,13 @@ import { runDigestRedo, type RedoReport } from "../digest/redo.js";
 import { runDigest, type DigestReport } from "../digest/orchestrator.js";
 import { consoleReporter } from "../digest/reporter.js";
 import { deriveKey } from "../crypto.js";
+import { migrateLegacyDataDir } from "../migrate.js";
+import { BOOK_INDEX_REL, bookIndexAbs } from "../repo-data-dir.js";
 
 export interface DigestOptions {
   /** When true, run the --redo recovery pipeline. */
   redo?: boolean;
-  /** When true, wipe book/ + .memvc/index.book.json then run digest fresh. */
+  /** When true, wipe book/ + .vibebook/index.book.json then run digest fresh. */
   reset?: boolean;
 }
 
@@ -45,6 +47,8 @@ export async function digestCmd(opts: DigestOptions): Promise<void> {
   }
 
   const cfg = readConfigWithMigration();
+  // One-shot data-dir rename `.memvc/` → `.vibebook/` if needed, before any path-load.
+  await migrateLegacyDataDir(cfg.repoPath);
   const key = cfg.encrypt
     ? deriveKey(getPassphrase(), Buffer.from(cfg.salt, "base64"))
     : null;
@@ -74,14 +78,14 @@ export async function digestCmd(opts: DigestOptions): Promise<void> {
     const git = await ensureRepo(cfg.repoPath, cfg.repoUrl);
     try { await git.fetch(); } catch { /* may be offline */ }
     await ensureDeviceBranch(git, cfg.deviceBranch);
-    const paths = [
-      ".memvc/index.book.json",
+    const paths = existingPaths(cfg.repoPath, [
+      BOOK_INDEX_REL,
       ...report.tocFilesWritten,
       ...report.chaptersRewritten.map((p) => `book/${p}/chapter.md`),
       // Stage every project's articles dir so any newly-written article files
       // get added (analogous to sync.ts's collectDigestPaths).
       ...uniqueProjectsFromReport(report).map((p) => `book/${p}/articles`),
-    ];
+    ]);
     const r = await commitAndPush(
       git,
       `vibebook digest --redo: ${report.threadsRecovered} recovered, ${report.chaptersRewritten.length} chapters`,
@@ -122,21 +126,33 @@ export function uniqueProjectsFromReport(
 ): string[] {
   const out = new Set<string>(report.chaptersRewritten);
   // Pull project names from per-chapter timeline paths in tocFilesWritten.
+  // Skip `_meta` — it's the global-timeline pseudo-project (book/_meta/timeline.md),
+  // not a real project, and has no articles dir.
   for (const path of report.tocFilesWritten) {
     const m = path.match(/^book\/([^/]+)\/timeline\.md$/);
-    if (m && m[1]) out.add(m[1]);
+    if (m && m[1] && m[1] !== "_meta") out.add(m[1]);
   }
   return [...out];
 }
 
 /**
- * `vibebook digest --reset` entrypoint: wipes book/ + .memvc/index.book.json,
+ * Drop paths that don't exist on disk. `git add` is strict about pathspec
+ * matches and aborts the whole add when any path is missing. Both --redo and
+ * --reset assemble paths optimistically (e.g. articles dirs that may not
+ * have been created yet); filter here before handing to commitAndPush.
+ */
+function existingPaths(repoRoot: string, paths: string[]): string[] {
+  return paths.filter((p) => existsSync(join(repoRoot, p)));
+}
+
+/**
+ * `vibebook digest --reset` entrypoint: wipes book/ + .vibebook/index.book.json,
  * then runs runDigest from scratch and (when configured) commits/pushes.
  */
 async function runDigestResetCmd(): Promise<void> {
   const cfg = readConfigWithMigration();
   console.log(chalk.yellow(
-    `vibebook digest --reset: wiping book/ and .memvc/index.book.json under ${cfg.repoPath}`,
+    `vibebook digest --reset: wiping book/ and ${BOOK_INDEX_REL} under ${cfg.repoPath}`,
   ));
   const key = cfg.encrypt
     ? deriveKey(getPassphrase(), Buffer.from(cfg.salt, "base64"))
@@ -163,12 +179,12 @@ async function runDigestResetCmd(): Promise<void> {
     const git = await ensureRepo(cfg.repoPath, cfg.repoUrl);
     try { await git.fetch(); } catch { /* ok if offline */ }
     await ensureDeviceBranch(git, cfg.deviceBranch);
-    const paths = [
-      ".memvc/index.book.json",
+    const paths = existingPaths(cfg.repoPath, [
+      BOOK_INDEX_REL,
       ...report.tocFilesWritten,
       ...report.chaptersRewritten.map((p) => `book/${p}/chapter.md`),
       ...uniqueProjectsFromReport(report).map((p) => `book/${p}/articles`),
-    ];
+    ]);
     const r = await commitAndPush(
       git,
       `vibebook digest --reset: ${report.articlesOk} articles, ${report.chaptersRewritten.length} chapters`,
@@ -185,7 +201,7 @@ async function runDigestResetCmd(): Promise<void> {
 }
 
 /**
- * Wipe book/ + .memvc/index.book.json under repoPath, then load index, build
+ * Wipe book/ + .vibebook/index.book.json under repoPath, then load index, build
  * a fresh empty BookIndex, run runDigest, and persist. Test-injectable via
  * `runner` (when omitted, built from runnerConfig).
  */
@@ -199,8 +215,10 @@ export async function runDigestResetFromRepo(args: {
   threadingConcurrency?: number;
   threadingMaxAttempts?: number;
 }): Promise<DigestReport> {
+  // Run data-dir migration before path resolution so wiping picks up the new path.
+  await migrateLegacyDataDir(args.repoPath);
   const bookDir = join(args.repoPath, "book");
-  const bookIndexPath = join(args.repoPath, ".memvc", "index.book.json");
+  const bookIndexPath = bookIndexAbs(args.repoPath);
   if (existsSync(bookDir)) rmSync(bookDir, { recursive: true, force: true });
   if (existsSync(bookIndexPath)) rmSync(bookIndexPath, { force: true });
 

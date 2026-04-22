@@ -96,13 +96,13 @@ describe("runDigestResetFromRepo (integration)", () => {
     repo = mkdtempSync(join(tmpdir(), "memvc-cmd-reset-"));
   });
 
-  it("wipes pre-existing book/ + .memvc/index.book.json then runs fresh digest", async () => {
+  it("wipes pre-existing book/ + .vibebook/index.book.json then runs fresh digest", async () => {
     // Pre-stage junk: a pre-existing book dir + index.book.json
     mkdirSync(join(repo, "book/old-junk"), { recursive: true });
     writeFileSync(join(repo, "book/old-junk/chapter.md"), "OLD");
     writeFileSync(join(repo, "book/index.md"), "OLD INDEX");
-    mkdirSync(join(repo, ".memvc"), { recursive: true });
-    writeFileSync(join(repo, ".memvc/index.book.json"), JSON.stringify({
+    mkdirSync(join(repo, ".vibebook"), { recursive: true });
+    writeFileSync(join(repo, ".vibebook/index.book.json"), JSON.stringify({
       version: 1,
       threads: {
         "t-old": {

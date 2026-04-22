@@ -61,17 +61,23 @@ jobs:
           mkdir -p ~/.vibebook
           REPO_PATH="$PWD"
           ENCRYPT="$( [ -n "$VIBEBOOK_PASSPHRASE" ] && echo true || echo false )"
-          # Salt is written by `vibebook init` to <repoPath>/.memvc/repo-salt.json
-          # (the in-repo data dir is intentionally still .memvc/ for backcompat
-          # with existing user memory repos) and committed (the salt is not
-          # sensitive — security relies on the passphrase). jq is preinstalled
-          # on ubuntu-latest GH runners.
-          if [ "$ENCRYPT" = "true" ] && [ ! -f "$REPO_PATH/.memvc/repo-salt.json" ]; then
-            echo "ERROR: encryption is on (VIBEBOOK_PASSPHRASE secret set) but $REPO_PATH/.memvc/repo-salt.json is missing."
-            echo "       Run \`vibebook init\` locally to regenerate it, then commit and push .memvc/repo-salt.json."
+          # Salt is written by `vibebook init` (or `vibebook sync`'s self-heal)
+          # to <repoPath>/.vibebook/repo-salt.json and committed. The salt is
+          # not sensitive — security relies on the passphrase. Repos created
+          # before the data-dir rename had it under .memvc/ — we read whichever
+          # exists. jq is preinstalled on ubuntu-latest GH runners.
+          SALT_FILE=""
+          if [ -f "$REPO_PATH/.vibebook/repo-salt.json" ]; then
+            SALT_FILE="$REPO_PATH/.vibebook/repo-salt.json"
+          elif [ -f "$REPO_PATH/.memvc/repo-salt.json" ]; then
+            SALT_FILE="$REPO_PATH/.memvc/repo-salt.json"
+          fi
+          if [ "$ENCRYPT" = "true" ] && [ -z "$SALT_FILE" ]; then
+            echo "ERROR: encryption is on (VIBEBOOK_PASSPHRASE secret set) but neither $REPO_PATH/.vibebook/repo-salt.json nor $REPO_PATH/.memvc/repo-salt.json exists."
+            echo "       Run \`vibebook sync\` locally — it will backfill the file. Then commit and push."
             exit 1
           fi
-          SALT="$(jq -r .salt $REPO_PATH/.memvc/repo-salt.json 2>/dev/null || echo placeholder)"
+          SALT="$( [ -n "$SALT_FILE" ] && jq -r .salt "$SALT_FILE" || echo placeholder)"
           cat > ~/.vibebook/config.json <<JSON
           {
             "repoPath": "$REPO_PATH",

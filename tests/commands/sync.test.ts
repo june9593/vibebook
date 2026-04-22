@@ -114,14 +114,14 @@ describe("runSync — digest integration", () => {
     vscodeRoot = mkdtempSync(join(tmpdir(), "memvc-vscode-"));
   });
 
-  it("with noDigest=true: no book/ files written, no .memvc/index.book.json", async () => {
+  it("with noDigest=true: no book/ files written, no .vibebook/index.book.json", async () => {
     const r = await runSync({
       repoPath: repo, claudeRoot, vscodeRoot, encrypt: false, noDigest: true,
     });
     expect(r.newCount).toBe(1);
     expect(r.digestStatus).toBe("skipped-flag");
     expect(existsSync(join(repo, "book"))).toBe(false);
-    expect(existsSync(join(repo, ".memvc/index.book.json"))).toBe(false);
+    expect(existsSync(join(repo, ".vibebook/index.book.json"))).toBe(false);
   });
 
   it("with noDigest=false but no runnerConfig: digest is skipped with skipped-no-runner status", async () => {
@@ -166,7 +166,7 @@ describe("runSync — digest integration", () => {
       expect(r.digestReport!.chaptersRewritten).toEqual(["edge-memvc"]);
       expect(existsSync(join(repo, "book/index.md"))).toBe(true);
       expect(existsSync(join(repo, "book/edge-memvc/chapter.md"))).toBe(true);
-      expect(existsSync(join(repo, ".memvc/index.book.json"))).toBe(true);
+      expect(existsSync(join(repo, ".vibebook/index.book.json"))).toBe(true);
       const book = loadBookIndex(repo);
       expect(book.threads["t-int"]!.articleStatus).toBe("ok");
       expect(book.chapters["edge-memvc"]).toBeDefined();

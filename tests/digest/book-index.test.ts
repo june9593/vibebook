@@ -51,7 +51,7 @@ describe("loadBookIndex", () => {
       },
     };
     saveBookIndex(repo, idx);
-    expect(existsSync(join(repo, ".memvc/index.book.json"))).toBe(true);
+    expect(existsSync(join(repo, ".vibebook/index.book.json"))).toBe(true);
     const loaded = loadBookIndex(repo);
     expect(loaded).toEqual(idx);
   });
@@ -59,7 +59,7 @@ describe("loadBookIndex", () => {
   it("throws on unsupported version", () => {
     const repo = tmpRepo();
     saveBookIndex(repo, { version: 1, threads: {}, chapters: {} });
-    const path = join(repo, ".memvc/index.book.json");
+    const path = join(repo, ".vibebook/index.book.json");
     const raw = JSON.parse(readFileSync(path, "utf8"));
     raw.version = 99;
     writeFileSync(path, JSON.stringify(raw));
@@ -69,7 +69,7 @@ describe("loadBookIndex", () => {
   it("throws when threads key is missing", () => {
     const repo = tmpRepo();
     saveBookIndex(repo, { version: 1, threads: {}, chapters: {} });
-    const path = join(repo, ".memvc/index.book.json");
+    const path = join(repo, ".vibebook/index.book.json");
     const raw = JSON.parse(readFileSync(path, "utf8"));
     delete raw.threads;
     writeFileSync(path, JSON.stringify(raw));

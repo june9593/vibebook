@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { readPassphraseFile } from "./passphrase-store.js";
+import { dataDirAbs, repoSaltAbs } from "./repo-data-dir.js";
 
 const CONFIG_DIR = join(homedir(), ".vibebook");
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
@@ -45,19 +46,17 @@ export function freshSaltBase64(): string {
 }
 
 /**
- * Write `<repoPath>/.memvc/repo-salt.json` so the GitHub Action workflow can
+ * Write `<repoPath>/.vibebook/repo-salt.json` so the GitHub Action workflow can
  * read the salt without having access to `~/.vibebook/config.json`. The salt
  * is not sensitive — security relies on the passphrase. Safe to commit.
  *
- * NOTE: the in-repo data dir is intentionally still `.memvc/` (not `.vibebook/`)
- * for backwards compatibility with existing user memory repos. Renaming would
- * break every previously-initialized `<repoPath>/.memvc/{index,repo-salt,index.book}.json`.
- * Only the user-home config dir was renamed (~/.memvc → ~/.vibebook).
+ * Legacy repos created before the data-dir rename had this file at
+ * `.memvc/repo-salt.json`; `migrateLegacyDataDir` (in src/migrate.ts) renames
+ * the directory on first sync/digest run.
  */
 export function writeRepoSaltFile(repoPath: string, salt: string): void {
-  const dir = join(repoPath, ".memvc");
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "repo-salt.json"), JSON.stringify({ salt }, null, 2) + "\n");
+  mkdirSync(dataDirAbs(repoPath), { recursive: true });
+  writeFileSync(repoSaltAbs(repoPath), JSON.stringify({ salt }, null, 2) + "\n");
 }
 
 export function getPassphrase(): string {

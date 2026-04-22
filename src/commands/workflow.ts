@@ -2,7 +2,9 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import chalk from "chalk";
-import { readConfig } from "../config.js";
+import { readConfig, writeRepoSaltFile } from "../config.js";
+import { migrateLegacyDataDir, migratedDataDirPaths } from "../migrate.js";
+import { REPO_SALT_REL, repoSaltAbs } from "../repo-data-dir.js";
 
 /**
  * Resolve the bundled workflow template path. The build emits to
@@ -38,9 +40,35 @@ export async function workflowInitCmd(opts: { force?: boolean } = {}): Promise<v
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, tpl);
   console.log(chalk.green(`workflow written: ${target}`));
+
+  // One-shot: rename legacy `.memvc/` → `.vibebook/` if present.
+  const dataDirMig = await migrateLegacyDataDir(cfg.repoPath);
+  if (dataDirMig.migrated) {
+    console.log(chalk.green(`renamed legacy .memvc/ → .vibebook/ ${dataDirMig.viaGit ? "(via git mv)" : ""}`));
+  }
+
+  // Self-heal: legacy repos initialized before salt-write was wired into init
+  // are missing .vibebook/repo-salt.json, which the workflow's fail-fast guard
+  // requires when encryption is on. Backfill it here from the in-memory salt.
+  let saltJustWritten = false;
+  if (cfg.encrypt) {
+    if (!existsSync(repoSaltAbs(cfg.repoPath))) {
+      writeRepoSaltFile(cfg.repoPath, cfg.salt);
+      saltJustWritten = true;
+      console.log(chalk.green(`backfilled missing ${REPO_SALT_REL} (legacy repo)`));
+    }
+  }
+
   console.log(chalk.gray("\nNext steps:"));
   console.log(chalk.gray(`  1. cd ${cfg.repoPath}`));
-  console.log(chalk.gray("  2. git add .github/workflows/vibebook-digest.yml && git commit -m 'add vibebook digest workflow' && git push"));
+  const extras: string[] = [];
+  if (saltJustWritten) extras.push(REPO_SALT_REL);
+  if (dataDirMig.migrated && dataDirMig.viaGit) extras.push(...migratedDataDirPaths(cfg.repoPath));
+  const stagePaths = [".github/workflows/vibebook-digest.yml", ...extras].join(" ");
+  const commitMsg = (saltJustWritten || dataDirMig.migrated)
+    ? "add vibebook digest workflow + repo data-dir housekeeping"
+    : "add vibebook digest workflow";
+  console.log(chalk.gray(`  2. git add ${stagePaths} && git commit -m '${commitMsg}' && git push`));
   if (cfg.encrypt) {
     console.log(chalk.cyan("  3. Set repo secret VIBEBOOK_PASSPHRASE in GitHub Settings -> Secrets and variables -> Actions -> 'New repository secret'"));
   } else {

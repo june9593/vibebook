@@ -27,7 +27,7 @@ export interface WizardAnswers {
  * Cwd-local hidden dir per user preference.
  */
 export function defaultLocalPath(): string {
-  return join(process.cwd(), ".memvc", "repo");
+  return join(process.cwd(), ".vibebook", "repo");
 }
 
 /**
@@ -208,7 +208,7 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
   writeConfig(cfg);
   if (cfg.encrypt) {
     writeRepoSaltFile(cfg.repoPath, cfg.salt);
-    console.log(chalk.gray(`  repo salt written to ${a.localPath}/.memvc/repo-salt.json (commit + push so CI can read it)`));
+    console.log(chalk.gray(`  repo salt written to ${a.localPath}/.vibebook/repo-salt.json (commit + push so CI can read it)`));
   }
   console.log(chalk.green("\nok vibebook initialized"));
   console.log(chalk.gray(`  config: ~/.vibebook/config.json`));

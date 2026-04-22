@@ -9,14 +9,15 @@ import { loadIndex, saveIndex, hasUnchanged, upsertEntry } from "../index-store.
 import type { IndexEntry } from "../types.js";
 import { writeSession } from "../writer.js";
 import { deriveKey, encrypt } from "../crypto.js";
-import { readConfig, writeConfig, getPassphrase, DEFAULT_THREADING_CONCURRENCY, DEFAULT_THREADING_MAX_ATTEMPTS, type Config } from "../config.js";
+import { readConfig, writeConfig, writeRepoSaltFile, getPassphrase, DEFAULT_THREADING_CONCURRENCY, DEFAULT_THREADING_MAX_ATTEMPTS, type Config } from "../config.js";
 import { deviceBranchFromHostname } from "../device.js";
 import { ensureRepo, commitAndPush, ensureDeviceBranch } from "../git-ops.js";
-import { migrateLegacyMainToDevice } from "../migrate.js";
+import { migrateLegacyMainToDevice, migrateLegacyDataDir, migratedDataDirPaths } from "../migrate.js";
 import { loadBookIndex, saveBookIndex } from "../digest/book-index.js";
 import { createRunner } from "../digest/runner.js";
 import { runDigest, type DigestReport } from "../digest/orchestrator.js";
 import { consoleReporter } from "../digest/reporter.js";
+import { INDEX_REL, BOOK_INDEX_REL, REPO_SALT_REL, LEGACY_REPO_DATA_DIR } from "../repo-data-dir.js";
 
 export interface SyncOptions {
   repoPath: string;
@@ -56,6 +57,14 @@ export interface SyncResult {
 }
 
 export async function runSync(opts: SyncOptions): Promise<SyncResult> {
+  // One-shot migration: rename legacy `.memvc/` → `.vibebook/` if present.
+  // Done before loadIndex so the read picks up the file at its new location.
+  // Returns paths to stage so the rename rides the next commit.
+  const dataDirMig = await migrateLegacyDataDir(opts.repoPath);
+  if (dataDirMig.migrated) {
+    console.log(chalk.cyan(`Migrating: renamed legacy ${LEGACY_REPO_DATA_DIR}/ → .vibebook/ ${dataDirMig.viaGit ? "(via git mv; staged for next commit)" : "(non-git mode)"}`));
+  }
+
   const adapters: SourceAdapter[] = [
     new ClaudeCodeAdapter(opts.claudeRoot),
     new VSCodeCopilotAdapter(opts.vscodeRoot),
@@ -119,7 +128,23 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
   }
 
   saveIndex(opts.repoPath, idx);
-  const indexPath = ".memvc/index.json";
+  const indexPath = INDEX_REL;
+
+  // Self-heal: encryption is on but the repo is missing .vibebook/repo-salt.json
+  // (legacy repo initialized before salt-write was wired into init, or someone
+  // git-rm'd it). Write it from the in-memory salt so the GH Action workflow
+  // doesn't fail on its salt-presence guard. Salt is not sensitive — security
+  // relies on the passphrase.
+  const saltRelPath = REPO_SALT_REL;
+  let saltJustWritten = false;
+  if (opts.encrypt && opts.saltB64) {
+    const saltAbs = join(opts.repoPath, saltRelPath);
+    if (!existsSync(saltAbs)) {
+      writeRepoSaltFile(opts.repoPath, opts.saltB64);
+      saltJustWritten = true;
+      console.log(chalk.cyan(`+ wrote missing ${saltRelPath} (needed by GitHub Action workflow)`));
+    }
+  }
 
   let committed = false, pushed = false;
   if (opts.push && opts.repoUrl && opts.deviceBranch) {
@@ -133,10 +158,22 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     console.log(chalk.gray(`Ensuring branch '${opts.deviceBranch}' is checked out...`));
     await ensureDeviceBranch(git, opts.deviceBranch);
     const all = [...pathsWritten, indexPath];
+    if (saltJustWritten) all.push(saltRelPath);
+    if (dataDirMig.migrated && dataDirMig.viaGit) {
+      // Stage the renamed dir contents so `git mv` is recorded in this commit.
+      // (git mv already staged them, but adding by path is idempotent and keeps
+      // commitAndPush's add+status logic uniform.)
+      for (const p of migratedDataDirPaths(opts.repoPath)) all.push(p);
+    }
     console.log(chalk.gray(`Staging ${all.length} paths and committing...`));
+    const commitMsg = newCount > 0
+      ? `vibebook sync: +${newCount} sessions${dataDirMig.migrated ? " (+ rename .memvc/→.vibebook/)" : ""}`
+      : (saltJustWritten ? "vibebook: backfill repo-salt.json for CI" :
+         (dataDirMig.migrated ? "vibebook: rename .memvc/ → .vibebook/" :
+          `vibebook sync: +${newCount} sessions`));
     const r = await commitAndPush(
       git,
-      `vibebook sync: +${newCount} sessions`,
+      commitMsg,
       all,
       opts.deviceBranch,
       (stage) => console.log(chalk.gray(`  ${stage}`)),
@@ -148,7 +185,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
           "\n  Push blocked by GitHub secret-scanning (GH013). Your raw_sessions contain something that looks like a real secret (token, API key) — typically because past AI conversations included one verbatim.",
         ));
         console.log(chalk.cyan(
-          "  Tip: enable encryption to scrub secrets from future syncs — set `encrypt: true` in ~/.vibebook/config.json, save a passphrase to ~/.vibebook/passphrase, then delete raw_sessions/ + .memvc/index.json and re-sync.",
+          "  Tip: enable encryption to scrub secrets from future syncs — set `encrypt: true` in ~/.vibebook/config.json, save a passphrase to ~/.vibebook/passphrase, then delete raw_sessions/ + .vibebook/index.json and re-sync.",
         ));
         console.log(chalk.gray(
           "  Or unblock manually via the GitHub URL above (not recommended for real tokens).",
@@ -243,7 +280,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
 
 /**
  * Collect repo-rooted paths the digest produced or might have produced:
- *   - .memvc/index.book.json
+ *   - .vibebook/index.book.json
  *   - every entry in digestReport.tocFilesWritten
  *   - book/<project>/articles/* for articles touched (we glob the project dirs)
  *   - book/<project>/chapter.md for each rewritten chapter
@@ -254,7 +291,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
  */
 function collectDigestPaths(report: DigestReport, repoRoot: string): string[] {
   const out = new Set<string>();
-  out.add(".memvc/index.book.json");
+  out.add(BOOK_INDEX_REL);
   for (const p of report.tocFilesWritten) out.add(p);
   for (const project of report.chaptersRewritten) out.add(`book/${project}/chapter.md`);
   // Articles: rather than enumerate per-thread, stage the whole articles dir

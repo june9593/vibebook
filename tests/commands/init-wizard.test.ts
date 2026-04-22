@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 
 describe("defaultLocalPath", () => {
-  it("returns ./.memvc/repo under cwd", async () => {
+  it("returns ./.vibebook/repo under cwd", async () => {
     const m = await import("../../src/commands/init-wizard.js");
-    expect(m.defaultLocalPath().endsWith("/.memvc/repo")).toBe(true);
+    expect(m.defaultLocalPath().endsWith("/.vibebook/repo")).toBe(true);
   });
 });
 
