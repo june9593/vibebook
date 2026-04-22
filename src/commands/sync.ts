@@ -136,7 +136,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     console.log(chalk.gray(`Staging ${all.length} paths and committing...`));
     const r = await commitAndPush(
       git,
-      `memvc sync: +${newCount} sessions`,
+      `vibebook sync: +${newCount} sessions`,
       all,
       opts.deviceBranch,
       (stage) => console.log(chalk.gray(`  ${stage}`)),
@@ -148,7 +148,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
           "\n  Push blocked by GitHub secret-scanning (GH013). Your raw_sessions contain something that looks like a real secret (token, API key) — typically because past AI conversations included one verbatim.",
         ));
         console.log(chalk.cyan(
-          "  Tip: enable encryption to scrub secrets from future syncs — set `encrypt: true` in ~/.memvc/config.json, save a passphrase to ~/.memvc/passphrase, then delete raw_sessions/ + .memvc/index.json and re-sync.",
+          "  Tip: enable encryption to scrub secrets from future syncs — set `encrypt: true` in ~/.vibebook/config.json, save a passphrase to ~/.vibebook/passphrase, then delete raw_sessions/ + .memvc/index.json and re-sync.",
         ));
         console.log(chalk.gray(
           "  Or unblock manually via the GitHub URL above (not recommended for real tokens).",
@@ -184,7 +184,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
   } else if (!opts.runnerConfig) {
     digestStatus = "skipped-no-runner";
     console.log(chalk.yellow("Digest pipeline skipped: no runnerConfig provided."));
-  } else if (opts.runnerConfig.runner === "github-action" && process.env.MEMVC_CI !== "1") {
+  } else if (opts.runnerConfig.runner === "github-action" && process.env.VIBEBOOK_CI !== "1") {
     digestStatus = "skipped-flag";
     console.log(chalk.cyan("\nDigest delegated to GitHub Action (runner='github-action'); will run in CI on next push."));
   } else {
@@ -220,7 +220,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
       const bookPaths = collectDigestPaths(digestReport, opts.repoPath);
       const r = await commitAndPush(
         git,
-        `memvc digest: +${digestReport.articlesOk} articles, ${digestReport.chaptersRewritten.length} chapters`,
+        `vibebook digest: +${digestReport.articlesOk} articles, ${digestReport.chaptersRewritten.length} chapters`,
         bookPaths,
         opts.deviceBranch,
         (stage) => console.log(chalk.gray(`  ${stage}`)),
@@ -291,7 +291,7 @@ export function ensureDeviceBranchOnConfig(cfg: Config): { migrated: boolean; cf
 }
 
 /**
- * Loads ~/.memvc/config.json and applies any in-place migrations needed by
+ * Loads ~/.vibebook/config.json and applies any in-place migrations needed by
  * current code (currently: deviceBranch self-heal). On migration, writes the
  * fixed config back to disk. Used by both syncCmd and digestCmd.
  */
@@ -300,7 +300,7 @@ export function readConfigWithMigration(): Config {
   const heal = ensureDeviceBranchOnConfig(rawCfg);
   if (heal.migrated) {
     console.log(chalk.cyan(
-      `Migrating: legacy config missing deviceBranch. Setting to "${heal.cfg.deviceBranch}" and saving to ~/.memvc/config.json.`,
+      `Migrating: legacy config missing deviceBranch. Setting to "${heal.cfg.deviceBranch}" and saving to ~/.vibebook/config.json.`,
     ));
     writeConfig(heal.cfg);
   }

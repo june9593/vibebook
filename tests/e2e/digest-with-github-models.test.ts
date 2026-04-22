@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRunner } from "../../src/digest/runner.js";
 
-describe("e2e: github-action runner under MEMVC_CI", () => {
+describe("e2e: github-action runner under VIBEBOOK_CI", () => {
   let tmp: string;
 
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), "memvc-e2e-"));
-    vi.stubEnv("MEMVC_CI", "1");
+    tmp = mkdtempSync(join(tmpdir(), "vibebook-e2e-"));
+    vi.stubEnv("VIBEBOOK_CI", "1");
     vi.stubEnv("GITHUB_TOKEN", "fake");
   });
   afterEach(() => {

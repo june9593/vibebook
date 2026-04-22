@@ -16,7 +16,7 @@ describe("applyWizardAnswers", () => {
   let originUrl: string;
 
   beforeEach(async () => {
-    tmpHome = mkdtempSync(join(tmpdir(), "memvc-wiz-"));
+    tmpHome = mkdtempSync(join(tmpdir(), "vibebook-wiz-"));
     vi.stubEnv("HOME", tmpHome);
     vi.resetModules();
     const { simpleGit } = await import("simple-git");
@@ -57,15 +57,15 @@ describe("applyWizardAnswers", () => {
     });
     const { existsSync, readFileSync, statSync } = await import("node:fs");
     expect(existsSync(join(localPath, ".git"))).toBe(true);
-    const cfg = JSON.parse(readFileSync(join(tmpHome, ".memvc", "config.json"), "utf8"));
+    const cfg = JSON.parse(readFileSync(join(tmpHome, ".vibebook", "config.json"), "utf8"));
     expect(cfg.repoUrl).toBe(originUrl);
     expect(cfg.repoPath).toBe(localPath);
     expect(cfg.encrypt).toBe(true);
     expect(cfg.digestEnabled).toBe(true);
     expect(cfg.runner).toBe("claude-cli");
-    const pp = readFileSync(join(tmpHome, ".memvc", "passphrase"), "utf8").trim();
+    const pp = readFileSync(join(tmpHome, ".vibebook", "passphrase"), "utf8").trim();
     expect(pp).toBe("secret");
-    expect(statSync(join(tmpHome, ".memvc", "passphrase")).mode & 0o777).toBe(0o600);
+    expect(statSync(join(tmpHome, ".vibebook", "passphrase")).mode & 0o777).toBe(0o600);
   });
 
   it("does NOT write passphrase when encrypt=false", async () => {
@@ -80,7 +80,7 @@ describe("applyWizardAnswers", () => {
       runnerModel: "",
     });
     const { existsSync } = await import("node:fs");
-    expect(existsSync(join(tmpHome, ".memvc", "passphrase"))).toBe(false);
+    expect(existsSync(join(tmpHome, ".vibebook", "passphrase"))).toBe(false);
   });
 });
 

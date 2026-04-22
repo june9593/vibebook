@@ -31,8 +31,8 @@ describe("passphrase-store", () => {
   });
 
   it("writePassphraseFile overwrites and re-chmods existing file", async () => {
-    mkdirSync(join(tmpHome, ".memvc"), { recursive: true });
-    const p = join(tmpHome, ".memvc", "passphrase");
+    mkdirSync(join(tmpHome, ".vibebook"), { recursive: true });
+    const p = join(tmpHome, ".vibebook", "passphrase");
     writeFileSync(p, "old\n", { mode: 0o644 });
     const m = await import("../src/passphrase-store.js");
     m.writePassphraseFile("new");
@@ -50,7 +50,7 @@ describe("passphrase-store", () => {
   it("config.getPassphrase prefers env over file", async () => {
     const m = await import("../src/passphrase-store.js");
     m.writePassphraseFile("from-file");
-    vi.stubEnv("MEMVC_PASSPHRASE", "from-env");
+    vi.stubEnv("VIBEBOOK_PASSPHRASE", "from-env");
     const cfg = await import("../src/config.js");
     expect(cfg.getPassphrase()).toBe("from-env");
   });
@@ -58,13 +58,13 @@ describe("passphrase-store", () => {
   it("config.getPassphrase falls back to file when env missing", async () => {
     const m = await import("../src/passphrase-store.js");
     m.writePassphraseFile("from-file");
-    vi.stubEnv("MEMVC_PASSPHRASE", "");
+    vi.stubEnv("VIBEBOOK_PASSPHRASE", "");
     const cfg = await import("../src/config.js");
     expect(cfg.getPassphrase()).toBe("from-file");
   });
 
   it("config.getPassphrase throws when neither env nor file set", async () => {
-    vi.stubEnv("MEMVC_PASSPHRASE", "");
+    vi.stubEnv("VIBEBOOK_PASSPHRASE", "");
     const cfg = await import("../src/config.js");
     expect(() => cfg.getPassphrase()).toThrow(/encryption is on/);
   });

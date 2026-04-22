@@ -21,11 +21,11 @@ export interface DigestOptions {
 }
 
 /**
- * `memvc digest --redo` entrypoint: reads config, loads indexes from disk,
+ * `vibebook digest --redo` entrypoint: reads config, loads indexes from disk,
  * runs the redo pipeline, persists, and (when push is configured) commits +
  * pushes the book changes onto the device branch.
  *
- * Without `--redo` we currently print a help message — `memvc sync` is the
+ * Without `--redo` we currently print a help message — `vibebook sync` is the
  * canonical way to drive the pipeline for new content.
  */
 export async function digestCmd(opts: DigestOptions): Promise<void> {
@@ -38,8 +38,8 @@ export async function digestCmd(opts: DigestOptions): Promise<void> {
   }
   if (!opts.redo) {
     console.log(chalk.yellow(
-      "Nothing to do without --redo. Use `memvc sync` for the regular pipeline,\n" +
-      "or `memvc digest --redo` to retry failed articles + force-rewrite all chapters.",
+      "Nothing to do without --redo. Use `vibebook sync` for the regular pipeline,\n" +
+      "or `vibebook digest --redo` to retry failed articles + force-rewrite all chapters.",
     ));
     return;
   }
@@ -84,7 +84,7 @@ export async function digestCmd(opts: DigestOptions): Promise<void> {
     ];
     const r = await commitAndPush(
       git,
-      `memvc digest --redo: ${report.threadsRecovered} recovered, ${report.chaptersRewritten.length} chapters`,
+      `vibebook digest --redo: ${report.threadsRecovered} recovered, ${report.chaptersRewritten.length} chapters`,
       paths,
       cfg.deviceBranch,
       (stage) => console.log(chalk.gray(`  ${stage}`)),
@@ -130,13 +130,13 @@ export function uniqueProjectsFromReport(
 }
 
 /**
- * `memvc digest --reset` entrypoint: wipes book/ + .memvc/index.book.json,
+ * `vibebook digest --reset` entrypoint: wipes book/ + .memvc/index.book.json,
  * then runs runDigest from scratch and (when configured) commits/pushes.
  */
 async function runDigestResetCmd(): Promise<void> {
   const cfg = readConfigWithMigration();
   console.log(chalk.yellow(
-    `memvc digest --reset: wiping book/ and .memvc/index.book.json under ${cfg.repoPath}`,
+    `vibebook digest --reset: wiping book/ and .memvc/index.book.json under ${cfg.repoPath}`,
   ));
   const key = cfg.encrypt
     ? deriveKey(getPassphrase(), Buffer.from(cfg.salt, "base64"))
@@ -171,7 +171,7 @@ async function runDigestResetCmd(): Promise<void> {
     ];
     const r = await commitAndPush(
       git,
-      `memvc digest --reset: ${report.articlesOk} articles, ${report.chaptersRewritten.length} chapters`,
+      `vibebook digest --reset: ${report.articlesOk} articles, ${report.chaptersRewritten.length} chapters`,
       paths,
       cfg.deviceBranch,
       (stage) => console.log(chalk.gray(`  ${stage}`)),

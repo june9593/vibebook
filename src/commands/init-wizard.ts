@@ -36,7 +36,7 @@ export function defaultLocalPath(): string {
  * loops can't recover from (caller catches and exits non-zero).
  */
 export async function runWizard(): Promise<WizardAnswers> {
-  console.log(chalk.bold("\nmemvc init wizard\n"));
+  console.log(chalk.bold("\nvibebook init wizard\n"));
 
   // Q0: sync to GitHub?
   const syncToRemote = await promptYesNo(
@@ -71,9 +71,9 @@ export async function runWizard(): Promise<WizardAnswers> {
     // Q4: passphrase (only if encrypt)
     if (encrypt) {
       for (;;) {
-        const pp = await promptHidden(chalk.cyan("Q4") + " Passphrase (will be saved to ~/.memvc/passphrase, mode 0600)");
+        const pp = await promptHidden(chalk.cyan("Q4") + " Passphrase (will be saved to ~/.vibebook/passphrase, mode 0600)");
         if (!pp) {
-          const skip = await promptYesNo("  Skip storing? You'll need to set MEMVC_PASSPHRASE before sync", false);
+          const skip = await promptYesNo("  Skip storing? You'll need to set VIBEBOOK_PASSPHRASE before sync", false);
           if (skip) break;
           continue;
         }
@@ -106,7 +106,7 @@ export async function runWizard(): Promise<WizardAnswers> {
       runnerOptions.push({
         value: "github-action",
         label: "GitHub Action",
-        description: "runs digest in CI via GitHub Models (free); see `memvc workflow init`",
+        description: "runs digest in CI via GitHub Models (free); see `vibebook workflow init`",
       });
     }
     runner = runnerOptions.length === 1
@@ -191,7 +191,7 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
   }
   if (a.encrypt && a.passphraseEntered) {
     writePassphraseFile(a.passphraseEntered);
-    console.log(chalk.gray(`  passphrase saved to ~/.memvc/passphrase (mode 0600)`));
+    console.log(chalk.gray(`  passphrase saved to ~/.vibebook/passphrase (mode 0600)`));
   }
   const cfg: Config = {
     repoPath: a.localPath,
@@ -210,13 +210,13 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
     writeRepoSaltFile(cfg.repoPath, cfg.salt);
     console.log(chalk.gray(`  repo salt written to ${a.localPath}/.memvc/repo-salt.json (commit + push so CI can read it)`));
   }
-  console.log(chalk.green("\nok memvc initialized"));
-  console.log(chalk.gray(`  config: ~/.memvc/config.json`));
+  console.log(chalk.green("\nok vibebook initialized"));
+  console.log(chalk.gray(`  config: ~/.vibebook/config.json`));
   if (!a.repoUrl) {
-    console.log(chalk.cyan(`  local-only mode: sessions stay on this machine. To enable sync later, edit ~/.memvc/config.json and set "repoUrl".`));
+    console.log(chalk.cyan(`  local-only mode: sessions stay on this machine. To enable sync later, edit ~/.vibebook/config.json and set "repoUrl".`));
   }
   if (a.runner === "github-action") {
-    console.log(chalk.cyan("  next: run `memvc workflow init` to set up the GitHub Action that runs digest in CI"));
+    console.log(chalk.cyan("  next: run `vibebook workflow init` to set up the GitHub Action that runs digest in CI"));
   }
 }
 
@@ -224,7 +224,7 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
 export async function runInitWizard(): Promise<void> {
   if (configExists()) {
     const overwrite = await promptYesNo(
-      chalk.yellow("memvc already initialized at ~/.memvc/config.json. Overwrite?"),
+      chalk.yellow("vibebook already initialized at ~/.vibebook/config.json. Overwrite?"),
       false,
     );
     if (!overwrite) {
@@ -240,7 +240,7 @@ export async function runInitWizard(): Promise<void> {
     await applyWizardAnswers(answers);
     if (answers.digestEnabled && !runnerOk) {
       console.log(chalk.yellow(
-        `  note: digest will fail until '${answers.runner}' is installed; install it then run \`memvc sync\`.`,
+        `  note: digest will fail until '${answers.runner}' is installed; install it then run \`vibebook sync\`.`,
       ));
     }
   } finally {

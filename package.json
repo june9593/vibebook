@@ -1,24 +1,24 @@
 {
-  "name": "memvc",
+  "name": "vibebook",
   "version": "0.1.0",
-  "description": "Memory of vibe coding — sync AI coding sessions to a private repo",
+  "description": "Vibe coding memory book — sync AI coding sessions to a private repo",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/june9593/memvc.git"
+    "url": "git+https://github.com/june9593/vibebook.git"
   },
-  "homepage": "https://github.com/june9593/memvc",
-  "bugs": "https://github.com/june9593/memvc/issues",
-  "keywords": ["memory", "ai", "claude", "copilot", "sessions", "digest", "vibe-coding"],
-  "bin": { "memvc": "./dist/bin/memvc.js" },
+  "homepage": "https://github.com/june9593/vibebook",
+  "bugs": "https://github.com/june9593/vibebook/issues",
+  "keywords": ["memory", "ai", "claude", "copilot", "sessions", "digest", "vibe-coding", "vibebook"],
+  "bin": { "vibebook": "./dist/bin/vibebook.js" },
   "files": ["dist/", "assets/", "README.md"],
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dev": "tsx bin/memvc.ts",
-    "prepack": "npm run build && chmod +x dist/bin/memvc.js",
+    "dev": "tsx bin/vibebook.ts",
+    "prepack": "npm run build && chmod +x dist/bin/vibebook.js",
     "prepublishOnly": "npm test"
   },
   "dependencies": {

@@ -8,7 +8,7 @@ describe("initCmd flag mode", () => {
   let originUrl: string;
 
   beforeEach(async () => {
-    tmpHome = mkdtempSync(join(tmpdir(), "memvc-init-"));
+    tmpHome = mkdtempSync(join(tmpdir(), "vibebook-init-"));
     vi.stubEnv("HOME", tmpHome);
     vi.resetModules();
     const { simpleGit } = await import("simple-git");
@@ -44,10 +44,10 @@ describe("initCmd flag mode", () => {
       passphrase: "abc",
       digestEnabled: false,
     });
-    const cfg = JSON.parse(readFileSync(join(tmpHome, ".memvc", "config.json"), "utf8"));
+    const cfg = JSON.parse(readFileSync(join(tmpHome, ".vibebook", "config.json"), "utf8"));
     expect(cfg.encrypt).toBe(true);
     expect(cfg.digestEnabled).toBe(false);
-    expect(readFileSync(join(tmpHome, ".memvc", "passphrase"), "utf8").trim()).toBe("abc");
+    expect(readFileSync(join(tmpHome, ".vibebook", "passphrase"), "utf8").trim()).toBe("abc");
     // repo-salt.json is written into the repo so the GH Action can read it.
     const saltFile = join(localPath, ".memvc", "repo-salt.json");
     expect(existsSync(saltFile)).toBe(true);
@@ -55,13 +55,13 @@ describe("initCmd flag mode", () => {
   });
 
   it("flag mode default localPath is ./.memvc/repo under cwd", async () => {
-    const cwd = realpathSync(mkdtempSync(join(tmpdir(), "memvc-cwd-")));
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), "vibebook-cwd-")));
     const orig = process.cwd();
     process.chdir(cwd);
     try {
       const { initCmd } = await import("../../src/commands/init.js");
       await initCmd({ repoUrl: originUrl });
-      const cfg = JSON.parse(readFileSync(join(tmpHome, ".memvc", "config.json"), "utf8"));
+      const cfg = JSON.parse(readFileSync(join(tmpHome, ".vibebook", "config.json"), "utf8"));
       expect(cfg.repoPath).toBe(join(cwd, ".memvc", "repo"));
       expect(existsSync(join(cwd, ".memvc", "repo", ".git"))).toBe(true);
     } finally {

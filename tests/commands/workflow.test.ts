@@ -8,13 +8,13 @@ describe("workflowInitCmd", () => {
   let repoPath: string;
 
   beforeEach(() => {
-    tmpHome = mkdtempSync(join(tmpdir(), "memvc-wf-"));
+    tmpHome = mkdtempSync(join(tmpdir(), "vibebook-wf-"));
     vi.stubEnv("HOME", tmpHome);
     repoPath = join(tmpHome, "memvc-repo");
     mkdirSync(repoPath, { recursive: true });
     // Minimal config for readConfig().
-    mkdirSync(join(tmpHome, ".memvc"), { recursive: true });
-    writeFileSync(join(tmpHome, ".memvc", "config.json"), JSON.stringify({
+    mkdirSync(join(tmpHome, ".vibebook"), { recursive: true });
+    writeFileSync(join(tmpHome, ".vibebook", "config.json"), JSON.stringify({
       repoPath, repoUrl: "git@example.com:u/r.git",
       encrypt: true, salt: "x",
       deviceBranch: "test.lan",
@@ -32,17 +32,17 @@ describe("workflowInitCmd", () => {
   it("writes the workflow file under repoPath/.github/workflows/", async () => {
     const { workflowInitCmd } = await import("../../src/commands/workflow.js");
     await workflowInitCmd();
-    const out = join(repoPath, ".github", "workflows", "memvc-digest.yml");
+    const out = join(repoPath, ".github", "workflows", "vibebook-digest.yml");
     expect(existsSync(out)).toBe(true);
     const body = readFileSync(out, "utf8");
     // Sanity: the template should at least mention these fixed strings.
-    expect(body).toContain("memvc digest");
-    expect(body).toContain("MEMVC_CI");
+    expect(body).toContain("vibebook digest");
+    expect(body).toContain("VIBEBOOK_CI");
     expect(body).toContain("workflow_dispatch");
   });
 
   it("refuses to overwrite without --force", async () => {
-    const out = join(repoPath, ".github", "workflows", "memvc-digest.yml");
+    const out = join(repoPath, ".github", "workflows", "vibebook-digest.yml");
     mkdirSync(join(repoPath, ".github", "workflows"), { recursive: true });
     writeFileSync(out, "existing content\n");
     const { workflowInitCmd } = await import("../../src/commands/workflow.js");
@@ -51,13 +51,13 @@ describe("workflowInitCmd", () => {
   });
 
   it("overwrites with --force", async () => {
-    const out = join(repoPath, ".github", "workflows", "memvc-digest.yml");
+    const out = join(repoPath, ".github", "workflows", "vibebook-digest.yml");
     mkdirSync(join(repoPath, ".github", "workflows"), { recursive: true });
     writeFileSync(out, "existing\n");
     const { workflowInitCmd } = await import("../../src/commands/workflow.js");
     await workflowInitCmd({ force: true });
     const body = readFileSync(out, "utf8");
     expect(body).not.toBe("existing\n");
-    expect(body).toContain("memvc digest");
+    expect(body).toContain("vibebook digest");
   });
 });

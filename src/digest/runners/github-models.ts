@@ -6,7 +6,7 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 
 /**
  * GitHub Models REST runner. Auth via `GITHUB_TOKEN` env (Action default) or
- * `MEMVC_GITHUB_TOKEN` for local testing. Token must have `models:read` scope.
+ * `VIBEBOOK_GITHUB_TOKEN` for local testing. Token must have `models:read` scope.
  *
  * Model id format is `<vendor>/<model>` per the GitHub Models catalog
  * (e.g. `openai/gpt-4o-mini`, `meta/Llama-3.3-70B-Instruct`).
@@ -20,11 +20,11 @@ export async function runGithubModels(
   opts: RunOptions,
 ): Promise<RunResult> {
   const started = Date.now();
-  const token = process.env.GITHUB_TOKEN ?? process.env.MEMVC_GITHUB_TOKEN ?? "";
+  const token = process.env.GITHUB_TOKEN ?? process.env.VIBEBOOK_GITHUB_TOKEN ?? "";
   if (!token) {
     return {
       ok: false,
-      error: "github-models: no GITHUB_TOKEN (or MEMVC_GITHUB_TOKEN) in env",
+      error: "github-models: no GITHUB_TOKEN (or VIBEBOOK_GITHUB_TOKEN) in env",
       durationMs: Date.now() - started,
     };
   }

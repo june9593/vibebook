@@ -31,32 +31,32 @@ describe("ClaudeCodeAdapter", () => {
 describe("ClaudeCodeAdapter — pollution filter", () => {
   let claudeRoot: string;
   beforeEach(() => {
-    claudeRoot = mkdtempSync(join(tmpdir(), "memvc-claude-test-"));
+    claudeRoot = mkdtempSync(join(tmpdir(), "vibebook-claude-test-"));
   });
 
-  it("skips top-level project dirs that look like memvc scratch", async () => {
+  it("skips top-level project dirs that look like vibebook scratch", async () => {
     // Real-looking project dir
     const realProj = join(claudeRoot, "-Users-yueliu-edge-memvc");
     mkdirSync(realProj, { recursive: true });
     writeFileSync(join(realProj, "session-1.jsonl"), '{"sessionId":"s1","cwd":"/Users/yueliu/edge/memvc"}\n');
 
     // Polluted dirs — different shapes
-    const polluted1 = join(claudeRoot, "-private-var-folders-zm-x-T-memvc-claude-Abc");
+    const polluted1 = join(claudeRoot, "-private-var-folders-zm-x-T-vibebook-claude-Abc");
     mkdirSync(polluted1, { recursive: true });
-    writeFileSync(join(polluted1, "junk.jsonl"), '{"sessionId":"junk","cwd":"/private/var/folders/x/T/memvc-claude-Abc"}\n');
+    writeFileSync(join(polluted1, "junk.jsonl"), '{"sessionId":"junk","cwd":"/private/var/folders/x/T/vibebook-claude-Abc"}\n');
 
-    const polluted2 = join(claudeRoot, "-var-folders-y-T-memvc-claude-Def");
+    const polluted2 = join(claudeRoot, "-var-folders-y-T-vibebook-claude-Def");
     mkdirSync(polluted2, { recursive: true });
-    writeFileSync(join(polluted2, "junk2.jsonl"), '{"sessionId":"junk2","cwd":"/var/folders/y/T/memvc-claude-Def"}\n');
+    writeFileSync(join(polluted2, "junk2.jsonl"), '{"sessionId":"junk2","cwd":"/var/folders/y/T/vibebook-claude-Def"}\n');
 
-    const polluted3 = join(claudeRoot, "-tmp-memvc-claude-Ghi");
+    const polluted3 = join(claudeRoot, "-tmp-vibebook-claude-Ghi");
     mkdirSync(polluted3, { recursive: true });
-    writeFileSync(join(polluted3, "junk3.jsonl"), '{"sessionId":"junk3","cwd":"/tmp/memvc-claude-Ghi"}\n');
+    writeFileSync(join(polluted3, "junk3.jsonl"), '{"sessionId":"junk3","cwd":"/tmp/vibebook-claude-Ghi"}\n');
 
-    // Generic memvc-claude name without the standard tmpdir prefix
-    const polluted4 = join(claudeRoot, "-some-random-path-memvc-claude-Jkl");
+    // Generic vibebook-claude name without the standard tmpdir prefix
+    const polluted4 = join(claudeRoot, "-some-random-path-vibebook-claude-Jkl");
     mkdirSync(polluted4, { recursive: true });
-    writeFileSync(join(polluted4, "junk4.jsonl"), '{"sessionId":"junk4","cwd":"/x/memvc-claude-Jkl"}\n');
+    writeFileSync(join(polluted4, "junk4.jsonl"), '{"sessionId":"junk4","cwd":"/x/vibebook-claude-Jkl"}\n');
 
     // Legit developer work in /tmp/experiment — must NOT be filtered out.
     const realTmpProj = join(claudeRoot, "-tmp-experiment");
@@ -70,11 +70,11 @@ describe("ClaudeCodeAdapter — pollution filter", () => {
     }
     // Real session yielded.
     expect(sourcePaths.some((p) => p.includes("-Users-yueliu-edge-memvc"))).toBe(true);
-    // Legit tmp-rooted developer work also yielded — we only filter memvc's own scratch.
+    // Legit tmp-rooted developer work also yielded — we only filter vibebook's own scratch.
     expect(sourcePaths.some((p) => p.includes("-tmp-experiment"))).toBe(true);
-    // No memvc-claude scratch yielded — assertion is on discover() itself,
+    // No vibebook-claude scratch yielded — assertion is on discover() itself,
     // not on load(), so a filter regression cannot be masked by parse errors.
-    // (The mkdtemp root itself contains "memvc-claude-test-" so we check the
+    // (The mkdtemp root itself contains "vibebook-claude-test-" so we check the
     // junk filenames that only exist inside the polluted dirs.)
     expect(sourcePaths.some((p) => p.endsWith("junk.jsonl"))).toBe(false);
     expect(sourcePaths.some((p) => p.endsWith("junk2.jsonl"))).toBe(false);

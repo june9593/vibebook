@@ -1,22 +1,22 @@
-# memvc — Memory of Vibe Coding
+# vibebook — Vibe Coding Memory Book
 
 Sync your AI coding sessions (Claude Code, VS Code Copilot Chat) across machines
 via a private Git repo. Manual, transparent, encryption-optional.
 
 ## Install
 
-    npm install -g memvc
+    npm install -g vibebook
 
 ## Setup
 
 Run the interactive wizard:
 
-    memvc init
+    vibebook init
 
 The wizard asks:
 1. **Repo URL** — your private memory repo (will be cloned if not present)
 2. **Local path** — defaults to `./.memvc/repo`
-3. **Encrypt?** — y/n; if y, asks for a passphrase saved to `~/.memvc/passphrase` (mode 0600)
+3. **Encrypt?** — y/n; if y, asks for a passphrase saved to `~/.vibebook/passphrase` (mode 0600)
 4. **Digest into a book?** — y/n
 5. **Runner** — local Claude CLI today; GitHub Action coming soon
 6. **Model** — blank for runner default
@@ -24,13 +24,13 @@ The wizard asks:
 
 Flag mode (CI-friendly): pass any of `--local-path / --encrypt / --no-digest / --device / --passphrase` (or a positional `<repoUrl>`) and the wizard is bypassed.
 
-    memvc init git@github.com:you/your-memory-repo.git --encrypt --passphrase secret
+    vibebook init git@github.com:you/your-memory-repo.git --encrypt --passphrase secret
 
 ## Daily use
 
-    memvc sync          # extract + commit + push
-    memvc list          # show synced sessions
-    memvc show <ref>    # dump one session as Markdown
+    vibebook sync          # extract + commit + push
+    vibebook list          # show synced sessions
+    vibebook show <ref>    # dump one session as Markdown
 
 ## Layout
 
@@ -42,10 +42,13 @@ Flag mode (CI-friendly): pass any of `--local-path / --encrypt / --no-digest / -
       summaries/     (future: hand-written or LLM-generated digests)
       decisions/     (future: ADRs)
 
+> Note: the in-repo data dir is `.memvc/` (not `.vibebook/`) for backwards
+> compatibility with existing memory repos initialized before the rename.
+
 ## Security
 
 - Repo MUST be private. Enable GitHub secret scanning + push protection.
-- `--encrypt` uses AES-256-GCM with scrypt KDF from `MEMVC_PASSPHRASE`.
+- `--encrypt` uses AES-256-GCM with scrypt KDF from `VIBEBOOK_PASSPHRASE`.
 - Passphrase is never stored on disk.
 
 ## Per-device branches (v0.2+)
@@ -56,26 +59,26 @@ from machine `yuedeMacBook-Pro-2.local`, check out that branch on the remote.
 
 Override the auto-derived name:
 
-    memvc init <repoUrl> --device mbp2
+    vibebook init <repoUrl> --device mbp2
 
-Existing repos initialized before v0.2 will auto-migrate on the next `memvc sync`:
+Existing repos initialized before v0.2 will auto-migrate on the next `vibebook sync`:
 the local `main` branch is renamed to `<device>`, and a fresh unborn `main` is left
 for you to use as a merge target.
 
 ## Run digest in GitHub Actions
 
-If you'd rather not burn local Claude credits / cycles, memvc can run the digest pipeline inside a GitHub Action using **GitHub Models** (free for personal accounts) as the LLM.
+If you'd rather not burn local Claude credits / cycles, vibebook can run the digest pipeline inside a GitHub Action using **GitHub Models** (free for personal accounts) as the LLM.
 
 ```bash
-# One-time setup inside your memvc repo:
-memvc workflow init
-cd ~/memvc-repo  # or wherever your memvc repo lives
-git add .github/workflows/memvc-digest.yml
-git commit -m "add memvc digest workflow"
+# One-time setup inside your vibebook repo:
+vibebook workflow init
+cd ~/memvc-repo  # or wherever your vibebook repo lives
+git add .github/workflows/vibebook-digest.yml
+git commit -m "add vibebook digest workflow"
 git push
 ```
 
-If your config has `encrypt: true`, also set the **MEMVC_PASSPHRASE** repo secret (Settings → Secrets and variables → Actions → New repository secret). The salt is auto-written to `.memvc/repo-salt.json` during `memvc init` and is safe to commit (security relies on the passphrase, not the salt).
+If your config has `encrypt: true`, also set the **VIBEBOOK_PASSPHRASE** repo secret (Settings → Secrets and variables → Actions → New repository secret). The salt is auto-written to `.memvc/repo-salt.json` during `vibebook init` and is safe to commit (security relies on the passphrase, not the salt).
 
 The workflow runs on:
 - Every `push` to a device branch (default patterns: `*.lan`, `*-pro`, `*-mbp`, `*-MBP*`, `*-pc`, `*-laptop`). Edit the workflow if your hostname doesn't match.

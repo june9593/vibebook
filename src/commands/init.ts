@@ -32,7 +32,7 @@ export async function initCmd(opts: InitOptions): Promise<void> {
 
   // Flag mode: non-interactive.
   if (!opts.repoUrl) {
-    throw new Error("repoUrl is required in flag mode (or run `memvc init` with no args for the wizard)");
+    throw new Error("repoUrl is required in flag mode (or run `vibebook init` with no args for the wizard)");
   }
   const localPath = opts.localPath ?? join(process.cwd(), ".memvc", "repo");
   const mat = await materializeRepoAtPath(localPath, opts.repoUrl);
@@ -60,13 +60,13 @@ export async function initCmd(opts: InitOptions): Promise<void> {
   if (cfg.encrypt) {
     writeRepoSaltFile(cfg.repoPath, cfg.salt);
   }
-  console.log(chalk.green(`memvc initialized:`));
+  console.log(chalk.green(`vibebook initialized:`));
   console.log(`  repo: ${localPath}`);
   console.log(`  remote: ${opts.repoUrl}`);
   console.log(`  device branch: ${cfg.deviceBranch}`);
   console.log(`  encrypt: ${cfg.encrypt}`);
   console.log(`  digest enabled: ${cfg.digestEnabled}`);
   if (cfg.encrypt && !opts.passphrase) {
-    console.log(chalk.cyan(`  set MEMVC_PASSPHRASE env var (or pass --passphrase) before running sync`));
+    console.log(chalk.cyan(`  set VIBEBOOK_PASSPHRASE env var (or pass --passphrase) before running sync`));
   }
 }
