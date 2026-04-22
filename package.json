@@ -3,13 +3,23 @@
   "version": "0.1.0",
   "description": "Memory of vibe coding — sync AI coding sessions to a private repo",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/june9593/memvc.git"
+  },
+  "homepage": "https://github.com/june9593/memvc",
+  "bugs": "https://github.com/june9593/memvc/issues",
+  "keywords": ["memory", "ai", "claude", "copilot", "sessions", "digest", "vibe-coding"],
   "bin": { "memvc": "./dist/bin/memvc.js" },
   "files": ["dist/", "assets/", "README.md"],
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dev": "tsx bin/memvc.ts"
+    "dev": "tsx bin/memvc.ts",
+    "prepack": "npm run build && chmod +x dist/bin/memvc.js",
+    "prepublishOnly": "npm test"
   },
   "dependencies": {
     "commander": "^12.1.0",
