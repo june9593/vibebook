@@ -23,12 +23,18 @@ export interface DigestOptions {
 }
 
 /**
- * `vibebook digest --redo` entrypoint: reads config, loads indexes from disk,
- * runs the redo pipeline, persists, and (when push is configured) commits +
- * pushes the book changes onto the device branch.
+ * `vibebook digest` entrypoints:
  *
- * Without `--redo` we currently print a help message — `vibebook sync` is the
- * canonical way to drive the pipeline for new content.
+ *   - no flag        run digest pipeline (phases 3-7) over existing index.json
+ *                    + book index, then push. CI uses this — local extract is
+ *                    skipped because raw_sessions/ + index.json are already in
+ *                    the checkout.
+ *   - --redo         rerun failed articles + force-rewrite every chapter.
+ *   - --reset        DESTRUCTIVE wipe of book/ + index.book.json, then run
+ *                    digest from scratch.
+ *
+ * `vibebook sync` is what users run locally — it does extract first, then
+ * delegates to the same digest pipeline.
  */
 export async function digestCmd(opts: DigestOptions): Promise<void> {
   if (opts.reset && opts.redo) {
@@ -39,11 +45,7 @@ export async function digestCmd(opts: DigestOptions): Promise<void> {
     return runDigestResetCmd();
   }
   if (!opts.redo) {
-    console.log(chalk.yellow(
-      "Nothing to do without --redo. Use `vibebook sync` for the regular pipeline,\n" +
-      "or `vibebook digest --redo` to retry failed articles + force-rewrite all chapters.",
-    ));
-    return;
+    return runDigestNoFlagCmd();
   }
 
   const cfg = readConfigWithMigration();
@@ -143,6 +145,65 @@ export function uniqueProjectsFromReport(
  */
 function existingPaths(repoRoot: string, paths: string[]): string[] {
   return paths.filter((p) => existsSync(join(repoRoot, p)));
+}
+
+/**
+ * `vibebook digest` (no flag) entrypoint: runs the full digest pipeline
+ * (phases 3-7) over the existing index.json + book index, then commits/pushes.
+ *
+ * Used by CI: the GH Action checks out the device branch (which already has
+ * raw_sessions/ + index.json from the latest local sync), then needs to turn
+ * those into articles using the configured runner. There's no local
+ * ~/.claude/ to extract from in CI, so the extract phase is skipped.
+ */
+async function runDigestNoFlagCmd(): Promise<void> {
+  const cfg = readConfigWithMigration();
+  await migrateLegacyDataDir(cfg.repoPath);
+  const key = cfg.encrypt
+    ? deriveKey(getPassphrase(), Buffer.from(cfg.salt, "base64"))
+    : null;
+
+  console.log(chalk.gray("Running digest pipeline (phases 3-7)..."));
+  const idx = loadIndex(cfg.repoPath);
+  const book = loadBookIndex(cfg.repoPath);
+  const runner = createRunner({ runner: cfg.runner, runnerModel: cfg.runnerModel });
+  const report = await runDigest(
+    runner, cfg.repoPath, idx, book, key,
+    cfg.threadingConcurrency, cfg.threadingMaxAttempts, consoleReporter(),
+  );
+  saveBookIndex(cfg.repoPath, book);
+  console.log(chalk.bold(
+    `\ndigest: +${report.articlesOk} articles, ${report.threadsSkipped} skip, ${report.articlesFailed} fail; chapters [${report.chaptersRewritten.join(", ")}]`,
+  ));
+  if (report.articleFailures.length > 0) {
+    for (const f of report.articleFailures) {
+      console.log(chalk.yellow(`    ! article ${f.threadId} failed: ${f.error.replace(/\s+/g, " ").slice(0, 200)}`));
+    }
+  }
+
+  if (cfg.deviceBranch) {
+    const git = await ensureRepo(cfg.repoPath, cfg.repoUrl);
+    try { await git.fetch(); } catch { /* ok if offline */ }
+    await ensureDeviceBranch(git, cfg.deviceBranch);
+    const paths = existingPaths(cfg.repoPath, [
+      BOOK_INDEX_REL,
+      ...report.tocFilesWritten,
+      ...report.chaptersRewritten.map((p) => `book/${p}/chapter.md`),
+      ...uniqueProjectsFromReport(report).map((p) => `book/${p}/articles`),
+    ]);
+    const r = await commitAndPush(
+      git,
+      `vibebook digest: +${report.articlesOk} articles, ${report.chaptersRewritten.length} chapters`,
+      paths,
+      cfg.deviceBranch,
+      (stage) => console.log(chalk.gray(`  ${stage}`)),
+    );
+    if (r.committed) {
+      console.log(chalk.cyan(r.pushed ? "Pushed (book)." : "Committed book (push failed)."));
+    } else {
+      console.log(chalk.gray("Nothing to commit."));
+    }
+  }
 }
 
 /**

@@ -109,7 +109,11 @@ jobs:
         env:
           VIBEBOOK_CI: "1"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: vibebook digest --redo
+        # `vibebook digest` (no flag) runs the digest pipeline over the
+        # checkout's existing index.json + book index. We skip extract
+        # (no local ~/.claude/ in CI). Use --redo only if you need to
+        # retry previously-failed articles.
+        run: vibebook digest
 
       - name: Push book commit
         run: git push origin HEAD:${{ inputs.branch || github.ref_name }}
