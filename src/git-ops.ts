@@ -1,7 +1,41 @@
 import { simpleGit, SimpleGit } from "simple-git";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
+
+/**
+ * Expand a leading `~` to the user's home dir. (Shell expansion doesn't
+ * happen for prompt input — `~/edge` would be taken literally otherwise.)
+ */
+export function expandHome(p: string): string {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/")) return join(homedir(), p.slice(2));
+  return p;
+}
+
+/**
+ * Clone with stdio inherited so git's terminal-based credential prompts
+ * (HTTPS username/password, SSH passphrase) actually reach the user instead
+ * of hanging forever on a piped FD that no one writes to. Also sets
+ * GIT_TERMINAL_PROMPT=0 when stdin isn't a TTY so the call fails fast in CI
+ * instead of hanging.
+ */
+function cloneWithProgress(repoUrl: string, dest: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const env = { ...process.env };
+    if (!process.stdin.isTTY) env.GIT_TERMINAL_PROMPT = "0";
+    const p = spawn("git", ["clone", "--progress", repoUrl, dest], {
+      stdio: "inherit",
+      env,
+    });
+    p.on("error", reject);
+    p.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`git clone exited with code ${code}. If this is an HTTPS URL needing auth, prefer SSH (git@github.com:...) or store a PAT via 'git config credential.helper'.`));
+    });
+  });
+}
 
 export interface MaterializeResult {
   /** "cloned" = brand-new clone; "existing" = used existing checkout;
@@ -27,18 +61,19 @@ export async function materializeRepoAtPath(
   localPath: string,
   repoUrl: string,
 ): Promise<MaterializeResult> {
-  if (!existsSync(localPath)) {
-    mkdirSync(localPath, { recursive: true });
-    await simpleGit().clone(repoUrl, localPath);
+  const path = resolve(expandHome(localPath));
+  if (!existsSync(path)) {
+    mkdirSync(path, { recursive: true });
+    await cloneWithProgress(repoUrl, path);
     return { kind: "cloned" };
   }
-  const entries = readdirSync(localPath);
+  const entries = readdirSync(path);
   if (entries.length === 0) {
-    await simpleGit().clone(repoUrl, localPath);
+    await cloneWithProgress(repoUrl, path);
     return { kind: "cloned" };
   }
   if (entries.includes(".git")) {
-    const git = simpleGit(localPath);
+    const git = simpleGit(path);
     let remote = "";
     try {
       remote = (await git.getConfig("remote.origin.url")).value ?? "";
@@ -46,7 +81,7 @@ export async function materializeRepoAtPath(
     return { kind: "existing", existingRemote: remote };
   }
   throw new Error(
-    `${localPath} is not empty and is not a git repo. Pick another path or empty this one first.`,
+    `${path} is not empty and is not a git repo. Pick another path or empty this one first.`,
   );
 }
 

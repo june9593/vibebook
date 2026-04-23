@@ -1,7 +1,7 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import chalk from "chalk";
 import { prompt, promptYesNo, promptChoice, promptHidden, closePrompts } from "../prompts.js";
-import { materializeRepoAtPath } from "../git-ops.js";
+import { materializeRepoAtPath, expandHome } from "../git-ops.js";
 import { writePassphraseFile } from "../passphrase-store.js";
 import {
   freshSaltBase64, writeConfig, writeRepoSaltFile, configExists,
@@ -11,6 +11,7 @@ import {
 import { deviceBranchFromHostname } from "../device.js";
 import { checkBinary, runnerBinary, runnerInstallUrl } from "../runner-check.js";
 import { createRunner } from "../digest/runner.js";
+import { fetchGithubModelsCatalog, GITHUB_MODELS_FALLBACK } from "../github-models-catalog.js";
 
 export interface WizardAnswers {
   repoUrl: string;
@@ -57,10 +58,11 @@ export async function runWizard(): Promise<WizardAnswers> {
     if (!repoUrl) throw new Error("repo URL is required");
 
     // Q2: local path
-    localPath = await prompt(
+    const rawPath = await prompt(
       chalk.cyan("Q2") + ` Where should the repo live locally?`,
       localPath,
     );
+    localPath = resolve(expandHome(rawPath));
 
     // Q3: encrypt
     encrypt = await promptYesNo(
@@ -112,10 +114,32 @@ export async function runWizard(): Promise<WizardAnswers> {
     runner = runnerOptions.length === 1
       ? runnerOptions[0]!.value
       : await promptChoice(chalk.cyan("Q6") + " Runner", runnerOptions, 0);
-    runnerModel = await prompt(
-      chalk.cyan("Q7") + " Model name (blank = runner default)",
-      "",
-    );
+
+    // Q7: model. For github-action, fetch the catalog and let the user pick.
+    // For claude-cli, blank = whatever `claude` ships with (recommended).
+    if (runner === "github-action") {
+      console.log(chalk.gray("  fetching GitHub Models catalog..."));
+      const models = await fetchGithubModelsCatalog();
+      // Surface "low" rate-limit-tier models first — they have the most
+      // generous quotas on the free tier. Default selection: gpt-4o-mini if
+      // present (cheapest sensible default), else first low-tier, else first.
+      const sorted = [...models].sort((a, b) => {
+        const tierRank = (t?: string) => t === "low" ? 0 : t === "high" ? 1 : 2;
+        return tierRank(a.rateLimitTier) - tierRank(b.rateLimitTier);
+      });
+      const choices = sorted.map((m) => ({
+        value: m.id,
+        label: `${m.id}  (${m.publisher}${m.rateLimitTier ? `, ${m.rateLimitTier}-tier` : ""})`,
+        description: m.name,
+      }));
+      const defaultIdx = Math.max(0, sorted.findIndex((m) => m.id === "openai/gpt-4o-mini"));
+      runnerModel = await promptChoice(chalk.cyan("Q7") + " Model (low-tier = generous free quota)", choices, defaultIdx);
+    } else {
+      runnerModel = await prompt(
+        chalk.cyan("Q7") + " Model name (blank = runner default)",
+        "",
+      );
+    }
   }
 
   return { repoUrl, localPath, encrypt, passphraseEntered, digestEnabled, runner, runnerModel };
