@@ -1,6 +1,6 @@
 {
   "name": "vibebook",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "Vibe coding memory book — sync AI coding sessions to a private repo",
   "type": "module",
   "license": "MIT",
