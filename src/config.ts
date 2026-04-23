@@ -9,8 +9,11 @@ import { dataDirAbs, repoSaltAbs } from "./repo-data-dir.js";
 const CONFIG_DIR = join(homedir(), ".vibebook");
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 
-/** Default cap on concurrent runner calls during the threading phase. */
-export const DEFAULT_THREADING_CONCURRENCY = 4;
+/** Default cap on concurrent runner calls during the threading phase.
+ *  Lowered from 4 → 1 because github-action runner (GitHub Models) burst-
+ *  rate-limits HARD at concurrency > 1. claude-cli runners can override
+ *  to 4+ in their config. */
+export const DEFAULT_THREADING_CONCURRENCY = 1;
 
 /** Default attempts per threading batch before soft-failing it. */
 export const DEFAULT_THREADING_MAX_ATTEMPTS = 3;

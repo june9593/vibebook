@@ -148,15 +148,20 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
   // git-rm'd it). Write it from the in-memory salt so the GH Action workflow
   // doesn't fail on its salt-presence guard. Salt is not sensitive — security
   // relies on the passphrase.
+  //
+  // Also: `vibebook init` writes the file to the worktree but never `git add`s
+  // it. So even when the file exists locally it may be untracked. We stage
+  // the path on every encrypted-mode sync — git no-ops if there's nothing
+  // new to commit.
   const saltRelPath = REPO_SALT_REL;
-  let saltJustWritten = false;
+  let saltStaged = false;
   if (opts.encrypt && opts.saltB64) {
     const saltAbs = join(opts.repoPath, saltRelPath);
     if (!existsSync(saltAbs)) {
       writeRepoSaltFile(opts.repoPath, opts.saltB64);
-      saltJustWritten = true;
       console.log(chalk.cyan(`+ wrote missing ${saltRelPath} (needed by GitHub Action workflow)`));
     }
+    saltStaged = true;
   }
 
   let committed = false, pushed = false;
@@ -191,7 +196,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
       };
     }
     const all = [...pathsWritten, indexPath];
-    if (saltJustWritten) all.push(saltRelPath);
+    if (saltStaged) all.push(saltRelPath);
     if (dataDirMig.migrated && dataDirMig.viaGit) {
       // Stage the renamed dir contents so `git mv` is recorded in this commit.
       // (git mv already staged them, but adding by path is idempotent and keeps
@@ -201,7 +206,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     console.log(chalk.gray(`Staging ${all.length} paths and committing...`));
     const commitMsg = newCount > 0
       ? `vibebook sync: +${newCount} sessions${dataDirMig.migrated ? " (+ rename .memvc/→.vibebook/)" : ""}`
-      : (saltJustWritten ? "vibebook: backfill repo-salt.json for CI" :
+      : (saltStaged ? "vibebook: backfill repo-salt.json for CI" :
          (dataDirMig.migrated ? "vibebook: rename .memvc/ → .vibebook/" :
           `vibebook sync: +${newCount} sessions`));
     const r = await commitAndPush(
