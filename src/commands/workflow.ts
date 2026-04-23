@@ -5,6 +5,7 @@ import chalk from "chalk";
 import { readConfig, writeRepoSaltFile } from "../config.js";
 import { migrateLegacyDataDir, migratedDataDirPaths } from "../migrate.js";
 import { REPO_SALT_REL, repoSaltAbs } from "../repo-data-dir.js";
+import { ensureRepo, ensureDeviceBranch, commitAndPush, fastForwardBranch } from "../git-ops.js";
 
 /**
  * Resolve the bundled workflow template path. The build emits to
@@ -28,7 +29,7 @@ function templatePath(): string {
   );
 }
 
-export async function workflowInitCmd(opts: { force?: boolean } = {}): Promise<void> {
+export async function workflowInitCmd(opts: { force?: boolean; noPush?: boolean } = {}): Promise<void> {
   const cfg = readConfig();
   const target = join(cfg.repoPath, ".github", "workflows", "vibebook-digest.yml");
   if (existsSync(target) && !opts.force) {
@@ -56,32 +57,61 @@ export async function workflowInitCmd(opts: { force?: boolean } = {}): Promise<v
     console.log(chalk.green(`renamed legacy .memvc/ → .vibebook/ ${dataDirMig.viaGit ? "(via git mv)" : ""}`));
   }
 
-  // Self-heal: legacy repos initialized before salt-write was wired into init
-  // are missing .vibebook/repo-salt.json, which the workflow's fail-fast guard
-  // requires when encryption is on. Backfill it here from the in-memory salt.
-  let saltJustWritten = false;
+  // Backfill .vibebook/repo-salt.json. We always write it when encrypt is on
+  // (init may have written it but never staged; or this could be a legacy repo
+  // that never had it). git add later is idempotent.
   if (cfg.encrypt) {
     if (!existsSync(repoSaltAbs(cfg.repoPath))) {
       writeRepoSaltFile(cfg.repoPath, cfg.salt);
-      saltJustWritten = true;
-      console.log(chalk.green(`backfilled missing ${REPO_SALT_REL} (legacy repo)`));
+      console.log(chalk.green(`wrote ${REPO_SALT_REL}`));
     }
   }
 
-  console.log(chalk.gray("\nNext steps:"));
-  console.log(chalk.gray(`  1. cd ${cfg.repoPath}`));
-  const extras: string[] = [];
-  if (saltJustWritten) extras.push(REPO_SALT_REL);
-  if (dataDirMig.migrated && dataDirMig.viaGit) extras.push(...migratedDataDirPaths(cfg.repoPath));
-  const stagePaths = [".github/workflows/vibebook-digest.yml", ...extras].join(" ");
-  const commitMsg = (saltJustWritten || dataDirMig.migrated)
-    ? "add vibebook digest workflow + repo data-dir housekeeping"
-    : "add vibebook digest workflow";
-  console.log(chalk.gray(`  2. git add ${stagePaths} && git commit -m '${commitMsg}' && git push`));
-  if (cfg.encrypt) {
-    console.log(chalk.cyan("  3. Set repo secret VIBEBOOK_PASSPHRASE in GitHub Settings -> Secrets and variables -> Actions -> 'New repository secret'"));
-  } else {
-    console.log(chalk.gray("  3. (encryption is off; no secret needed - but anyone with repo access can read raw_sessions)"));
+  // Auto-commit + push so the user doesn't have to copy-paste git commands.
+  // Skip when --no-push (or when there's no remote URL configured = local-only).
+  const wantPush = !opts.noPush && cfg.repoUrl && cfg.deviceBranch;
+  if (!wantPush) {
+    console.log(chalk.gray("\nLocal-only mode: workflow yaml written but not committed/pushed."));
+    console.log(chalk.gray(`  repoUrl: ${cfg.repoUrl || "(none)"}`));
+    if (cfg.encrypt) {
+      console.log(chalk.cyan("  Don't forget to set VIBEBOOK_PASSPHRASE secret on GitHub once you push."));
+    }
+    return;
   }
-  console.log(chalk.gray("  4. Trigger: push a device branch, OR run from the Actions tab -> 'vibebook digest' -> 'Run workflow'"));
+
+  console.log(chalk.gray(`\nCommitting + pushing to '${cfg.deviceBranch}'...`));
+  const git = await ensureRepo(cfg.repoPath, cfg.repoUrl);
+  try { await git.fetch(); } catch { /* offline / empty */ }
+  await ensureDeviceBranch(git, cfg.deviceBranch);
+  try {
+    await fastForwardBranch(git, cfg.deviceBranch, (s) => console.log(chalk.gray(`  ${s}`)));
+  } catch (err) {
+    console.log(chalk.red(`! could not sync local branch with origin: ${err instanceof Error ? err.message : String(err)}`));
+    console.log(chalk.cyan(`  Skipping push. Resolve in ${cfg.repoPath} and re-run \`vibebook workflow init\`.`));
+    return;
+  }
+  const paths: string[] = [".github/workflows/vibebook-digest.yml"];
+  if (cfg.encrypt) paths.push(REPO_SALT_REL);
+  if (dataDirMig.migrated && dataDirMig.viaGit) paths.push(...migratedDataDirPaths(cfg.repoPath));
+  const r = await commitAndPush(
+    git,
+    "vibebook: add digest workflow + repo housekeeping",
+    paths,
+    cfg.deviceBranch,
+    (stage) => console.log(chalk.gray(`  ${stage}`)),
+  );
+  if (r.committed && r.pushed) {
+    console.log(chalk.green(`✓ workflow + salt pushed to '${cfg.deviceBranch}'`));
+  } else if (r.committed && !r.pushed) {
+    console.log(chalk.yellow(`Committed locally but push failed. Run \`git push\` manually from ${cfg.repoPath}.`));
+  } else {
+    console.log(chalk.gray("Nothing to commit (workflow + salt already up to date)."));
+  }
+
+  if (cfg.encrypt) {
+    console.log(chalk.cyan("\nNext: set repo secret VIBEBOOK_PASSPHRASE on GitHub"));
+    console.log(chalk.gray("  Settings → Secrets and variables → Actions → 'New repository secret'"));
+  }
+  console.log(chalk.gray("\nThe workflow will fire on every push to this device branch."));
+  console.log(chalk.gray("Run `vibebook sync` to push your first batch."));
 }

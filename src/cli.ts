@@ -48,11 +48,13 @@ export async function run(argv: string[]) {
     .description("Manage the GitHub Action that runs digest in CI")
     .addCommand(
       new Command("init")
-        .description("Write .github/workflows/vibebook-digest.yml into the configured vibebook repo")
+        .description("Write .github/workflows/vibebook-digest.yml into the configured vibebook repo, then commit + push")
         .option("--force", "overwrite if file already exists")
-        .action(async (opts: { force?: boolean }) => {
+        .option("--no-push", "write the yaml locally but don't auto commit + push")
+        .action(async (opts: { force?: boolean; push?: boolean }) => {
           const { workflowInitCmd } = await import("./commands/workflow.js");
-          await workflowInitCmd({ force: opts.force });
+          // commander's --no-X sets opts.X=false when flag present, true otherwise.
+          await workflowInitCmd({ force: opts.force, noPush: opts.push === false });
         }),
     );
   program
