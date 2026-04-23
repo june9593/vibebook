@@ -40,6 +40,10 @@ async function makeOrCloneSeeded(remote: string, branch: string): Promise<string
 }
 
 describe("fastForwardBranch", () => {
+  // Each case spins up bare remotes + clones. Under load (full suite) git
+  // operations easily exceed the default 5s vitest timeout. Tag with 30s.
+  const T = { timeout: 30_000 };
+
   let remote: string;
 
   beforeEach(async () => {
@@ -57,7 +61,7 @@ describe("fastForwardBranch", () => {
     const r = await fastForwardBranch(g, "Mac.lan");
     expect(r.pulled).toBe(false);
     expect(r.reason).toBe("no-tracking");
-  });
+  }, T);
 
   it("fast-forwards local branch when origin has new commits", async () => {
     const localA = await makeOrCloneSeeded(remote, "Mac.lan");
@@ -74,7 +78,7 @@ describe("fastForwardBranch", () => {
     expect(r.pulled).toBe(true);
     const log = await simpleGit(localB).log();
     expect(log.all.some((c) => c.message === "ci commit")).toBe(true);
-  });
+  }, T);
 
   it("rebases local commit on top of remote commit (diverged)", async () => {
     const localA = await makeOrCloneSeeded(remote, "Mac.lan");
@@ -102,7 +106,7 @@ describe("fastForwardBranch", () => {
     const log = await gB.log();
     expect(log.all[0].message).toBe("b commit");
     expect(log.all[1].message).toBe("a commit");
-  });
+  }, T);
 
   it("throws on rebase conflict and leaves working tree clean", async () => {
     const localA = await makeOrCloneSeeded(remote, "Mac.lan");
@@ -129,5 +133,5 @@ describe("fastForwardBranch", () => {
     // After abort, working tree should not be in a rebase state.
     const status = await gB.status();
     expect(status.conflicted).toEqual([]);
-  });
+  }, T);
 });
