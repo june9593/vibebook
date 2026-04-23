@@ -12,11 +12,13 @@ on:
   push:
     branches:
       - "*.lan"      # macOS device branch (default from os.hostname())
+      - "*.local"    # macOS legacy mDNS hostname (e.g. Mac-mini-2.local)
       - "*-pro"      # common Mac hostname suffix
       - "*-mbp"
       - "*-MBP*"
       - "*-pc"
       - "*-laptop"
+      - "*-mini*"    # Mac mini hostnames
       # Add your hostname pattern here if it doesn't match.
       # Tip: see your `cfg.deviceBranch` value in ~/.vibebook/config.json.
   workflow_dispatch:
