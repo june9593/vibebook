@@ -11,12 +11,26 @@ async function makeBareRemote(): Promise<string> {
   return bare;
 }
 
-async function makeClone(remote: string, branch: string): Promise<string> {
+/**
+ * Seed a bare remote with one commit on `branch`. Returns a local clone that
+ * has the branch checked out and tracks origin/<branch>. Idempotent: if the
+ * branch already exists on the remote, just clones+checks out.
+ */
+async function makeOrCloneSeeded(remote: string, branch: string): Promise<string> {
   const local = mkdtempSync(join(tmpdir(), "vibebook-clone-"));
   await simpleGit().clone(remote, local);
   const g = simpleGit(local);
   await g.addConfig("user.email", "t@example.com");
   await g.addConfig("user.name", "Tester");
+
+  // Does origin/<branch> exist?
+  const remoteBranches = await g.branch(["-r"]);
+  if (remoteBranches.all.includes(`origin/${branch}`)) {
+    await g.checkout(["-b", branch, "--track", `origin/${branch}`]);
+    return local;
+  }
+
+  // First clone — create the branch and seed it.
   await g.checkoutLocalBranch(branch);
   writeFileSync(join(local, "seed.txt"), "init\n");
   await g.add("seed.txt");
@@ -46,8 +60,8 @@ describe("fastForwardBranch", () => {
   });
 
   it("fast-forwards local branch when origin has new commits", async () => {
-    const localA = await makeClone(remote, "Mac.lan");
-    const localB = await makeClone(remote, "Mac.lan");
+    const localA = await makeOrCloneSeeded(remote, "Mac.lan");
+    const localB = await makeOrCloneSeeded(remote, "Mac.lan");
 
     // localA pushes a new commit (simulating CI)
     writeFileSync(join(localA, "ci-added.txt"), "from CI\n");
@@ -63,7 +77,7 @@ describe("fastForwardBranch", () => {
   });
 
   it("rebases local commit on top of remote commit (diverged)", async () => {
-    const localA = await makeClone(remote, "Mac.lan");
+    const localA = await makeOrCloneSeeded(remote, "Mac.lan");
     const localB = mkdtempSync(join(tmpdir(), "vibebook-cloneB-"));
     await simpleGit().clone(remote, localB);
     const gB = simpleGit(localB);
@@ -91,7 +105,7 @@ describe("fastForwardBranch", () => {
   });
 
   it("throws on rebase conflict and leaves working tree clean", async () => {
-    const localA = await makeClone(remote, "Mac.lan");
+    const localA = await makeOrCloneSeeded(remote, "Mac.lan");
     const localB = mkdtempSync(join(tmpdir(), "vibebook-cloneC-"));
     await simpleGit().clone(remote, localB);
     const gB = simpleGit(localB);
