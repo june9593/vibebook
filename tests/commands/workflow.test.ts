@@ -41,6 +41,39 @@ describe("workflowInitCmd", () => {
     expect(body).toContain("workflow_dispatch");
   });
 
+  it("substitutes runnerModel from config (no leftover placeholder)", async () => {
+    rmSync(join(tmpHome, ".vibebook", "config.json"));
+    writeFileSync(join(tmpHome, ".vibebook", "config.json"), JSON.stringify({
+      repoPath, repoUrl: "git@example.com:u/r.git",
+      encrypt: false, salt: "x",
+      deviceBranch: "test.lan",
+      runner: "github-action", runnerModel: "openai/gpt-4.1-mini",
+      threadingConcurrency: 1, threadingMaxAttempts: 3,
+      digestEnabled: true,
+    }));
+    const { workflowInitCmd } = await import("../../src/commands/workflow.js");
+    await workflowInitCmd();
+    const body = readFileSync(join(repoPath, ".github", "workflows", "vibebook-digest.yml"), "utf8");
+    expect(body).toContain('"runnerModel": "openai/gpt-4.1-mini"');
+    expect(body).not.toContain("__VIBEBOOK_RUNNER_MODEL__");
+  });
+
+  it("falls back to gpt-4o-mini when config has empty runnerModel", async () => {
+    rmSync(join(tmpHome, ".vibebook", "config.json"));
+    writeFileSync(join(tmpHome, ".vibebook", "config.json"), JSON.stringify({
+      repoPath, repoUrl: "git@example.com:u/r.git",
+      encrypt: false, salt: "x",
+      deviceBranch: "test.lan",
+      runner: "github-action", runnerModel: "",
+      threadingConcurrency: 1, threadingMaxAttempts: 3,
+      digestEnabled: true,
+    }));
+    const { workflowInitCmd } = await import("../../src/commands/workflow.js");
+    await workflowInitCmd();
+    const body = readFileSync(join(repoPath, ".github", "workflows", "vibebook-digest.yml"), "utf8");
+    expect(body).toContain('"runnerModel": "openai/gpt-4o-mini"');
+  });
+
   it("refuses to overwrite without --force", async () => {
     const out = join(repoPath, ".github", "workflows", "vibebook-digest.yml");
     mkdirSync(join(repoPath, ".github", "workflows"), { recursive: true });

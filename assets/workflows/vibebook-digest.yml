@@ -84,7 +84,7 @@ jobs:
             "salt": "$SALT",
             "deviceBranch": "${{ inputs.branch || github.ref_name }}",
             "runner": "github-action",
-            "runnerModel": "openai/gpt-4o-mini",
+            "runnerModel": "__VIBEBOOK_RUNNER_MODEL__",
             "threadingConcurrency": 1,
             "threadingMaxAttempts": 3,
             "digestEnabled": true

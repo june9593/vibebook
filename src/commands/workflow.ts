@@ -37,9 +37,18 @@ export async function workflowInitCmd(opts: { force?: boolean } = {}): Promise<v
     return;
   }
   const tpl = readFileSync(templatePath(), "utf8");
+  // Substitute placeholders. The template ships with __VIBEBOOK_RUNNER_MODEL__
+  // as a sentinel so we don't accidentally bake in a stale default and ignore
+  // the user's wizard choice. Empty cfg.runnerModel → fall back to the
+  // catalog default the runner picks at call time (openai/gpt-4o-mini).
+  const renderedTpl = tpl.replace(
+    /__VIBEBOOK_RUNNER_MODEL__/g,
+    cfg.runnerModel?.trim() || "openai/gpt-4o-mini",
+  );
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, tpl);
+  writeFileSync(target, renderedTpl);
   console.log(chalk.green(`workflow written: ${target}`));
+  console.log(chalk.gray(`  runnerModel: ${cfg.runnerModel?.trim() || "(default) openai/gpt-4o-mini"}`));
 
   // One-shot: rename legacy `.memvc/` → `.vibebook/` if present.
   const dataDirMig = await migrateLegacyDataDir(cfg.repoPath);
