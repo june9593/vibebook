@@ -29,6 +29,28 @@ export interface GithubModel {
 
 const CATALOG_URL = "https://models.github.ai/catalog/models";
 
+/**
+ * Models that GitHub Models marks "Not applicable" for the Copilot Free tier
+ * per https://docs.github.com/en/github-models/use-github-models/prototyping-with-ai-models#rate-limits
+ *
+ * These require Copilot Pro / Business / Enterprise. We hide them by default
+ * in the wizard; user can opt in with `--all-models` to see them.
+ *
+ * NOTE: catalog's `rate_limit_tier === "custom"` is NOT a clean proxy for
+ * "Copilot-Pro-only" — DeepSeek-R1 and Grok-3 are also custom-tier but ARE
+ * available on Free. So we maintain an explicit prefix denylist instead.
+ */
+const COPILOT_PAID_ONLY_PREFIXES = [
+  "openai/gpt-5",
+  "openai/o1",
+  "openai/o3",
+  "openai/o4-mini",
+];
+
+export function isCopilotPaidOnly(modelId: string): boolean {
+  return COPILOT_PAID_ONLY_PREFIXES.some((p) => modelId === p || modelId.startsWith(p));
+}
+
 /** Hard-coded fallback when the catalog fetch fails. Intentionally small. */
 export const GITHUB_MODELS_FALLBACK: GithubModel[] = [
   { id: "openai/gpt-4o-mini", name: "OpenAI GPT-4o mini", publisher: "OpenAI", rateLimitTier: "low" },
@@ -49,12 +71,23 @@ interface RawCatalogEntry {
   tags?: string[];
 }
 
+export interface FetchCatalogOptions {
+  timeoutMs?: number;
+  /** When true, include models that require Copilot Pro+ (default: false). */
+  includePaidOnly?: boolean;
+}
+
 /**
  * Fetch and normalize the catalog. Filters out embeddings (no chat support)
- * and image/audio-only outputs. Honors a soft timeout so the wizard doesn't
- * stall on a slow network.
+ * and image/audio-only outputs. By default also filters out models that
+ * Copilot Free tier can't access (gpt-5*, o1*, o3*, o4-mini); pass
+ * { includePaidOnly: true } to get the full list.
+ *
+ * Honors a soft timeout so the wizard doesn't stall on a slow network.
  */
-export async function fetchGithubModelsCatalog(timeoutMs = 5000): Promise<GithubModel[]> {
+export async function fetchGithubModelsCatalog(opts: FetchCatalogOptions | number = {}): Promise<GithubModel[]> {
+  // Backwards-compat: callers used to pass a number.
+  const { timeoutMs = 5000, includePaidOnly = false } = typeof opts === "number" ? { timeoutMs: opts } : opts;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   try {
@@ -67,6 +100,7 @@ export async function fetchGithubModelsCatalog(timeoutMs = 5000): Promise<Github
         typeof m.id === "string" && typeof m.name === "string" && typeof m.publisher === "string")
       .filter((m) => m.rate_limit_tier !== "embeddings")
       .filter((m) => !m.supported_output_modalities || m.supported_output_modalities.includes("text"))
+      .filter((m) => includePaidOnly || !isCopilotPaidOnly(m.id))
       .map<GithubModel>((m) => ({
         id: m.id,
         name: m.name,

@@ -12,9 +12,13 @@ export interface InitOptions {
   digestEnabled?: boolean;
   device?: string;
   passphrase?: string;
+  /** Wizard-only: include Copilot-paid models (gpt-5*, o1*, o3*, o4-mini)
+   *  in Q7's model picker. */
+  allModels?: boolean;
 }
 
-/** Wizard mode kicks in when caller passed no flags AND no repoUrl. */
+/** Wizard mode kicks in when caller passed no flags AND no repoUrl.
+ *  --all-models is wizard-only, so it doesn't count as flag-mode. */
 function isFlagMode(opts: InitOptions): boolean {
   return Boolean(
     opts.repoUrl || opts.localPath || opts.encrypt || opts.device ||
@@ -26,7 +30,7 @@ export async function initCmd(opts: InitOptions): Promise<void> {
   if (!isFlagMode(opts)) {
     // No flags → interactive wizard.
     const { runInitWizard } = await import("./init-wizard.js");
-    await runInitWizard();
+    await runInitWizard({ allModels: opts.allModels });
     return;
   }
 

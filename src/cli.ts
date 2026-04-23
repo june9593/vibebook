@@ -11,9 +11,10 @@ export async function run(argv: string[]) {
     .option("--no-digest", "skip the digest pipeline (raw push only)")
     .option("--device <name>", "device branch name (default: sanitized os.hostname())")
     .option("--passphrase <pp>", "save passphrase to ~/.vibebook/passphrase (only with --encrypt)")
+    .option("--all-models", "wizard mode: include Copilot-paid models (gpt-5*, o1*, o3*, o4-mini) in the model picker")
     .action(async (
       repoUrl: string | undefined,
-      opts: { localPath?: string; encrypt?: boolean; digest?: boolean; device?: string; passphrase?: string },
+      opts: { localPath?: string; encrypt?: boolean; digest?: boolean; device?: string; passphrase?: string; allModels?: boolean },
     ) => {
       const { initCmd } = await import("./commands/init.js");
       await initCmd({
@@ -23,6 +24,7 @@ export async function run(argv: string[]) {
         digestEnabled: opts.digest !== false,
         device: opts.device,
         passphrase: opts.passphrase,
+        allModels: opts.allModels,
       });
     });
   program

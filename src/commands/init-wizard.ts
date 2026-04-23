@@ -36,7 +36,13 @@ export function defaultLocalPath(): string {
  * config + materializing the repo. Throws on user-invalid input that the
  * loops can't recover from (caller catches and exits non-zero).
  */
-export async function runWizard(): Promise<WizardAnswers> {
+export interface RunWizardOptions {
+  /** Show the full GitHub Models catalog including paid-only models
+   *  (gpt-5*, o1*, o3*, o4-mini). Default: false (Copilot Free models only). */
+  allModels?: boolean;
+}
+
+export async function runWizard(opts: RunWizardOptions = {}): Promise<WizardAnswers> {
   console.log(chalk.bold("\nvibebook init wizard\n"));
 
   // Q0: sync to GitHub?
@@ -136,11 +142,15 @@ export async function runWizard(): Promise<WizardAnswers> {
     // Q7: model. For github-action, fetch the catalog and let the user pick.
     // For claude-cli, blank = whatever `claude` ships with (recommended).
     if (runner === "github-action") {
-      console.log(chalk.gray("  fetching GitHub Models catalog..."));
-      const models = await fetchGithubModelsCatalog();
-      // Surface "low" rate-limit-tier models first — they have the most
-      // generous quotas on the free tier. Default selection: gpt-4o-mini if
-      // present (cheapest sensible default), else first low-tier, else first.
+      console.log(chalk.gray(
+        opts.allModels
+          ? "  fetching GitHub Models catalog (including paid-only models)..."
+          : "  fetching GitHub Models catalog (Copilot Free tier; pass --all-models to see paid-only models like gpt-5/o3)...",
+      ));
+      const models = await fetchGithubModelsCatalog({ includePaidOnly: opts.allModels });
+      // All Copilot Free models share an 8K input cap, so rate-tier doesn't
+      // change the digest experience. Sort low-tier first only because they
+      // have higher requests/min, which matters at our concurrency=1.
       const sorted = [...models].sort((a, b) => {
         const tierRank = (t?: string) => t === "low" ? 0 : t === "high" ? 1 : 2;
         return tierRank(a.rateLimitTier) - tierRank(b.rateLimitTier);
@@ -151,7 +161,11 @@ export async function runWizard(): Promise<WizardAnswers> {
         description: m.name,
       }));
       const defaultIdx = Math.max(0, sorted.findIndex((m) => m.id === "openai/gpt-4o-mini"));
-      runnerModel = await promptChoice(chalk.cyan("Q7") + " Model (low-tier = generous free quota)", choices, defaultIdx);
+      runnerModel = await promptChoice(
+        chalk.cyan("Q7") + " Model (all Copilot-Free models cap at 8K input / 4K output per request)",
+        choices,
+        defaultIdx,
+      );
     } else {
       runnerModel = await prompt(
         chalk.cyan("Q7") + " Model name (blank = runner default)",
@@ -274,7 +288,7 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
 }
 
 /** Top-level entry — composes wizard + verify + apply, with cleanup. */
-export async function runInitWizard(): Promise<void> {
+export async function runInitWizard(opts: RunWizardOptions = {}): Promise<void> {
   if (configExists()) {
     const overwrite = await promptYesNo(
       chalk.yellow("vibebook already initialized at ~/.vibebook/config.json. Overwrite?"),
@@ -287,7 +301,7 @@ export async function runInitWizard(): Promise<void> {
     }
   }
   try {
-    const answers = await runWizard();
+    const answers = await runWizard(opts);
     let runnerOk = true;
     if (answers.digestEnabled) runnerOk = await verifyRunner(answers.runner, answers.runnerModel);
     await applyWizardAnswers(answers);

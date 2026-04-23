@@ -42,23 +42,34 @@ export function tokensToChars(tokens: number): number {
 const PROMPT_OVERHEAD_TOKENS = 1500;
 
 /** GitHub Models free tier hard-cap, per
- *  https://docs.github.com/en/github-models/use-github-models/prototyping-with-ai-models#rate-limits */
+ *  https://docs.github.com/en/github-models/use-github-models/prototyping-with-ai-models#rate-limits
+ *  Applies to ALL Copilot Free models (low, high, AND custom tier). The only
+ *  way out is Copilot Pro+, where the gpt-5 / o-series quotas are slightly
+ *  different (and even then per-request token caps are still small). */
 const GITHUB_FREE_TIER_INPUT = 8000;
 const GITHUB_FREE_TIER_OUTPUT = 4000;
 
-/** Best-effort: if the model id is in custom tier (paid Copilot Pro/Enterprise),
- *  use its catalog metadata. Otherwise, the 8K floor wins. */
-const GITHUB_PAID_MODELS = new Set([
-  "openai/gpt-5", "openai/gpt-5-chat", "openai/gpt-5-mini", "openai/gpt-5-nano",
-  "openai/o1", "openai/o1-mini", "openai/o1-preview",
-  "openai/o3", "openai/o3-mini", "openai/o4-mini",
-  "deepseek/deepseek-r1", "deepseek/deepseek-r1-0528",
-  "xai/grok-3", "xai/grok-3-mini",
-  "microsoft/mai-ds-r1",
-]);
+/** Models that REQUIRE a paid Copilot tier (Pro / Business / Enterprise) —
+ *  Copilot Free returns "Not applicable" per the docs. We treat these as
+ *  having higher per-request budgets when the user explicitly opts in. The
+ *  default budget assumes Copilot Free.
+ *
+ *  IMPORTANT: catalog `rate_limit_tier === "custom"` is NOT a clean proxy.
+ *  DeepSeek-R1 and Grok-3 are also custom-tier but ARE available on Copilot
+ *  Free (with their own tight quotas). Maintain an explicit prefix list. */
+const COPILOT_PAID_ONLY_PREFIXES = [
+  "openai/gpt-5",
+  "openai/o1",
+  "openai/o3",
+  "openai/o4-mini",
+];
 
-/** Catalog-advertised limits for paid models (used only when model id is
- *  in GITHUB_PAID_MODELS). */
+function isCopilotPaidOnly(modelId: string): boolean {
+  return COPILOT_PAID_ONLY_PREFIXES.some((p) => modelId === p || modelId.startsWith(p));
+}
+
+/** Catalog-advertised limits for paid-only models (used only when caller
+ *  explicitly opts into the paid tier — see budgetForGithubModels). */
 const GITHUB_PAID_LIMITS: Record<string, { in: number; out: number }> = {
   "openai/gpt-5": { in: 200_000, out: 100_000 },
   "openai/gpt-5-chat": { in: 200_000, out: 100_000 },
@@ -92,19 +103,20 @@ function anthropicFallback(): { in: number; out: number } {
 
 export function budgetForGithubModels(model: string): ModelBudget {
   const useModel = model.trim() || "openai/gpt-4o-mini";
-  if (GITHUB_PAID_MODELS.has(useModel)) {
+  if (isCopilotPaidOnly(useModel)) {
     const lim = GITHUB_PAID_LIMITS[useModel] ?? { in: 200_000, out: 4096 };
     return {
       inputBudgetTokens: Math.max(1000, lim.in - PROMPT_OVERHEAD_TOKENS - lim.out),
       outputBudgetTokens: lim.out,
-      reason: `github-models paid model '${useModel}': catalog limit ${lim.in}/${lim.out} tokens`,
+      reason: `github-models Copilot-paid model '${useModel}': catalog limit ${lim.in}/${lim.out} tokens`,
     };
   }
-  // Free tier — hard cap regardless of model.
+  // Copilot Free tier — hard 8K input cap on every model (low/high/custom),
+  // including DeepSeek-R1, Grok-3, gpt-4o, gpt-4.1-mini, etc.
   return {
     inputBudgetTokens: GITHUB_FREE_TIER_INPUT - PROMPT_OVERHEAD_TOKENS,
     outputBudgetTokens: GITHUB_FREE_TIER_OUTPUT,
-    reason: `github-models free tier: 8K input / 4K output (model '${useModel}' catalog limits don't apply on free tier)`,
+    reason: `github-models Copilot Free tier: 8K input / 4K output (model '${useModel}' catalog limits don't apply on free tier)`,
   };
 }
 
