@@ -115,6 +115,24 @@ export async function runWizard(): Promise<WizardAnswers> {
       ? runnerOptions[0]!.value
       : await promptChoice(chalk.cyan("Q6") + " Runner", runnerOptions, 0);
 
+    if (runner === "github-action") {
+      console.log(chalk.yellow(
+        "\n  ⚠ EXPERIMENTAL: GitHub Action runner uses GitHub Models (free tier)."
+      ));
+      console.log(chalk.yellow(
+        "    Free tier hard-caps every request at 8000 input / 4000 output tokens"
+      ));
+      console.log(chalk.yellow(
+        "    regardless of model. Long threads will be auto-truncated; some articles"
+      ));
+      console.log(chalk.yellow(
+        "    may be partial or fail outright. For high-quality digests on big repos,"
+      ));
+      console.log(chalk.yellow(
+        "    use the local Claude CLI runner instead.\n"
+      ));
+    }
+
     // Q7: model. For github-action, fetch the catalog and let the user pick.
     // For claude-cli, blank = whatever `claude` ships with (recommended).
     if (runner === "github-action") {

@@ -12,6 +12,37 @@ const DEFAULT_RETRY_AFTER_MS = 60_000;
 const MAX_RETRY_BACKOFF_MS = 5 * 60_000;
 
 /**
+ * GitHub Models free tier caps every low/high-tier model at 8000 input tokens
+ * and 4000 output tokens *per request*, regardless of what the catalog
+ * metadata says about the underlying model's theoretical context. (See
+ * https://docs.github.com/en/github-models/use-github-models/prototyping-with-ai-models#rate-limits)
+ *
+ * We truncate the prompt to ~21000 characters before sending. That's
+ * conservatively ~7000 tokens (3 char/token rule-of-thumb for mixed
+ * English/Chinese), leaving ~1000 tokens of headroom for system overhead.
+ *
+ * When we truncate, we splice in a marker so the model knows part of the
+ * input was dropped and can produce a partial-but-honest article instead
+ * of a confidently-wrong full one.
+ */
+const MAX_INPUT_CHARS = 21_000;
+const TRUNCATION_MARKER = "\n\n[... 此处省略 ${dropped} 字符以满足 GitHub Models 8K 输入上限 ...]\n\n";
+
+export function truncatePromptForGithubModels(prompt: string, maxChars = MAX_INPUT_CHARS): string {
+  if (prompt.length <= maxChars) return prompt;
+  // Keep the head (where the prompt + first sessions live) and a tail snippet
+  // (so the LLM sees how the conversation ended). 80/20 split.
+  const headChars = Math.floor(maxChars * 0.8);
+  const tailChars = maxChars - headChars - 200; // leave room for the marker
+  const dropped = prompt.length - headChars - tailChars;
+  return (
+    prompt.slice(0, headChars) +
+    TRUNCATION_MARKER.replace("${dropped}", dropped.toLocaleString()) +
+    prompt.slice(prompt.length - tailChars)
+  );
+}
+
+/**
  * Parse a Retry-After header per RFC 7231 §7.1.3:
  *   - delta-seconds: positive integer → seconds
  *   - HTTP-date: parse to epoch ms; clamp to ≥ 0
@@ -66,6 +97,8 @@ export async function runGithubModels(
   }
   const useModel = model.trim() || DEFAULT_MODEL;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  // Truncate before send. GH Models hard-caps free-tier input at 8K tokens.
+  const safePrompt = truncatePromptForGithubModels(prompt);
 
   let lastErrorBody = "";
   for (let attempt = 0; attempt <= RATE_LIMIT_MAX_RETRIES; attempt++) {
@@ -82,7 +115,7 @@ export async function runGithubModels(
         },
         body: JSON.stringify({
           model: useModel,
-          messages: [{ role: "user", content: prompt }],
+          messages: [{ role: "user", content: safePrompt }],
         }),
       });
       if (res.status === 429) {

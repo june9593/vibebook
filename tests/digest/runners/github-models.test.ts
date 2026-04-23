@@ -1,5 +1,28 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { runGithubModels, parseRetryAfterMs } from "../../../src/digest/runners/github-models.js";
+import { runGithubModels, parseRetryAfterMs, truncatePromptForGithubModels } from "../../../src/digest/runners/github-models.js";
+
+describe("truncatePromptForGithubModels", () => {
+  it("returns the prompt unchanged when under cap", () => {
+    const p = "x".repeat(1000);
+    expect(truncatePromptForGithubModels(p, 5000)).toBe(p);
+  });
+  it("truncates long prompts with a marker mentioning dropped char count", () => {
+    const p = "h".repeat(2000) + "m".repeat(2000) + "t".repeat(2000);
+    const out = truncatePromptForGithubModels(p, 3000);
+    expect(out.length).toBeLessThan(p.length);
+    expect(out).toMatch(/省略 [\d,]+ 字符/);
+    // head preserved (some "h" chars at the start)
+    expect(out.startsWith("h".repeat(100))).toBe(true);
+    // tail preserved (some "t" chars at the end)
+    expect(out.endsWith("t".repeat(50))).toBe(true);
+  });
+  it("default cap (~21000 chars) prevents 8K-token overflow", () => {
+    const huge = "a".repeat(100_000);
+    const out = truncatePromptForGithubModels(huge);
+    // ~21000 char + truncation marker overhead
+    expect(out.length).toBeLessThan(22_000);
+  });
+});
 
 describe("parseRetryAfterMs", () => {
   it("parses delta-seconds form", () => {

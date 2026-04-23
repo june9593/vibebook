@@ -113,7 +113,14 @@ jobs:
         # checkout's existing index.json + book index. We skip extract
         # (no local ~/.claude/ in CI). Use --redo only if you need to
         # retry previously-failed articles.
-        run: vibebook digest
+        #
+        # ⚠ EXPERIMENTAL: GitHub Models free tier caps every request at
+        # 8000 input / 4000 output tokens. Long threads get truncated and
+        # some articles may fail. For high-quality digests, run
+        # `vibebook sync` locally with the claude-cli runner instead.
+        run: |
+          echo "::warning::GitHub Action digest runs against GitHub Models free tier (8K input cap). Long articles may be truncated or fail. For best quality, run 'vibebook sync' locally with claude-cli."
+          vibebook digest
 
       - name: Push book commit
         run: git push origin HEAD:${{ inputs.branch || github.ref_name }}
