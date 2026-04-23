@@ -1,4 +1,5 @@
 import type { RunOptions, RunResult } from "../runner.js";
+import { budgetForGithubModels, tokensToChars } from "../model-limits.js";
 
 const ENDPOINT = "https://models.github.ai/inference/chat/completions";
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
@@ -11,33 +12,28 @@ const DEFAULT_RETRY_AFTER_MS = 60_000;
 /** Cap on how long any single retry will sleep. */
 const MAX_RETRY_BACKOFF_MS = 5 * 60_000;
 
-/**
- * GitHub Models free tier caps every low/high-tier model at 8000 input tokens
- * and 4000 output tokens *per request*, regardless of what the catalog
- * metadata says about the underlying model's theoretical context. (See
- * https://docs.github.com/en/github-models/use-github-models/prototyping-with-ai-models#rate-limits)
- *
- * We truncate the prompt to ~21000 characters before sending. That's
- * conservatively ~7000 tokens (3 char/token rule-of-thumb for mixed
- * English/Chinese), leaving ~1000 tokens of headroom for system overhead.
- *
- * When we truncate, we splice in a marker so the model knows part of the
- * input was dropped and can produce a partial-but-honest article instead
- * of a confidently-wrong full one.
- */
-const MAX_INPUT_CHARS = 21_000;
-const TRUNCATION_MARKER = "\n\n[... 此处省略 ${dropped} 字符以满足 GitHub Models 8K 输入上限 ...]\n\n";
+const TRUNCATION_MARKER = "\n\n[... 此处省略 ${dropped} 字符以满足 ${reason} ...]\n\n";
 
-export function truncatePromptForGithubModels(prompt: string, maxChars = MAX_INPUT_CHARS): string {
+/**
+ * Truncate prompt to fit the model's per-request budget. Splits 80/20
+ * head/tail with a Chinese marker so the model knows part of the input
+ * was dropped and produces a partial-but-honest output.
+ *
+ * Budget is determined per-model via budgetForGithubModels (free tier 8K,
+ * paid custom-tier models use their full catalog cap).
+ */
+export function truncatePromptForGithubModels(
+  prompt: string,
+  maxChars: number,
+  reason = "model token limit",
+): string {
   if (prompt.length <= maxChars) return prompt;
-  // Keep the head (where the prompt + first sessions live) and a tail snippet
-  // (so the LLM sees how the conversation ended). 80/20 split.
   const headChars = Math.floor(maxChars * 0.8);
-  const tailChars = maxChars - headChars - 200; // leave room for the marker
+  const tailChars = Math.max(50, maxChars - headChars - 200); // leave room for marker
   const dropped = prompt.length - headChars - tailChars;
   return (
     prompt.slice(0, headChars) +
-    TRUNCATION_MARKER.replace("${dropped}", dropped.toLocaleString()) +
+    TRUNCATION_MARKER.replace("${dropped}", dropped.toLocaleString()).replace("${reason}", reason) +
     prompt.slice(prompt.length - tailChars)
   );
 }
@@ -97,8 +93,10 @@ export async function runGithubModels(
   }
   const useModel = model.trim() || DEFAULT_MODEL;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  // Truncate before send. GH Models hard-caps free-tier input at 8K tokens.
-  const safePrompt = truncatePromptForGithubModels(prompt);
+  // Per-model budget: free tier hits 8K, paid custom-tier models get full cap.
+  const budget = budgetForGithubModels(useModel);
+  const maxChars = tokensToChars(budget.inputBudgetTokens);
+  const safePrompt = truncatePromptForGithubModels(prompt, maxChars, budget.reason);
 
   let lastErrorBody = "";
   for (let attempt = 0; attempt <= RATE_LIMIT_MAX_RETRIES; attempt++) {

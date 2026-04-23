@@ -1,26 +1,27 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { runGithubModels, parseRetryAfterMs, truncatePromptForGithubModels } from "../../../src/digest/runners/github-models.js";
+import { budgetForGithubModels, tokensToChars } from "../../../src/digest/model-limits.js";
 
 describe("truncatePromptForGithubModels", () => {
   it("returns the prompt unchanged when under cap", () => {
     const p = "x".repeat(1000);
-    expect(truncatePromptForGithubModels(p, 5000)).toBe(p);
+    expect(truncatePromptForGithubModels(p, 5000, "test")).toBe(p);
   });
-  it("truncates long prompts with a marker mentioning dropped char count", () => {
+  it("truncates long prompts with a marker mentioning dropped char count + reason", () => {
     const p = "h".repeat(2000) + "m".repeat(2000) + "t".repeat(2000);
-    const out = truncatePromptForGithubModels(p, 3000);
+    const out = truncatePromptForGithubModels(p, 3000, "free-tier 8K cap");
     expect(out.length).toBeLessThan(p.length);
-    expect(out).toMatch(/省略 [\d,]+ 字符/);
-    // head preserved (some "h" chars at the start)
+    expect(out).toMatch(/省略 [\d,]+ 字符以满足 free-tier 8K cap/);
     expect(out.startsWith("h".repeat(100))).toBe(true);
-    // tail preserved (some "t" chars at the end)
     expect(out.endsWith("t".repeat(50))).toBe(true);
   });
-  it("default cap (~21000 chars) prevents 8K-token overflow", () => {
+  it("default cap (~21000 chars from 7000-token GH free-tier budget) prevents 8K-token overflow", () => {
+    const budget = budgetForGithubModels("openai/gpt-4o-mini");
+    const maxChars = tokensToChars(budget.inputBudgetTokens);
     const huge = "a".repeat(100_000);
-    const out = truncatePromptForGithubModels(huge);
-    // ~21000 char + truncation marker overhead
-    expect(out.length).toBeLessThan(22_000);
+    const out = truncatePromptForGithubModels(huge, maxChars, budget.reason);
+    expect(out.length).toBeLessThan(maxChars + 500);
+    expect(out).toMatch(/8K input \/ 4K output/);
   });
 });
 
