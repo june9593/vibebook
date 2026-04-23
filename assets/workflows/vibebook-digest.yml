@@ -70,9 +70,10 @@ jobs:
             SALT_FILE="$REPO_PATH/.memvc/repo-salt.json"
           fi
           if [ "$ENCRYPT" = "true" ] && [ -z "$SALT_FILE" ]; then
-            echo "ERROR: encryption is on (VIBEBOOK_PASSPHRASE secret set) but neither $REPO_PATH/.vibebook/repo-salt.json nor $REPO_PATH/.memvc/repo-salt.json exists."
-            echo "       Run \`vibebook sync\` locally — it will backfill the file. Then commit and push."
-            exit 1
+            echo "::warning::encryption is on (VIBEBOOK_PASSPHRASE secret set) but neither $REPO_PATH/.vibebook/repo-salt.json nor $REPO_PATH/.memvc/repo-salt.json exists in the checkout."
+            echo "::warning::This usually means the device that pushed is on an old vibebook version. Run 'npm install -g vibebook@latest && vibebook sync' on that device to backfill the salt file."
+            echo "::warning::Skipping digest for this push (workflow exits successfully so CI doesn't keep re-failing)."
+            echo "VIBEBOOK_SKIP_DIGEST=1" >> "$GITHUB_ENV"
           fi
           SALT="$( [ -n "$SALT_FILE" ] && jq -r .salt "$SALT_FILE" || echo placeholder)"
           cat > ~/.vibebook/config.json <<JSON
@@ -103,6 +104,7 @@ jobs:
           git config user.email "vibebook-bot@users.noreply.github.com"
 
       - name: Run digest
+        if: env.VIBEBOOK_SKIP_DIGEST != '1'
         env:
           VIBEBOOK_CI: "1"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -120,4 +122,5 @@ jobs:
           vibebook digest
 
       - name: Push book commit
+        if: env.VIBEBOOK_SKIP_DIGEST != '1'
         run: git push origin HEAD:${{ inputs.branch || github.ref_name }}
