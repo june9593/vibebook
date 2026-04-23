@@ -17,6 +17,7 @@ import { loadBookIndex, saveBookIndex } from "../digest/book-index.js";
 import { createRunner } from "../digest/runner.js";
 import { runDigest, type DigestReport } from "../digest/orchestrator.js";
 import { consoleReporter } from "../digest/reporter.js";
+import { sweepScratchDirs } from "../digest/with-isolated-cwd.js";
 import { INDEX_REL, BOOK_INDEX_REL, REPO_SALT_REL, LEGACY_REPO_DATA_DIR } from "../repo-data-dir.js";
 
 export interface SyncOptions {
@@ -57,6 +58,18 @@ export interface SyncResult {
 }
 
 export async function runSync(opts: SyncOptions): Promise<SyncResult> {
+  // Sweep leftover scratch dirs from prior crashed/aborted runs BEFORE the
+  // source adapter scans. If a previous digest was killed mid-flight, its
+  // tmp cwd + Claude CLI's stamped session-history dir might still be on
+  // disk and would otherwise show up in the next sync as polluting sessions
+  // (titled with the prompt text itself, e.g. "你是一个代码工程师的助手...").
+  const sweep = sweepScratchDirs();
+  if (sweep.tmpDirsRemoved + sweep.claudeDirsRemoved > 0) {
+    console.log(chalk.gray(
+      `Cleaned up ${sweep.tmpDirsRemoved} tmpdir + ${sweep.claudeDirsRemoved} ~/.claude/projects scratch dirs from prior runs`,
+    ));
+  }
+
   // One-shot migration: rename legacy `.memvc/` → `.vibebook/` if present.
   // Done before loadIndex so the read picks up the file at its new location.
   // Returns paths to stage so the rename rides the next commit.

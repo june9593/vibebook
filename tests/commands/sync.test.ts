@@ -67,7 +67,7 @@ describe("runSync", () => {
   let vscodeRoot: string;
   beforeEach(() => {
     repo = mkdtempSync(join(tmpdir(), "memvc-repo-"));
-    claudeRoot = mkdtempSync(join(tmpdir(), "memvc-claude-"));
+    claudeRoot = mkdtempSync(join(tmpdir(), "vibebook-test-claude-fixture-"));
     // put the claude fixture under claudeRoot/<project>
     const proj = join(claudeRoot, "-Users-yueliu-edge-memvc");
     mkdirSync(proj, { recursive: true });
@@ -107,7 +107,7 @@ describe("runSync — digest integration", () => {
 
   beforeEach(() => {
     repo = mkdtempSync(join(tmpdir(), "memvc-repo-"));
-    claudeRoot = mkdtempSync(join(tmpdir(), "memvc-claude-"));
+    claudeRoot = mkdtempSync(join(tmpdir(), "vibebook-test-claude-fixture-"));
     const proj = join(claudeRoot, "-Users-yueliu-edge-memvc");
     mkdirSync(proj, { recursive: true });
     cpSync(join(fixturesDir, "claude-session.jsonl"), join(proj, "abc12345.jsonl"));

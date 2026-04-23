@@ -13,6 +13,7 @@ import { runDigest, type DigestReport } from "../digest/orchestrator.js";
 import { consoleReporter } from "../digest/reporter.js";
 import { deriveKey } from "../crypto.js";
 import { migrateLegacyDataDir } from "../migrate.js";
+import { sweepScratchDirs } from "../digest/with-isolated-cwd.js";
 import { BOOK_INDEX_REL, bookIndexAbs } from "../repo-data-dir.js";
 
 export interface DigestOptions {
@@ -49,6 +50,14 @@ export async function digestCmd(opts: DigestOptions): Promise<void> {
   }
 
   const cfg = readConfigWithMigration();
+  // Clean up scratch dirs from prior aborted runs before any logic touches
+  // the user's repo or Claude CLI projects dir (see sweepScratchDirs docs).
+  const sweep = sweepScratchDirs();
+  if (sweep.tmpDirsRemoved + sweep.claudeDirsRemoved > 0) {
+    console.log(chalk.gray(
+      `Cleaned up ${sweep.tmpDirsRemoved} tmpdir + ${sweep.claudeDirsRemoved} ~/.claude/projects scratch dirs from prior runs`,
+    ));
+  }
   // One-shot data-dir rename `.memvc/` → `.vibebook/` if needed, before any path-load.
   await migrateLegacyDataDir(cfg.repoPath);
   const key = cfg.encrypt
@@ -182,6 +191,12 @@ async function tryFastForward(
  */
 async function runDigestNoFlagCmd(): Promise<void> {
   const cfg = readConfigWithMigration();
+  const sweep = sweepScratchDirs();
+  if (sweep.tmpDirsRemoved + sweep.claudeDirsRemoved > 0) {
+    console.log(chalk.gray(
+      `Cleaned up ${sweep.tmpDirsRemoved} tmpdir + ${sweep.claudeDirsRemoved} ~/.claude/projects scratch dirs from prior runs`,
+    ));
+  }
   await migrateLegacyDataDir(cfg.repoPath);
   const key = cfg.encrypt
     ? deriveKey(getPassphrase(), Buffer.from(cfg.salt, "base64"))
@@ -237,6 +252,12 @@ async function runDigestNoFlagCmd(): Promise<void> {
  */
 async function runDigestResetCmd(): Promise<void> {
   const cfg = readConfigWithMigration();
+  const sweep = sweepScratchDirs();
+  if (sweep.tmpDirsRemoved + sweep.claudeDirsRemoved > 0) {
+    console.log(chalk.gray(
+      `Cleaned up ${sweep.tmpDirsRemoved} tmpdir + ${sweep.claudeDirsRemoved} ~/.claude/projects scratch dirs from prior runs`,
+    ));
+  }
   console.log(chalk.yellow(
     `vibebook digest --reset: wiping book/ and ${BOOK_INDEX_REL} under ${cfg.repoPath}`,
   ));

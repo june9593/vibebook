@@ -51,11 +51,16 @@ export class ClaudeCodeAdapter implements SourceAdapter {
  * Skip Claude project directories that correspond to vibebook's own scratch
  * subprocesses. We deliberately do NOT filter by tmpdir-prefix alone —
  * developers may legitimately run `claude` in /tmp/experiment etc., and we
- * shouldn't silently drop their work. We require the `-vibebook-claude-` substring
- * (which ONLY vibebook-spawned cwds contain) to confirm provenance.
+ * shouldn't silently drop their work. We require one of the known scratch
+ * substrings (which only vibebook-spawned cwds contain) to confirm provenance.
+ *
+ * Both `vibebook-claude-` and `memvc-claude-` are recognized — the latter is
+ * the legacy name from before the project was renamed; old user machines
+ * may still have leftover dirs from pre-rename runs that crashed before
+ * cleanup, and we want sync to skip them too.
  */
-function isVibebookOrTmpProjectDir(name: string): boolean {
-  return name.includes("-vibebook-claude-");
+export function isVibebookOrTmpProjectDir(name: string): boolean {
+  return name.includes("-vibebook-claude-") || name.includes("-memvc-claude-");
 }
 
 function parseClaudeJsonl(sourcePath: string, content: string): NormalizedSession {

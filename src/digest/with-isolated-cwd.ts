@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, existsSync, realpathSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, realpathSync, readdirSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LlmRunner } from "./runner.js";
@@ -69,3 +69,59 @@ function claudeProjectHash(absPath: string): string {
 
 // Exported for tests.
 export { claudeProjectHash as _claudeProjectHashForTests };
+
+/**
+ * Sweep leftover scratch dirs from prior crashed/aborted digest runs. Called
+ * at the start of every sync/digest BEFORE the source-adapter scan, so any
+ * extract path won't even see the polluting jsonl files.
+ *
+ * Cleans BOTH:
+ *   - $TMPDIR/vibebook-claude-* and $TMPDIR/memvc-claude-* (the cwd dirs)
+ *   - ~/.claude/projects/-...-T-vibebook-claude-*  and -memvc-claude-*
+ *     (the session-history dirs Claude CLI stamps based on cwd)
+ *
+ * Returns the count of paths removed (for logging). Best-effort — never throws.
+ *
+ * Why we need this on top of the try/finally cleanup in withIsolatedCwd:
+ *   - If the process is SIGKILL'd, OOM-killed, the user Ctrl-C's, or node
+ *     crashes between mkdtempSync and the finally block, finally never runs
+ *     and the scratch dir leaks. Next sync's source-adapter scan picks up
+ *     the leftover jsonl as a real session.
+ *   - The filter in claude-code.ts skips them by name, but the user's index
+ *     may already contain entries from a previous version that didn't filter.
+ *     Removing the source jsonl ensures they can't be re-extracted.
+ */
+export function sweepScratchDirs(opts: {
+  tmpdirPath?: string;
+  claudeProjectsPath?: string;
+} = {}): { tmpDirsRemoved: number; claudeDirsRemoved: number } {
+  const tmpdirPath = opts.tmpdirPath ?? tmpdir();
+  const claudeProjectsPath = opts.claudeProjectsPath ?? join(homedir(), ".claude", "projects");
+  let tmpDirsRemoved = 0;
+  let claudeDirsRemoved = 0;
+
+  const isScratch = (name: string) =>
+    name.startsWith("vibebook-claude-") || name.startsWith("memvc-claude-");
+  const isClaudeScratch = (name: string) =>
+    name.includes("-vibebook-claude-") || name.includes("-memvc-claude-");
+
+  try {
+    if (existsSync(tmpdirPath)) {
+      for (const name of readdirSync(tmpdirPath)) {
+        if (!isScratch(name)) continue;
+        try { rmSync(join(tmpdirPath, name), { recursive: true, force: true }); tmpDirsRemoved++; } catch { /* swallow */ }
+      }
+    }
+  } catch { /* swallow */ }
+
+  try {
+    if (existsSync(claudeProjectsPath)) {
+      for (const name of readdirSync(claudeProjectsPath)) {
+        if (!isClaudeScratch(name)) continue;
+        try { rmSync(join(claudeProjectsPath, name), { recursive: true, force: true }); claudeDirsRemoved++; } catch { /* swallow */ }
+      }
+    }
+  } catch { /* swallow */ }
+
+  return { tmpDirsRemoved, claudeDirsRemoved };
+}
