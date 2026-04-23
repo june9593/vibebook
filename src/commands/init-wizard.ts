@@ -258,7 +258,18 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
     console.log(chalk.cyan(`  local-only mode: sessions stay on this machine. To enable sync later, edit ~/.vibebook/config.json and set "repoUrl".`));
   }
   if (a.runner === "github-action") {
-    console.log(chalk.cyan("  next: run `vibebook workflow init` to set up the GitHub Action that runs digest in CI"));
+    console.log(chalk.cyan("\nNext steps (this order matters):"));
+    console.log(chalk.cyan("  1. vibebook sync"));
+    console.log(chalk.gray("       → pushes raw_sessions + index.json. CI doesn't fire yet (workflow yaml not on remote)."));
+    console.log(chalk.cyan("  2. vibebook workflow init"));
+    console.log(chalk.gray("       → installs .github/workflows/vibebook-digest.yml + repo-salt.json + auto pushes."));
+    console.log(chalk.gray("         The push fires CI ONCE, with full session data already in the repo (saves a wasted CI run)."));
+    if (a.encrypt) {
+      console.log(chalk.cyan("  3. Set repo secret VIBEBOOK_PASSPHRASE on GitHub"));
+      console.log(chalk.gray("       Settings → Secrets and variables → Actions → 'New repository secret'"));
+    }
+  } else if (a.runner === "claude-cli" && a.repoUrl) {
+    console.log(chalk.cyan("\nNext: run `vibebook sync` to push your first batch (digest runs locally via Claude CLI)."));
   }
 }
 

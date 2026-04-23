@@ -112,6 +112,6 @@ export async function workflowInitCmd(opts: { force?: boolean; noPush?: boolean 
     console.log(chalk.cyan("\nNext: set repo secret VIBEBOOK_PASSPHRASE on GitHub"));
     console.log(chalk.gray("  Settings → Secrets and variables → Actions → 'New repository secret'"));
   }
-  console.log(chalk.gray("\nThe workflow will fire on every push to this device branch."));
-  console.log(chalk.gray("Run `vibebook sync` to push your first batch."));
+  console.log(chalk.gray("\nThe workflow will fire on every push to this device branch (this commit included)."));
+  console.log(chalk.gray("Tip: run `vibebook sync` BEFORE `vibebook workflow init` next time — that way the first CI run already has session data instead of running on an empty repo."));
 }

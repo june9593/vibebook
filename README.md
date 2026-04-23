@@ -70,19 +70,19 @@ for you to use as a merge target.
 
 If you'd rather not burn local Claude credits / cycles, vibebook can run the digest pipeline inside a GitHub Action using **GitHub Models** (free for personal accounts) as the LLM.
 
+**Setup order matters** — run `sync` first, then `workflow init`. That way the first CI run already has session data to digest, instead of firing on an empty repo.
+
 ```bash
-# One-time setup inside your vibebook repo:
+# 1. Push your sessions. CI doesn't fire yet (workflow yaml not on remote).
+vibebook sync
+
+# 2. Install the workflow + push it. THIS push triggers CI for the first time,
+#    and the repo already has sessions ready to digest.
 vibebook workflow init
-cd ~/memvc-repo  # or wherever your vibebook repo lives
-git add .github/workflows/vibebook-digest.yml
-git commit -m "add vibebook digest workflow"
-git push
 ```
 
-If your config has `encrypt: true`, also set the **VIBEBOOK_PASSPHRASE** repo secret (Settings → Secrets and variables → Actions → New repository secret). The salt is auto-written to `.vibebook/repo-salt.json` during `vibebook init` (or backfilled by `vibebook sync` on legacy repos) and is safe to commit (security relies on the passphrase, not the salt).
+`workflow init` auto-commits and pushes both `.github/workflows/vibebook-digest.yml` and `.vibebook/repo-salt.json`. If your config has `encrypt: true`, also set the **VIBEBOOK_PASSPHRASE** repo secret on GitHub (Settings → Secrets and variables → Actions → New repository secret) — without it, CI can't decrypt your raw sessions. The salt itself is safe to commit (security relies on the passphrase, not the salt).
 
-The workflow runs on:
-- Every `push` to a device branch (default patterns: `*.lan`, `*-pro`, `*-mbp`, `*-MBP*`, `*-pc`, `*-laptop`). Edit the workflow if your hostname doesn't match.
-- Manual `workflow_dispatch` from the **Actions** tab.
+The workflow runs on every push to any non-`main` branch (your device branches), or manually via `workflow_dispatch` from the **Actions** tab.
 
-It uses model `openai/gpt-4o-mini` by default — change `runnerModel` in the workflow if you want a different one (see [GitHub Models catalog](https://github.com/marketplace?type=models)).
+It uses model `openai/gpt-4o-mini` by default — change `runnerModel` in the workflow if you want a different one (see [GitHub Models catalog](https://github.com/marketplace?type=models)). Note: GitHub Models free tier hard-caps every request at 8000 input tokens regardless of model, so long threads get truncated. For high-quality digests on large repos, use the local `claude-cli` runner instead.
