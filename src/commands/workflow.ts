@@ -2,80 +2,63 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import chalk from "chalk";
-import { readConfig, writeRepoSaltFile } from "../config.js";
+import { readConfig } from "../config.js";
 import { migrateLegacyDataDir, migratedDataDirPaths } from "../migrate.js";
-import { REPO_SALT_REL, repoSaltAbs } from "../repo-data-dir.js";
 import { ensureRepo, ensureDeviceBranch, commitAndPush, fastForwardBranch } from "../git-ops.js";
 
 /**
- * Resolve the bundled workflow template path. The build emits to
- * `dist/src/commands/` (because tsconfig has rootDir="." and includes both
- * bin/ and src/), while dev runs from `src/commands/`. We probe both layouts
- * (and one more level up for npm-globally-installed layouts) and return the
- * first that exists.
+ * Resolve the path to a bundled asset. The build emits to `dist/src/commands/`
+ * (because tsconfig has rootDir="." and includes both bin/ and src/), while
+ * dev runs from `src/commands/`. Probe both layouts plus npm-global ones.
  */
-function templatePath(): string {
+function assetPath(rel: string): string {
   const here = dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    resolve(here, "..", "..", "assets", "workflows", "vibebook-digest.yml"),         // src/commands/
-    resolve(here, "..", "..", "..", "assets", "workflows", "vibebook-digest.yml"),   // dist/src/commands/
-    resolve(here, "..", "..", "..", "..", "assets", "workflows", "vibebook-digest.yml"),
+    resolve(here, "..", "..", rel),       // src/commands/
+    resolve(here, "..", "..", "..", rel), // dist/src/commands/
+    resolve(here, "..", "..", "..", "..", rel),
   ];
   for (const c of candidates) {
     if (existsSync(c)) return c;
   }
   throw new Error(
-    `vibebook workflow template not found. Tried:\n  ${candidates.join("\n  ")}\nIf you installed vibebook from npm, please file an issue — the assets/ dir wasn't bundled.`,
+    `vibebook bundled asset not found: ${rel}. Tried:\n  ${candidates.join("\n  ")}\nIf you installed vibebook from npm, please file an issue.`,
   );
 }
 
 export async function workflowInitCmd(opts: { force?: boolean; noPush?: boolean } = {}): Promise<void> {
   const cfg = readConfig();
-  const target = join(cfg.repoPath, ".github", "workflows", "vibebook-digest.yml");
-  if (existsSync(target) && !opts.force) {
-    console.log(chalk.yellow(`workflow already exists: ${target}`));
+  const yamlTarget = join(cfg.repoPath, ".github", "workflows", "vibebook-aggregate.yml");
+  const scriptTarget = join(cfg.repoPath, "scripts", "merge-books.mjs");
+
+  if ((existsSync(yamlTarget) || existsSync(scriptTarget)) && !opts.force) {
+    if (existsSync(yamlTarget)) console.log(chalk.yellow(`already exists: ${yamlTarget}`));
+    if (existsSync(scriptTarget)) console.log(chalk.yellow(`already exists: ${scriptTarget}`));
     console.log(chalk.gray("  re-run with --force to overwrite"));
     return;
   }
-  const tpl = readFileSync(templatePath(), "utf8");
-  // Substitute placeholders. The template ships with __VIBEBOOK_RUNNER_MODEL__
-  // as a sentinel so we don't accidentally bake in a stale default and ignore
-  // the user's wizard choice. Empty cfg.runnerModel → fall back to the
-  // catalog default the runner picks at call time (openai/gpt-4o-mini).
-  const renderedTpl = tpl.replace(
-    /__VIBEBOOK_RUNNER_MODEL__/g,
-    cfg.runnerModel?.trim() || "openai/gpt-4o-mini",
-  );
-  mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, renderedTpl);
-  console.log(chalk.green(`workflow written: ${target}`));
-  console.log(chalk.gray(`  runnerModel: ${cfg.runnerModel?.trim() || "(default) openai/gpt-4o-mini"}`));
 
-  // One-shot: rename legacy `.memvc/` → `.vibebook/` if present.
+  // Copy both files from the bundled assets/ into the user's repo.
+  mkdirSync(dirname(yamlTarget), { recursive: true });
+  writeFileSync(yamlTarget, readFileSync(assetPath("assets/workflows/vibebook-aggregate.yml"), "utf8"));
+  console.log(chalk.green(`workflow written: ${yamlTarget}`));
+
+  mkdirSync(dirname(scriptTarget), { recursive: true });
+  writeFileSync(scriptTarget, readFileSync(assetPath("assets/scripts/merge-books.mjs"), "utf8"));
+  console.log(chalk.green(`merge script written: ${scriptTarget}`));
+
+  // Opportunistic: rename legacy `.memvc/` → `.vibebook/` if the user skipped
+  // it on earlier syncs.
   const dataDirMig = await migrateLegacyDataDir(cfg.repoPath);
   if (dataDirMig.migrated) {
     console.log(chalk.green(`renamed legacy .memvc/ → .vibebook/ ${dataDirMig.viaGit ? "(via git mv)" : ""}`));
   }
 
-  // Backfill .vibebook/repo-salt.json. We always write it when encrypt is on
-  // (init may have written it but never staged; or this could be a legacy repo
-  // that never had it). git add later is idempotent.
-  if (cfg.encrypt) {
-    if (!existsSync(repoSaltAbs(cfg.repoPath))) {
-      writeRepoSaltFile(cfg.repoPath, cfg.salt);
-      console.log(chalk.green(`wrote ${REPO_SALT_REL}`));
-    }
-  }
-
-  // Auto-commit + push so the user doesn't have to copy-paste git commands.
-  // Skip when --no-push (or when there's no remote URL configured = local-only).
+  // Auto-commit + push. Skip when --no-push or local-only (no remote URL).
   const wantPush = !opts.noPush && cfg.repoUrl && cfg.deviceBranch;
   if (!wantPush) {
-    console.log(chalk.gray("\nLocal-only mode: workflow yaml written but not committed/pushed."));
+    console.log(chalk.gray("\nLocal-only mode: files written but not committed/pushed."));
     console.log(chalk.gray(`  repoUrl: ${cfg.repoUrl || "(none)"}`));
-    if (cfg.encrypt) {
-      console.log(chalk.cyan("  Don't forget to set VIBEBOOK_PASSPHRASE secret on GitHub once you push."));
-    }
     return;
   }
 
@@ -90,28 +73,26 @@ export async function workflowInitCmd(opts: { force?: boolean; noPush?: boolean 
     console.log(chalk.cyan(`  Skipping push. Resolve in ${cfg.repoPath} and re-run \`vibebook workflow init\`.`));
     return;
   }
-  const paths: string[] = [".github/workflows/vibebook-digest.yml"];
-  if (cfg.encrypt) paths.push(REPO_SALT_REL);
+  const paths: string[] = [
+    ".github/workflows/vibebook-aggregate.yml",
+    "scripts/merge-books.mjs",
+  ];
   if (dataDirMig.migrated && dataDirMig.viaGit) paths.push(...migratedDataDirPaths(cfg.repoPath));
   const r = await commitAndPush(
     git,
-    "vibebook: add digest workflow + repo housekeeping",
+    "vibebook: add CI aggregation workflow + merge-books script",
     paths,
     cfg.deviceBranch,
     (stage) => console.log(chalk.gray(`  ${stage}`)),
   );
   if (r.committed && r.pushed) {
-    console.log(chalk.green(`✓ workflow + salt pushed to '${cfg.deviceBranch}'`));
+    console.log(chalk.green(`✓ pushed to '${cfg.deviceBranch}'`));
   } else if (r.committed && !r.pushed) {
     console.log(chalk.yellow(`Committed locally but push failed. Run \`git push\` manually from ${cfg.repoPath}.`));
   } else {
-    console.log(chalk.gray("Nothing to commit (workflow + salt already up to date)."));
+    console.log(chalk.gray("Nothing to commit (workflow + script already up to date)."));
   }
 
-  if (cfg.encrypt) {
-    console.log(chalk.cyan("\nNext: set repo secret VIBEBOOK_PASSPHRASE on GitHub"));
-    console.log(chalk.gray("  Settings → Secrets and variables → Actions → 'New repository secret'"));
-  }
-  console.log(chalk.gray("\nThe workflow will fire on every push to this device branch (this commit included)."));
-  console.log(chalk.gray("Tip: run `vibebook sync` BEFORE `vibebook workflow init` next time — that way the first CI run already has session data instead of running on an empty repo."));
+  console.log(chalk.gray("\nThe workflow fires on every push to a non-main branch."));
+  console.log(chalk.gray("Each device's `vibebook sync` will trigger it; the CI merges all device book/s into main."));
 }

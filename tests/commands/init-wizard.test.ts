@@ -52,7 +52,7 @@ describe("applyWizardAnswers", () => {
       encrypt: true,
       passphraseEntered: "secret",
       digestEnabled: true,
-      runner: "claude-cli",
+      enableAggregateCI: true,
       runnerModel: "",
     });
     const { existsSync, readFileSync, statSync } = await import("node:fs");
@@ -63,6 +63,7 @@ describe("applyWizardAnswers", () => {
     expect(cfg.encrypt).toBe(true);
     expect(cfg.digestEnabled).toBe(true);
     expect(cfg.runner).toBe("claude-cli");
+    expect(cfg.enableAggregateCI).toBe(true);
     const pp = readFileSync(join(tmpHome, ".vibebook", "passphrase"), "utf8").trim();
     expect(pp).toBe("secret");
     expect(statSync(join(tmpHome, ".vibebook", "passphrase")).mode & 0o777).toBe(0o600);
@@ -76,7 +77,7 @@ describe("applyWizardAnswers", () => {
       localPath,
       encrypt: false,
       digestEnabled: false,
-      runner: "claude-cli",
+      enableAggregateCI: false,
       runnerModel: "",
     });
     const { existsSync } = await import("node:fs");
@@ -142,7 +143,7 @@ describe("runWizard end-to-end transcript", () => {
     vi.resetModules();
   });
 
-  it("walks through all 7 questions and returns expected answers", async () => {
+  it("walks through all questions and returns expected answers (remote mode)", async () => {
     const lines = [
       "y",                             // Q0 sync to remote
       "git@github.com:you/repo.git",  // Q1 repo URL
@@ -151,8 +152,8 @@ describe("runWizard end-to-end transcript", () => {
       "secret123",                     // Q4 passphrase
       "secret123",                     // Q4 confirm
       "y",                             // Q5 digest
-      "1",                             // Q6 runner = claude-cli
-      "claude-sonnet-4-6",             // Q7 model
+      "claude-sonnet-4-6",             // Q6 model
+      "y",                             // Q7 enable aggregate CI
     ];
     const stdin = new Readable({ read() {} }) as Readable & { isTTY?: boolean };
     stdin.isTTY = true;
@@ -180,15 +181,15 @@ describe("runWizard end-to-end transcript", () => {
     expect(a.encrypt).toBe(true);
     expect(a.passphraseEntered).toBe("secret123");
     expect(a.digestEnabled).toBe(true);
-    expect(a.runner).toBe("claude-cli");
     expect(a.runnerModel).toBe("claude-sonnet-4-6");
+    expect(a.enableAggregateCI).toBe(true);
   });
 
-  it("local-only mode (Q0=n) skips repo URL + encryption questions", async () => {
+  it("local-only mode (Q0=n) skips remote-only questions (including aggregate CI)", async () => {
     const lines = [
       "n",                              // Q0 sync to remote → no
       "y",                              // Q5 digest
-      "",                               // Q7 model (Q6 auto since only one runner)
+      "",                               // Q6 model (blank = default)
     ];
     const stdin = new Readable({ read() {} }) as Readable & { isTTY?: boolean };
     stdin.isTTY = true;
@@ -215,6 +216,6 @@ describe("runWizard end-to-end transcript", () => {
     expect(a.encrypt).toBe(false);
     expect(a.passphraseEntered).toBeUndefined();
     expect(a.digestEnabled).toBe(true);
-    expect(a.runner).toBe("claude-cli");
+    expect(a.enableAggregateCI).toBe(false); // local-only mode → no CI question asked
   });
 });

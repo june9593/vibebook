@@ -66,23 +66,44 @@ Existing repos initialized before v0.2 will auto-migrate on the next `vibebook s
 the local `main` branch is renamed to `<device>`, and a fresh unborn `main` is left
 for you to use as a merge target.
 
-## Run digest in GitHub Actions
+## Aggregate book/ across devices (GitHub Actions)
 
-If you'd rather not burn local Claude credits / cycles, vibebook can run the digest pipeline inside a GitHub Action using **GitHub Models** (free for personal accounts) as the LLM.
+When you run `vibebook sync` on each of your machines, each one pushes to its
+own device branch (named after `os.hostname()`). To see **one unified book**
+that merges every machine's articles into `main`, use the built-in CI
+aggregation workflow.
 
-**Setup order matters** — run `sync` first, then `workflow init`. That way the first CI run already has session data to digest, instead of firing on an empty repo.
+The workflow does NOT run an LLM — threading / article / chapter generation
+happens locally on each device when you `vibebook sync` there. CI just does
+a deterministic merge:
+
+- Articles from every device are deduped by `threadId`; the latest-updated
+  version wins.
+- Each device keeps its own `chapter.md` alongside the others, stored as
+  `book/<project>/chapter.<device>.md`, so no device overwrites another.
+- `book/index.md` and `book/_meta/timeline.md` are regenerated to list every
+  article across every device.
+
+### Setup order (matters)
 
 ```bash
-# 1. Push your sessions. CI doesn't fire yet (workflow yaml not on remote).
+# 1. Push your sessions FIRST. CI doesn't fire yet (workflow yaml not on remote).
 vibebook sync
 
-# 2. Install the workflow + push it. THIS push triggers CI for the first time,
-#    and the repo already has sessions ready to digest.
+# 2. Install the aggregation workflow + push it. THIS push triggers CI for
+#    the first time, and the repo already has sessions ready to aggregate.
 vibebook workflow init
 ```
 
-`workflow init` auto-commits and pushes both `.github/workflows/vibebook-digest.yml` and `.vibebook/repo-salt.json`. If your config has `encrypt: true`, also set the **VIBEBOOK_PASSPHRASE** repo secret on GitHub (Settings → Secrets and variables → Actions → New repository secret) — without it, CI can't decrypt your raw sessions. The salt itself is safe to commit (security relies on the passphrase, not the salt).
+`workflow init` writes two files into your repo and auto-commits + pushes them:
 
-The workflow runs on every push to any non-`main` branch (your device branches), or manually via `workflow_dispatch` from the **Actions** tab.
+- `.github/workflows/vibebook-aggregate.yml`
+- `scripts/merge-books.mjs`
 
-It uses model `openai/gpt-4o-mini` by default — change `runnerModel` in the workflow if you want a different one (see [GitHub Models catalog](https://github.com/marketplace?type=models)). Note: GitHub Models free tier hard-caps every request at 8000 input tokens regardless of model, so long threads get truncated. For high-quality digests on large repos, use the local `claude-cli` runner instead.
+From then on, every push to any non-`main` branch triggers the workflow, which
+clones `main`, runs `merge-books.mjs`, and pushes the aggregated `book/` back
+to `main`. Manual run also available via the **Actions** tab →
+`workflow_dispatch`.
+
+No GitHub secrets needed — the workflow uses the default `GITHUB_TOKEN` for
+pushing to `main` and doesn't call any external services.

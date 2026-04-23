@@ -10,10 +10,9 @@ const CONFIG_DIR = join(homedir(), ".vibebook");
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 
 /** Default cap on concurrent runner calls during the threading phase.
- *  Lowered from 4 → 1 because github-action runner (GitHub Models) burst-
- *  rate-limits HARD at concurrency > 1. claude-cli runners can override
- *  to 4+ in their config. */
-export const DEFAULT_THREADING_CONCURRENCY = 1;
+ *  claude-cli can comfortably handle 4 (each spawn is its own subprocess
+ *  against the user's own Claude quota). anthropic-api also fine at 4. */
+export const DEFAULT_THREADING_CONCURRENCY = 4;
 
 /** Default attempts per threading batch before soft-failing it. */
 export const DEFAULT_THREADING_MAX_ATTEMPTS = 3;
@@ -24,8 +23,13 @@ const Schema = z.object({
   encrypt: z.boolean().default(false),
   salt: z.string(),          // base64 per-repo salt for scrypt
   deviceBranch: z.string().default(""),
-  runner: z.enum(["claude-cli", "anthropic-api", "github-models", "github-action"]).default("claude-cli"),
+  runner: z.enum(["claude-cli", "anthropic-api"]).default("claude-cli"),
   runnerModel: z.string().default(""),
+  /** When true, the user opted into the CI book-aggregation workflow
+   *  (scripts/merge-books.mjs runs on push to any non-main branch and
+   *  merges device books into main). Purely informational — the workflow
+   *  yaml + script live in the user's repo, not driven by this flag. */
+  enableAggregateCI: z.boolean().default(false),
   threadingConcurrency: z.number().int().positive().default(DEFAULT_THREADING_CONCURRENCY),
   threadingMaxAttempts: z.number().int().positive().default(DEFAULT_THREADING_MAX_ATTEMPTS),
   digestEnabled: z.boolean().default(true),

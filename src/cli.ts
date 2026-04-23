@@ -11,10 +11,9 @@ export async function run(argv: string[]) {
     .option("--no-digest", "skip the digest pipeline (raw push only)")
     .option("--device <name>", "device branch name (default: sanitized os.hostname())")
     .option("--passphrase <pp>", "save passphrase to ~/.vibebook/passphrase (only with --encrypt)")
-    .option("--all-models", "wizard mode: include Copilot-paid models (gpt-5*, o1*, o3*, o4-mini) in the model picker")
     .action(async (
       repoUrl: string | undefined,
-      opts: { localPath?: string; encrypt?: boolean; digest?: boolean; device?: string; passphrase?: string; allModels?: boolean },
+      opts: { localPath?: string; encrypt?: boolean; digest?: boolean; device?: string; passphrase?: string },
     ) => {
       const { initCmd } = await import("./commands/init.js");
       await initCmd({
@@ -24,7 +23,6 @@ export async function run(argv: string[]) {
         digestEnabled: opts.digest !== false,
         device: opts.device,
         passphrase: opts.passphrase,
-        allModels: opts.allModels,
       });
     });
   program
@@ -47,12 +45,12 @@ export async function run(argv: string[]) {
     });
   program
     .command("workflow")
-    .description("Manage the GitHub Action that runs digest in CI")
+    .description("Manage the GitHub Action that aggregates device branches into main")
     .addCommand(
       new Command("init")
-        .description("Write .github/workflows/vibebook-digest.yml into the configured vibebook repo, then commit + push")
-        .option("--force", "overwrite if file already exists")
-        .option("--no-push", "write the yaml locally but don't auto commit + push")
+        .description("Write .github/workflows/vibebook-aggregate.yml + scripts/merge-books.mjs into the configured vibebook repo, then commit + push")
+        .option("--force", "overwrite if files already exist")
+        .option("--no-push", "write the files locally but don't auto commit + push")
         .action(async (opts: { force?: boolean; push?: boolean }) => {
           const { workflowInitCmd } = await import("./commands/workflow.js");
           // commander's --no-X sets opts.X=false when flag present, true otherwise.

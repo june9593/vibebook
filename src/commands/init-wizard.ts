@@ -1,6 +1,6 @@
 import { join, resolve } from "node:path";
 import chalk from "chalk";
-import { prompt, promptYesNo, promptChoice, promptHidden, closePrompts } from "../prompts.js";
+import { prompt, promptYesNo, promptHidden, closePrompts } from "../prompts.js";
 import { materializeRepoAtPath, expandHome } from "../git-ops.js";
 import { writePassphraseFile } from "../passphrase-store.js";
 import {
@@ -11,7 +11,6 @@ import {
 import { deviceBranchFromHostname } from "../device.js";
 import { checkBinary, runnerBinary, runnerInstallUrl } from "../runner-check.js";
 import { createRunner } from "../digest/runner.js";
-import { fetchGithubModelsCatalog, GITHUB_MODELS_FALLBACK } from "../github-models-catalog.js";
 
 export interface WizardAnswers {
   repoUrl: string;
@@ -19,7 +18,9 @@ export interface WizardAnswers {
   encrypt: boolean;
   passphraseEntered?: string;
   digestEnabled: boolean;
-  runner: "claude-cli" | "github-action";
+  /** User opted into the CI cross-device aggregation workflow. Only
+   *  meaningful when syncToRemote is true. */
+  enableAggregateCI: boolean;
   runnerModel: string;
 }
 
@@ -32,20 +33,14 @@ export function defaultLocalPath(): string {
 }
 
 /**
- * Run the interactive 7-step wizard. Returns answers; caller owns writing
- * config + materializing the repo. Throws on user-invalid input that the
- * loops can't recover from (caller catches and exits non-zero).
+ * Run the interactive wizard. Returns answers; caller owns writing config +
+ * materializing the repo. Throws on user-invalid input that the loops can't
+ * recover from (caller catches and exits non-zero).
  */
-export interface RunWizardOptions {
-  /** Show the full GitHub Models catalog including paid-only models
-   *  (gpt-5*, o1*, o3*, o4-mini). Default: false (Copilot Free models only). */
-  allModels?: boolean;
-}
-
-export async function runWizard(opts: RunWizardOptions = {}): Promise<WizardAnswers> {
+export async function runWizard(): Promise<WizardAnswers> {
   console.log(chalk.bold("\nvibebook init wizard\n"));
 
-  // Q0: sync to GitHub?
+  // Q0: sync to remote?
   const syncToRemote = await promptYesNo(
     chalk.cyan("Q0") + " Sync to a remote git repo (GitHub etc.)? Choose 'no' for local-only.",
     true,
@@ -103,78 +98,30 @@ export async function runWizard(opts: RunWizardOptions = {}): Promise<WizardAnsw
     true,
   );
 
-  // Q6 + Q7 only if digest enabled
-  let runner: WizardAnswers["runner"] = "claude-cli";
+  // Q6: model name for claude-cli. Blank = whatever `claude` ships with.
+  // We used to ask about the runner here (claude-cli vs GitHub Action) but
+  // dropped the GitHub Action path because GitHub Models free tier caps every
+  // request at 8K input tokens and makes useful digests impossible. claude-cli
+  // is the only supported runner now; anthropic-api remains as a stub (Sprint 5).
   let runnerModel = "";
   if (digestEnabled) {
-    const runnerOptions: { value: WizardAnswers["runner"]; label: string; description?: string }[] = [
-      { value: "claude-cli", label: "Local Claude CLI", description: "needs `claude` on PATH" },
-    ];
-    if (syncToRemote) {
-      runnerOptions.push({
-        value: "github-action",
-        label: "GitHub Action",
-        description: "runs digest in CI via GitHub Models (free); see `vibebook workflow init`",
-      });
-    }
-    runner = runnerOptions.length === 1
-      ? runnerOptions[0]!.value
-      : await promptChoice(chalk.cyan("Q6") + " Runner", runnerOptions, 0);
-
-    if (runner === "github-action") {
-      console.log(chalk.yellow(
-        "\n  ⚠ EXPERIMENTAL: GitHub Action runner uses GitHub Models (free tier)."
-      ));
-      console.log(chalk.yellow(
-        "    Free tier hard-caps every request at 8000 input / 4000 output tokens"
-      ));
-      console.log(chalk.yellow(
-        "    regardless of model. Long threads will be auto-truncated; some articles"
-      ));
-      console.log(chalk.yellow(
-        "    may be partial or fail outright. For high-quality digests on big repos,"
-      ));
-      console.log(chalk.yellow(
-        "    use the local Claude CLI runner instead.\n"
-      ));
-    }
-
-    // Q7: model. For github-action, fetch the catalog and let the user pick.
-    // For claude-cli, blank = whatever `claude` ships with (recommended).
-    if (runner === "github-action") {
-      console.log(chalk.gray(
-        opts.allModels
-          ? "  fetching GitHub Models catalog (including paid-only models)..."
-          : "  fetching GitHub Models catalog (Copilot Free tier; pass --all-models to see paid-only models like gpt-5/o3)...",
-      ));
-      const models = await fetchGithubModelsCatalog({ includePaidOnly: opts.allModels });
-      // All Copilot Free models share an 8K input cap, so rate-tier doesn't
-      // change the digest experience. Sort low-tier first only because they
-      // have higher requests/min, which matters at our concurrency=1.
-      const sorted = [...models].sort((a, b) => {
-        const tierRank = (t?: string) => t === "low" ? 0 : t === "high" ? 1 : 2;
-        return tierRank(a.rateLimitTier) - tierRank(b.rateLimitTier);
-      });
-      const choices = sorted.map((m) => ({
-        value: m.id,
-        label: `${m.id}  (${m.publisher}${m.rateLimitTier ? `, ${m.rateLimitTier}-tier` : ""})`,
-        description: m.name,
-      }));
-      const defaultIdx = Math.max(0, sorted.findIndex((m) => m.id === "openai/gpt-4o-mini"));
-      runnerModel = await promptChoice(
-        chalk.cyan("Q7") + " Model (all Copilot-Free models cap at 8K input / 4K output per request)",
-        choices,
-        defaultIdx,
-      );
-    } else {
-      runnerModel = await prompt(
-        chalk.cyan("Q7") + " Model name (blank = runner default)",
-        "",
-      );
-    }
+    runnerModel = await prompt(
+      chalk.cyan("Q6") + " claude model (blank = whatever `claude -p` defaults to)",
+      "",
+    );
   }
 
-  return { repoUrl, localPath, encrypt, passphraseEntered, digestEnabled, runner, runnerModel };
+  // Q7: opt-in to cross-device CI aggregation. Only offered when syncToRemote
+  // — local-only repos have no CI to run.
+  let enableAggregateCI = false;
+  if (syncToRemote) {
+    enableAggregateCI = await promptYesNo(
+      chalk.cyan("Q7") + " Enable CI cross-device book aggregation? (GitHub Actions merges device branches into main)",
+      false,
+    );
+  }
+
+  return { repoUrl, localPath, encrypt, passphraseEntered, digestEnabled, enableAggregateCI, runnerModel };
 }
 
 /**
@@ -195,7 +142,7 @@ export async function verifyRunner(runner: string, model = ""): Promise<boolean>
   console.log(chalk.green(`  ok ${bin}: ${r.output.split("\n")[0]}`));
   const ping = await promptYesNo("  Test a real API call now? (sends 1-token ping)", false);
   if (!ping) return true;
-  if (runner !== "claude-cli" && runner !== "anthropic-api" && runner !== "github-models") {
+  if (runner !== "claude-cli" && runner !== "anthropic-api") {
     console.log(chalk.yellow(`  ping not supported for runner '${runner}' yet`));
     return true;
   }
@@ -255,8 +202,9 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
     encrypt: a.encrypt,
     salt: freshSaltBase64(),
     deviceBranch: deviceBranchFromHostname(),
-    runner: a.runner,
+    runner: "claude-cli",
     runnerModel: a.runnerModel,
+    enableAggregateCI: a.enableAggregateCI,
     threadingConcurrency: DEFAULT_THREADING_CONCURRENCY,
     threadingMaxAttempts: DEFAULT_THREADING_MAX_ATTEMPTS,
     digestEnabled: a.digestEnabled,
@@ -264,31 +212,28 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
   writeConfig(cfg);
   if (cfg.encrypt) {
     writeRepoSaltFile(cfg.repoPath, cfg.salt);
-    console.log(chalk.gray(`  repo salt written to ${a.localPath}/.vibebook/repo-salt.json (commit + push so CI can read it)`));
+    console.log(chalk.gray(`  repo salt written to ${a.localPath}/.vibebook/repo-salt.json`));
   }
   console.log(chalk.green("\nok vibebook initialized"));
   console.log(chalk.gray(`  config: ~/.vibebook/config.json`));
   if (!a.repoUrl) {
     console.log(chalk.cyan(`  local-only mode: sessions stay on this machine. To enable sync later, edit ~/.vibebook/config.json and set "repoUrl".`));
+    return;
   }
-  if (a.runner === "github-action") {
-    console.log(chalk.cyan("\nNext steps (this order matters):"));
-    console.log(chalk.cyan("  1. vibebook sync"));
-    console.log(chalk.gray("       → pushes raw_sessions + index.json. CI doesn't fire yet (workflow yaml not on remote)."));
+
+  // Remote mode: spell out the next steps.
+  console.log(chalk.cyan("\nNext steps:"));
+  console.log(chalk.cyan("  1. vibebook sync"));
+  console.log(chalk.gray("       → extract, encrypt, commit, push, then run digest locally (claude-cli)."));
+  if (a.enableAggregateCI) {
     console.log(chalk.cyan("  2. vibebook workflow init"));
-    console.log(chalk.gray("       → installs .github/workflows/vibebook-digest.yml + repo-salt.json + auto pushes."));
-    console.log(chalk.gray("         The push fires CI ONCE, with full session data already in the repo (saves a wasted CI run)."));
-    if (a.encrypt) {
-      console.log(chalk.cyan("  3. Set repo secret VIBEBOOK_PASSPHRASE on GitHub"));
-      console.log(chalk.gray("       Settings → Secrets and variables → Actions → 'New repository secret'"));
-    }
-  } else if (a.runner === "claude-cli" && a.repoUrl) {
-    console.log(chalk.cyan("\nNext: run `vibebook sync` to push your first batch (digest runs locally via Claude CLI)."));
+    console.log(chalk.gray("       → install the CI book-aggregation workflow into your repo + auto push."));
+    console.log(chalk.gray("         The workflow merges every device branch's book/ into main on each push."));
   }
 }
 
 /** Top-level entry — composes wizard + verify + apply, with cleanup. */
-export async function runInitWizard(opts: RunWizardOptions = {}): Promise<void> {
+export async function runInitWizard(): Promise<void> {
   if (configExists()) {
     const overwrite = await promptYesNo(
       chalk.yellow("vibebook already initialized at ~/.vibebook/config.json. Overwrite?"),
@@ -301,13 +246,13 @@ export async function runInitWizard(opts: RunWizardOptions = {}): Promise<void> 
     }
   }
   try {
-    const answers = await runWizard(opts);
+    const answers = await runWizard();
     let runnerOk = true;
-    if (answers.digestEnabled) runnerOk = await verifyRunner(answers.runner, answers.runnerModel);
+    if (answers.digestEnabled) runnerOk = await verifyRunner("claude-cli", answers.runnerModel);
     await applyWizardAnswers(answers);
     if (answers.digestEnabled && !runnerOk) {
       console.log(chalk.yellow(
-        `  note: digest will fail until '${answers.runner}' is installed; install it then run \`vibebook sync\`.`,
+        `  note: digest will fail until 'claude' is installed; install it then run \`vibebook sync\`.`,
       ));
     }
   } finally {

@@ -11,11 +11,6 @@ describe("createRunner factory", () => {
     const r = createRunner({ runner: "anthropic-api", runnerModel: "" });
     expect(typeof r.run).toBe("function");
   });
-
-  it("returns a runner for github-models", () => {
-    const r = createRunner({ runner: "github-models", runnerModel: "" });
-    expect(typeof r.run).toBe("function");
-  });
 });
 
 describe("anthropic-api runner stub", () => {
@@ -24,24 +19,6 @@ describe("anthropic-api runner stub", () => {
     const res = await r.run("hello", {});
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toMatch(/not implemented/i);
-  });
-});
-
-describe("github-models runner stub", () => {
-  it("returns ok:false with a clear error when GITHUB_TOKEN is missing", async () => {
-    const prevToken = process.env.GITHUB_TOKEN;
-    const prevAlt = process.env.VIBEBOOK_GITHUB_TOKEN;
-    delete process.env.GITHUB_TOKEN;
-    delete process.env.VIBEBOOK_GITHUB_TOKEN;
-    try {
-      const r = createRunner({ runner: "github-models", runnerModel: "" });
-      const res = await r.run("hello", {});
-      expect(res.ok).toBe(false);
-      if (!res.ok) expect(res.error).toMatch(/no GITHUB_TOKEN/i);
-    } finally {
-      if (prevToken !== undefined) process.env.GITHUB_TOKEN = prevToken;
-      if (prevAlt !== undefined) process.env.VIBEBOOK_GITHUB_TOKEN = prevAlt;
-    }
   });
 });
 
@@ -157,46 +134,5 @@ describe("claude-cli runner", () => {
     const res = await r.run("x", {}, { outputFormat: "text" });
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.text).toBe("just plain text\n");
-  });
-});
-
-describe("createRunner — github-action dispatch", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it("throws when not in CI (VIBEBOOK_CI != '1')", () => {
-    expect(() => createRunner({ runner: "github-action", runnerModel: "" }))
-      .toThrow(/VIBEBOOK_CI=1/);
-  });
-
-  it("returns a runner when VIBEBOOK_CI='1'", () => {
-    vi.stubEnv("VIBEBOOK_CI", "1");
-    const r = createRunner({ runner: "github-action", runnerModel: "openai/gpt-4o-mini" });
-    expect(typeof r.run).toBe("function");
-  });
-
-  it("dispatches to github-models with rendered prompt", async () => {
-    vi.stubEnv("VIBEBOOK_CI", "1");
-    vi.stubEnv("GITHUB_TOKEN", "tok");
-    const captured: { url?: string; body?: string } = {};
-    const origFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string, init: RequestInit) => {
-      captured.url = String(url);
-      captured.body = init.body as string;
-      return new Response(
-        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
-        { status: 200 },
-      );
-    }) as typeof fetch;
-    try {
-      const r = createRunner({ runner: "github-action", runnerModel: "openai/gpt-4o-mini" });
-      const out = await r.run("Hello {{name}}", { name: "world" });
-      expect(out.ok).toBe(true);
-      expect(JSON.parse(captured.body!).messages[0].content).toBe("Hello world");
-      expect(captured.url).toContain("models.github.ai");
-    } finally {
-      globalThis.fetch = origFetch;
-    }
   });
 });

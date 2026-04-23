@@ -1,6 +1,5 @@
 import { runClaudeCli } from "./runners/claude-cli.js";
 import { runAnthropicApi } from "./runners/anthropic-api.js";
-import { runGithubModels } from "./runners/github-models.js";
 import type { Config } from "../config.js";
 
 export type RunResult =
@@ -45,28 +44,5 @@ export function createRunner(cfg: RunnerConfig): LlmRunner {
         run: (prompt, vars, opts) =>
           runAnthropicApi(renderPrompt(prompt, vars), cfg.runnerModel, opts ?? {}),
       };
-    case "github-models":
-      return {
-        run: (prompt, vars, opts) =>
-          runGithubModels(renderPrompt(prompt, vars), cfg.runnerModel, opts ?? {}),
-      };
-    case "github-action": {
-      // The "github-action" config value means "I'll run the digest from a GitHub
-      // Action, not locally". When VIBEBOOK_CI=1 (set by the workflow), we transparently
-      // dispatch to the GitHub Models adapter, which authenticates via GITHUB_TOKEN.
-      //
-      // Local invocation should not pick this branch — `vibebook init` only writes
-      // "github-action" if the user picked it in the wizard, and the wizard rejects
-      // it (see runWizard's Q6 loop).
-      if (process.env.VIBEBOOK_CI === "1") {
-        return {
-          run: (prompt, vars, opts) =>
-            runGithubModels(renderPrompt(prompt, vars), cfg.runnerModel, opts ?? {}),
-        };
-      }
-      throw new Error(
-        "runner='github-action' delegates digest to GitHub Actions and is not callable locally. The local sync should skip the digest phase; if you reached this error, run `vibebook init` and pick 'Local Claude CLI' for local digest, or set VIBEBOOK_CI=1 (only inside the workflow).",
-      );
-    }
   }
 }

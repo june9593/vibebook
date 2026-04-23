@@ -16,9 +16,10 @@ describe("workflowInitCmd", () => {
     mkdirSync(join(tmpHome, ".vibebook"), { recursive: true });
     writeFileSync(join(tmpHome, ".vibebook", "config.json"), JSON.stringify({
       repoPath, repoUrl: "git@example.com:u/r.git",
-      encrypt: true, salt: "x",
+      encrypt: false, salt: "x",
       deviceBranch: "test.lan",
-      runner: "github-action", runnerModel: "openai/gpt-4o-mini",
+      runner: "claude-cli", runnerModel: "",
+      enableAggregateCI: true,
       threadingConcurrency: 4, threadingMaxAttempts: 3,
       digestEnabled: true,
     }));
@@ -29,69 +30,43 @@ describe("workflowInitCmd", () => {
     vi.resetModules();
   });
 
-  it("writes the workflow file under repoPath/.github/workflows/", async () => {
+  it("writes both the workflow yaml and the merge-books.mjs script", async () => {
     const { workflowInitCmd } = await import("../../src/commands/workflow.js");
     await workflowInitCmd({ noPush: true });
-    const out = join(repoPath, ".github", "workflows", "vibebook-digest.yml");
-    expect(existsSync(out)).toBe(true);
-    const body = readFileSync(out, "utf8");
-    // Sanity: the template should at least mention these fixed strings.
-    expect(body).toContain("vibebook digest");
-    expect(body).toContain("VIBEBOOK_CI");
-    expect(body).toContain("workflow_dispatch");
-  });
-
-  it("substitutes runnerModel from config (no leftover placeholder)", async () => {
-    rmSync(join(tmpHome, ".vibebook", "config.json"));
-    writeFileSync(join(tmpHome, ".vibebook", "config.json"), JSON.stringify({
-      repoPath, repoUrl: "git@example.com:u/r.git",
-      encrypt: false, salt: "x",
-      deviceBranch: "test.lan",
-      runner: "github-action", runnerModel: "openai/gpt-4.1-mini",
-      threadingConcurrency: 1, threadingMaxAttempts: 3,
-      digestEnabled: true,
-    }));
-    const { workflowInitCmd } = await import("../../src/commands/workflow.js");
-    await workflowInitCmd({ noPush: true });
-    const body = readFileSync(join(repoPath, ".github", "workflows", "vibebook-digest.yml"), "utf8");
-    expect(body).toContain('"runnerModel": "openai/gpt-4.1-mini"');
-    expect(body).not.toContain("__VIBEBOOK_RUNNER_MODEL__");
-  });
-
-  it("falls back to gpt-4o-mini when config has empty runnerModel", async () => {
-    rmSync(join(tmpHome, ".vibebook", "config.json"));
-    writeFileSync(join(tmpHome, ".vibebook", "config.json"), JSON.stringify({
-      repoPath, repoUrl: "git@example.com:u/r.git",
-      encrypt: false, salt: "x",
-      deviceBranch: "test.lan",
-      runner: "github-action", runnerModel: "",
-      threadingConcurrency: 1, threadingMaxAttempts: 3,
-      digestEnabled: true,
-    }));
-    const { workflowInitCmd } = await import("../../src/commands/workflow.js");
-    await workflowInitCmd({ noPush: true });
-    const body = readFileSync(join(repoPath, ".github", "workflows", "vibebook-digest.yml"), "utf8");
-    expect(body).toContain('"runnerModel": "openai/gpt-4o-mini"');
+    const yamlOut = join(repoPath, ".github", "workflows", "vibebook-aggregate.yml");
+    const scriptOut = join(repoPath, "scripts", "merge-books.mjs");
+    expect(existsSync(yamlOut)).toBe(true);
+    expect(existsSync(scriptOut)).toBe(true);
+    const yaml = readFileSync(yamlOut, "utf8");
+    expect(yaml).toContain("vibebook aggregate book");
+    expect(yaml).toContain("branches-ignore");
+    expect(yaml).toContain("merge-books.mjs");
+    // No longer calls an LLM → no GitHub Models / VIBEBOOK_PASSPHRASE refs.
+    expect(yaml).not.toContain("VIBEBOOK_PASSPHRASE");
+    expect(yaml).not.toContain("models.github.ai");
+    expect(yaml).not.toContain("models: read");
+    const script = readFileSync(scriptOut, "utf8");
+    expect(script).toContain("Aggregate every device branch");
   });
 
   it("refuses to overwrite without --force", async () => {
-    const out = join(repoPath, ".github", "workflows", "vibebook-digest.yml");
+    const yamlOut = join(repoPath, ".github", "workflows", "vibebook-aggregate.yml");
     mkdirSync(join(repoPath, ".github", "workflows"), { recursive: true });
-    writeFileSync(out, "existing content\n");
+    writeFileSync(yamlOut, "existing content\n");
     const { workflowInitCmd } = await import("../../src/commands/workflow.js");
     await workflowInitCmd({ noPush: true });
-    expect(readFileSync(out, "utf8")).toBe("existing content\n");
+    expect(readFileSync(yamlOut, "utf8")).toBe("existing content\n");
   });
 
   it("overwrites with --force", async () => {
-    const out = join(repoPath, ".github", "workflows", "vibebook-digest.yml");
+    const yamlOut = join(repoPath, ".github", "workflows", "vibebook-aggregate.yml");
     mkdirSync(join(repoPath, ".github", "workflows"), { recursive: true });
-    writeFileSync(out, "existing\n");
+    writeFileSync(yamlOut, "existing\n");
     const { workflowInitCmd } = await import("../../src/commands/workflow.js");
     await workflowInitCmd({ force: true, noPush: true });
-    const body = readFileSync(out, "utf8");
+    const body = readFileSync(yamlOut, "utf8");
     expect(body).not.toBe("existing\n");
-    expect(body).toContain("vibebook digest");
+    expect(body).toContain("vibebook aggregate book");
   });
 });
 
@@ -116,10 +91,11 @@ describe("workflowInitCmd auto-push integration", () => {
     mkdirSync(join(tmpHome, ".vibebook"), { recursive: true });
     writeFileSync(join(tmpHome, ".vibebook", "config.json"), JSON.stringify({
       repoPath: workRepo, repoUrl: bareRemote,
-      encrypt: true, salt: "fakesalt",
+      encrypt: false, salt: "x",
       deviceBranch: "test.lan",
-      runner: "github-action", runnerModel: "openai/gpt-4o-mini",
-      threadingConcurrency: 1, threadingMaxAttempts: 3,
+      runner: "claude-cli", runnerModel: "",
+      enableAggregateCI: true,
+      threadingConcurrency: 4, threadingMaxAttempts: 3,
       digestEnabled: true,
     }));
   });
@@ -131,7 +107,7 @@ describe("workflowInitCmd auto-push integration", () => {
     vi.resetModules();
   });
 
-  it("commits and pushes workflow yaml + repo-salt.json to origin", async () => {
+  it("commits and pushes workflow yaml + merge-books.mjs to origin", async () => {
     const { workflowInitCmd } = await import("../../src/commands/workflow.js");
     await workflowInitCmd();
 
@@ -141,10 +117,10 @@ describe("workflowInitCmd auto-push integration", () => {
     await simpleGit().clone(bareRemote, verifyClone);
     const g = simpleGit(verifyClone);
     await g.checkout("test.lan");
-    expect(existsSync(join(verifyClone, ".github", "workflows", "vibebook-digest.yml"))).toBe(true);
-    expect(existsSync(join(verifyClone, ".vibebook", "repo-salt.json"))).toBe(true);
+    expect(existsSync(join(verifyClone, ".github", "workflows", "vibebook-aggregate.yml"))).toBe(true);
+    expect(existsSync(join(verifyClone, "scripts", "merge-books.mjs"))).toBe(true);
     const log = await g.log();
-    expect(log.all[0].message).toMatch(/vibebook.*workflow/);
+    expect(log.all[0].message).toMatch(/vibebook.*aggregation/);
     rmSync(verifyClone, { recursive: true, force: true });
   }, 30_000);
 });
