@@ -219,4 +219,39 @@ describe("publish — input validation", () => {
     const { publishCmd } = await import("../../src/commands/publish.js");
     await expect(publishCmd({ chroniclesPath: path, noCommit: true })).rejects.toThrow(/not valid JSON/);
   });
+
+  it("rejects chronicle missing top-level project (avoid book/undefined/...)", async () => {
+    // Regression: an LLM that put `project` only in YAML frontmatter (not at
+    // the top level of the JSON entry) used to silently land everything in
+    // book/undefined/chronicle/ — entire batch lost to a typo.
+    const chrs = [{
+      threadId: "fix-foo", title: "Fix foo", sessionIds: ["s1"],
+      body: "---\nproject: edge-src\n---\nbody\n",
+      // project intentionally omitted at top level
+    }];
+    const path = writeJson("missing-project.json", chrs as unknown as ChronicleInput[]);
+    const { publishCmd } = await import("../../src/commands/publish.js");
+    await expect(publishCmd({ chroniclesPath: path, noCommit: true }))
+      .rejects.toThrow(/chronicle\.project is required/);
+  });
+
+  it("rejects topic missing top-level project", async () => {
+    const tops = [{
+      topicSlug: "x", action: "insert", contributingThreads: [], body: "x\n",
+    }];
+    const path = writeJson("t.json", tops as unknown as TopicInput[]);
+    const { publishCmd } = await import("../../src/commands/publish.js");
+    await expect(publishCmd({ topicsPath: path, noCommit: true }))
+      .rejects.toThrow(/topic\.project is required/);
+  });
+
+  it("rejects card missing top-level cardSlug", async () => {
+    const cards = [{
+      project: "edge-src", type: "gotcha", action: "insert", body: "x\n",
+    }];
+    const path = writeJson("c.json", cards as unknown as CardInput[]);
+    const { publishCmd } = await import("../../src/commands/publish.js");
+    await expect(publishCmd({ cardsPath: path, noCommit: true }))
+      .rejects.toThrow(/card\.cardSlug is required/);
+  });
 });

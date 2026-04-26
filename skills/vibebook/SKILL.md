@@ -185,6 +185,21 @@ pass. **Never `cat > /tmp/x.json << 'PYEOF'` heredoc with all bodies in
 one shot** — that triggers Bash injection prompts and hits cloudflare 524
 on big batches.
 
+**`project`, `threadId`, `title` MUST appear at the TOP LEVEL of each JSON
+entry, not only inside the markdown frontmatter.** publish reads the JSON
+top level to compute paths; if `project` is missing publish refuses with
+`chronicle.project is required`. The same rule applies to topics
+(`project` + `topicSlug`) and cards (`project` + `cardSlug`). Schema:
+
+```json
+[
+  { "threadId": "fix-fullscreen", "project": "edge-src",
+    "title": "修复 Edge 全屏书签条 bug",
+    "sessionIds": ["abc12345"], "tags": ["fullscreen"],
+    "body": "---\nproject: edge-src\n...\n---\n# ...\n## What...\n" }
+]
+```
+
 **Never write a Python script that generates chronicle bodies.** The bodies
 ARE your output as the LLM. Python is fine for: merging JSON files, sorting,
 deduplicating slugs. NOT for writing prose.

@@ -237,6 +237,15 @@ function registerChronicle(
   bookIndex: BookIndexV2,
   c: ChronicleInput,
 ): ChronicleRegisterResult {
+  // Reject inputs missing the fields publish needs to compute paths. Without
+  // these checks a typo / frontmatter-only LLM mistake silently writes to
+  // book/undefined/chronicle/<undefined>.md, which is what we explicitly
+  // don't want — the whole point of the publish CLI is to be the one place
+  // that enforces shape.
+  assertNonEmpty("chronicle.project", c.project);
+  assertNonEmpty("chronicle.threadId", c.threadId);
+  assertNonEmpty("chronicle.title", c.title);
+
   // SKIP'd chronicles are recorded in the index (so re-runs don't reconsider
   // the same sessions) but NO file is written.
   const dateStr = new Date().toISOString().slice(0, 10);
@@ -291,6 +300,9 @@ function registerTopic(
   bookIndex: BookIndexV2,
   t: TopicInput,
 ): TopicRegisterResult {
+  assertNonEmpty("topic.project", t.project);
+  assertNonEmpty("topic.topicSlug", t.topicSlug);
+
   const relPath = `book/${t.project}/topics/${t.topicSlug}.md`;
   const absPath = join(repoRoot, relPath);
   const dateStr = new Date().toISOString().slice(0, 10);
@@ -337,6 +349,9 @@ function registerCard(
   bookIndex: BookIndexV2,
   c: CardInput,
 ): CardRegisterResult {
+  assertNonEmpty("card.project", c.project);
+  assertNonEmpty("card.cardSlug", c.cardSlug);
+
   const relPath = `book/${c.project}/cards/${c.cardSlug}.md`;
   const dateStr = new Date().toISOString().slice(0, 10);
 
@@ -369,6 +384,19 @@ function readJsonInput<T>(path: string, label: string): T {
     return JSON.parse(readFileSync(path, "utf8")) as T;
   } catch (e) {
     throw new Error(`${label} input ${path} is not valid JSON: ${(e as Error).message}`);
+  }
+}
+
+/** Throw if the field is missing/empty/not-a-string. The fail-fast guards in
+ *  registerChronicle/Topic/Card use this so a typo (or an LLM that put
+ *  `project` only inside frontmatter, not at the top level of the JSON)
+ *  errors loudly instead of writing to `book/undefined/...`. */
+function assertNonEmpty(label: string, v: unknown): asserts v is string {
+  if (typeof v !== "string" || v.trim().length === 0) {
+    throw new Error(
+      `${label} is required and must be a non-empty string (got ${JSON.stringify(v)}). ` +
+      `If you wrote the value only in YAML frontmatter, also add it to the top level of the JSON entry.`,
+    );
   }
 }
 
