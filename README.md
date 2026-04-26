@@ -1,109 +1,142 @@
 # vibebook — Vibe Coding Memory Book
 
 Sync your AI coding sessions (Claude Code, VS Code Copilot Chat) across machines
-via a private Git repo. Manual, transparent, encryption-optional.
+via a private Git repo, then digest them into a per-project book of
+**chronicles**, **topics**, and **cards** — written by an in-session Claude via
+the `/vibebook` slash command. The CLI never spawns an LLM.
+
+- **chronicles** — one diary entry per thread (5W: What / Why / How / Outcome)
+- **topics** — mid-grain knowledge pages, full-rewritten as understanding grows
+- **cards** — atomic, non-obvious insights (memex-style); `_global/` for
+  cross-project ones (git, OS, generic patterns)
+
+Per-project isolation is enforced: edge-src content stays in `book/edge-src/`,
+never crosses into other projects. Quality > speed > token cost.
 
 ## Install
 
     npm install -g vibebook
 
-## Setup
+Or install as a Claude Code plugin (ships skill + Stop hook + slash command):
+add `june9593/vibebook` from the marketplace.
 
-Run the interactive wizard:
+## Setup
 
     vibebook init
 
-The wizard asks:
-1. **Repo URL** — your private memory repo (will be cloned if not present)
-2. **Local path** — defaults to `./.vibebook/repo`
-3. **Encrypt?** — y/n; if y, asks for a passphrase saved to `~/.vibebook/passphrase` (mode 0600)
-4. **Digest into a book?** — y/n
-5. **Runner** — local Claude CLI today; GitHub Action coming soon
-6. **Model** — blank for runner default
-7. **Verify** — checks `claude --version`; offers a real test call
+The interactive wizard asks:
 
-Flag mode (CI-friendly): pass any of `--local-path / --encrypt / --no-digest / --device / --passphrase` (or a positional `<repoUrl>`) and the wizard is bypassed.
+0. **Sync to a remote?** — pick `no` for local-only mode (no remote, no encrypt, no CI).
+1. **Repo URL** — your private memory repo (cloned if not present).
+2. **Local path** — defaults to `./.vibebook/repo`.
+3. **Encrypt?** — y/n; AES-256-GCM with scrypt KDF.
+4. **Passphrase** — saved to `~/.vibebook/passphrase` (mode 0600).
+5. **Digest into a book?** — y/n.
+6. **Claude model** — blank for whatever `claude -p` defaults to.
+7. **Enable CI cross-device aggregation?** — opt-in GitHub Actions merge.
+8. **Include reasoning in synced md?** — recommended ON for ≥400K-context
+   models, OFF for smaller (adds 30–100% to md size).
+
+Flag mode (CI-friendly): pass any of `--local-path / --encrypt / --no-digest /
+--device / --passphrase` (or a positional `<repoUrl>`) to skip the wizard.
 
     vibebook init git@github.com:you/your-memory-repo.git --encrypt --passphrase secret
 
 ## Daily use
 
-    vibebook sync          # extract + commit + push
+    vibebook sync          # extract Claude/Copilot sessions, commit + push to your device branch
+    cd <repo> && claude    # open Claude Code (cwd doesn't matter — vibebook reads its config)
+    /vibebook              # in-session: digests new sessions into chronicle/topics/cards
+
+`vibebook sync` is **pure raw sync** — no LLM call. The writing happens
+in-session under the `/vibebook` skill, where Claude has the full project
+context and can ask you clarifying questions.
+
+Other commands:
+
     vibebook list          # show synced sessions
     vibebook show <ref>    # dump one session as Markdown
+    vibebook prepare       # JSON output: which sessions need digesting (used by /vibebook)
+    vibebook publish       # consume JSON: write chronicle/topic/card files + commit
 
-## Layout
+## Repo layout
 
     work-memory/
-      raw_sessions/
-        <tool>/<project>/<YYYY-MM-DD>/<slug>__<shortId>.raw.json
-        <tool>/<project>/<YYYY-MM-DD>/<slug>__<shortId>.md
-      .vibebook/index.json
-      summaries/     (future: hand-written or LLM-generated digests)
-      decisions/     (future: ADRs)
+      raw_sessions/<tool>/<project>/<YYYY-MM-DD>/<slug>__<shortId>.{raw.json,md}
+      .vibebook/
+        index.json         # raw-session catalog (per-device)
+        index.book.json    # book index v2: chronicles, topics, cards
+        repo-salt.json     # crypto material (only when --encrypt)
+      book/
+        <project>/
+          chronicle/<YYYY-MM-DD>__<threadId>__<short>.md
+          topics/<slug>.md             (or .<device>.md after merge)
+          cards/<slug>.md
+          index.md
+        _global/cards/<slug>.md        # cross-project insights
+        _meta/timeline.md
+        index.md
 
-> Note: legacy repos initialized before v0.2 had this dir as `.memvc/`. The
-> first `vibebook sync` run on such a repo automatically renames it via
-> `git mv` (preserving history) and stages the rename in the next commit.
+Legacy repos initialized before v0.2 had `.memvc/`. The first `vibebook sync`
+auto-renames via `git mv` (preserving history).
 
-## Security
-
-- Repo MUST be private. Enable GitHub secret scanning + push protection.
-- `--encrypt` uses AES-256-GCM with scrypt KDF from `VIBEBOOK_PASSPHRASE`.
-- Passphrase is never stored on disk.
-
-## Per-device branches (v0.2+)
+## Per-device branches
 
 Each machine pushes to its own branch named after `os.hostname()` (sanitized).
-`main` is left empty and serves only as an aggregation target. To see chats
-from machine `yuedeMacBook-Pro-2.local`, check out that branch on the remote.
+`main` is left empty and serves only as the aggregation target.
 
 Override the auto-derived name:
 
     vibebook init <repoUrl> --device mbp2
 
-Existing repos initialized before v0.2 will auto-migrate on the next `vibebook sync`:
-the local `main` branch is renamed to `<device>`, and a fresh unborn `main` is left
-for you to use as a merge target.
+## Aggregate across devices (GitHub Actions, no LLM)
 
-## Aggregate book/ across devices (GitHub Actions)
+If you said yes to Q7, install the aggregation workflow:
 
-When you run `vibebook sync` on each of your machines, each one pushes to its
-own device branch (named after `os.hostname()`). To see **one unified book**
-that merges every machine's articles into `main`, use the built-in CI
-aggregation workflow.
+    vibebook sync             # push sessions FIRST
+    vibebook workflow init    # writes .github/workflows/vibebook-aggregate.yml + scripts/merge-books.mjs
 
-The workflow does NOT run an LLM — threading / article / chapter generation
-happens locally on each device when you `vibebook sync` there. CI just does
-a deterministic merge:
+From then on, every push to a non-`main` branch triggers the workflow, which
+deterministically merges every device's `book/` into `main`:
 
-- Articles from every device are deduped by `threadId`; the latest-updated
-  version wins.
-- Each device keeps its own `chapter.md` alongside the others, stored as
-  `book/<project>/chapter.<device>.md`, so no device overwrites another.
-- `book/index.md` and `book/_meta/timeline.md` are regenerated to list every
-  article across every device.
+- **chronicles** — deduped by `threadId`; latest `updatedAt` wins.
+- **topics** — preserved per-device as `<slug>.<device>.md` (rewrites diverge
+  in voice; mechanical merge would garble both).
+- **cards** — unioned by `(project, slug)`; collisions resolve to latest
+  `updatedAt`. `_global/cards/` unioned unconditionally.
+- **catalog** — `book/index.md`, `book/_meta/timeline.md`, and per-project
+  `index.md` regenerated.
 
-### Setup order (matters)
+No GitHub secrets needed — workflow uses default `GITHUB_TOKEN` and doesn't
+call any external services.
 
-```bash
-# 1. Push your sessions FIRST. CI doesn't fire yet (workflow yaml not on remote).
-vibebook sync
+## Security
 
-# 2. Install the aggregation workflow + push it. THIS push triggers CI for
-#    the first time, and the repo already has sessions ready to aggregate.
-vibebook workflow init
-```
+- Repo MUST be private. Enable GitHub secret scanning + push protection.
+- `--encrypt` uses AES-256-GCM with scrypt KDF from `VIBEBOOK_PASSPHRASE`.
+- Passphrase is never stored in the repo.
 
-`workflow init` writes two files into your repo and auto-commits + pushes them:
+### How encryption works (v0.2+)
 
-- `.github/workflows/vibebook-aggregate.yml`
-- `scripts/merge-books.mjs`
+vibebook wires a **git clean/smudge filter** when you enable encryption. The
+working tree always shows plaintext `.md` / `.raw.json`; only git's object
+database (and therefore the remote) holds ciphertext. So:
 
-From then on, every push to any non-`main` branch triggers the workflow, which
-clones `main`, runs `merge-books.mjs`, and pushes the aggregated `book/` back
-to `main`. Manual run also available via the **Actions** tab →
-`workflow_dispatch`.
+- `vibebook sync` writes plaintext → `git add` runs the clean filter → blob
+  in `.git/objects` is encrypted → push uploads ciphertext.
+- `git clone` / `git pull` downloads ciphertext → smudge filter runs on
+  checkout → working tree shows plaintext.
+- The `/vibebook` skill, your editor, and `cat` all see plaintext directly.
+  No `.md.enc` files anywhere in the working tree.
 
-No GitHub secrets needed — the workflow uses the default `GITHUB_TOKEN` for
-pushing to `main` and doesn't call any external services.
+Wiring is automatic on `vibebook init` and idempotently re-applied by every
+`vibebook sync`. To wire it manually (e.g., on a fresh clone), run:
+
+    vibebook crypt init     # wires clean/smudge in .git/config + commits .gitattributes line
+    vibebook crypt status   # check whether filter is wired in this clone
+
+The IV is **deterministic** (`HMAC-SHA256(key, plaintext)[:12]`) so identical
+plaintext yields identical ciphertext — required to keep `git diff` clean
+when nothing changed. Trade-off: an attacker with a candidate plaintext can
+confirm the guess. Acceptable for AI conversation transcripts in a private
+repo, not acceptable for high-value secrets.

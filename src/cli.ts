@@ -2,7 +2,7 @@ import { Command } from "commander";
 
 export async function run(argv: string[]) {
   const program = new Command();
-  program.name("vibebook").description("Vibe coding memory book").version("0.1.0");
+  program.name("vibebook").description("Vibe coding memory book").version("0.2.0");
   program
     .command("init [repoUrl]")
     .description("Initialize vibebook. Run with no arguments for the interactive wizard, or pass a repoUrl + flags for non-interactive setup.")
@@ -27,21 +27,54 @@ export async function run(argv: string[]) {
     });
   program
     .command("sync")
-    .description("Extract, commit, push raw sessions; then run digest pipeline (phases 3-7) and push book branch")
-    .option("--no-digest", "skip digest pipeline (only runs extract + raw push)")
-    .action(async (opts: { digest?: boolean }) => {
+    .description("Extract sessions from local Claude Code + VS Code Copilot Chat, commit + push to your device branch. No LLM call. Run /vibebook in Claude Code afterward to digest.")
+    .action(async () => {
       const { syncCmd } = await import("./commands/sync.js");
-      // commander's --no-X sets opts.X = false when the flag is present, true otherwise.
-      await syncCmd({ noDigest: opts.digest === false });
+      await syncCmd();
     });
   program
-    .command("digest")
-    .description("Digest pipeline operations: --redo retries failed; --reset wipes book/ and re-runs from scratch")
-    .option("--redo", "retry all failed threads and force-rewrite every chapter")
-    .option("--reset", "DESTRUCTIVE: wipe book/ + .vibebook/index.book.json, then run digest from scratch")
-    .action(async (opts: { redo?: boolean; reset?: boolean }) => {
-      const { digestCmd } = await import("./commands/digest.js");
-      await digestCmd({ redo: opts.redo, reset: opts.reset });
+    .command("prepare")
+    .description("Emit JSON describing new sessions + existing topics/cards. Consumed by the /vibebook skill in Claude Code.")
+    .option("--project <slug>", "limit to one project (default: all real projects)")
+    .option("--cwd <path>", "auto-resolve --project from this cwd via projectSlugFromPath + index lookup")
+    .action(async (opts: { project?: string; cwd?: string }) => {
+      const { prepareCmd } = await import("./commands/prepare.js");
+      await prepareCmd({ project: opts.project, cwd: opts.cwd });
+    });
+  program
+    .command("list-projects")
+    .description("Print per-project session + artifact counts. Consumed by the global-mode /vibebook skill to decide where to fan-out subagents.")
+    .action(async () => {
+      const { listProjectsCmd } = await import("./commands/list-projects.js");
+      await listProjectsCmd();
+    });
+  program
+    .command("publish")
+    .description("Read JSON inputs from /vibebook skill, write chronicles + topics + cards into book/, regen catalog, commit + push.")
+    .option("--chronicles <path>", "JSON file with ChronicleInput[]")
+    .option("--topics <path>", "JSON file with TopicInput[]")
+    .option("--cards <path>", "JSON file with CardInput[]")
+    .option("--no-commit", "write files locally but don't commit/push")
+    .option("--no-catalog", "skip book/index.md + book/_meta/timeline.md + book/<proj>/index.md regen (project-mode publish uses this; global mode does the regen once at the end of fan-out)")
+    .action(async (opts: { chronicles?: string; topics?: string; cards?: string; commit?: boolean; catalog?: boolean }) => {
+      const { publishCmd } = await import("./commands/publish.js");
+      const r = await publishCmd({
+        chroniclesPath: opts.chronicles,
+        topicsPath: opts.topics,
+        cardsPath: opts.cards,
+        noCommit: opts.commit === false,
+        noCatalog: opts.catalog === false,
+      });
+      console.log(JSON.stringify(r, null, 2));
+    });
+  program
+    .command("catalog-regen")
+    .description("Regenerate book/index.md + book/_meta/timeline.md + book/<proj>/index.md from the existing book index. Used by global-mode /vibebook after subagent fan-out finishes.")
+    .option("--no-commit", "write files locally but don't commit/push")
+    .action(async (opts: { commit?: boolean }) => {
+      const { catalogRegenCmd } = await import("./commands/catalog-regen.js");
+      const r = await catalogRegenCmd({ noCommit: opts.commit === false });
+      console.log(JSON.stringify(r, null, 2));
     });
   program
     .command("workflow")
@@ -72,6 +105,20 @@ export async function run(argv: string[]) {
     .action(async (ref: string) => {
       const { showCmd } = await import("./commands/show.js");
       await showCmd(ref);
+    });
+  program
+    .command("cat <path>")
+    .description("Print a repo file to stdout, auto-decrypting `.enc` files. Path is absolute or relative to the configured repoPath. Used by the /vibebook skill to read encrypted session md.")
+    .action(async (path: string) => {
+      const { catCmd } = await import("./commands/cat.js");
+      await catCmd(path);
+    });
+  program
+    .command("crypt <action>")
+    .description("Manage the git clean/smudge filter that encrypts raw_sessions/ on push and decrypts on checkout. Actions: init | status | clean | smudge. (`clean` and `smudge` are invoked by git itself, not by you.)")
+    .action(async (action: string) => {
+      const { cryptCmd } = await import("./commands/crypt.js");
+      await cryptCmd(action);
     });
   await program.parseAsync(argv);
 }

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "vibebook",
+  "description": "Sync AI coding sessions across machines and digest them into a per-project chronicle / topics / cards book.",
+  "owner": {
+    "name": "june9593"
+  },
+  "plugins": [
+    {
+      "name": "vibebook",
+      "description": "Run /vibebook in Claude Code to digest your synced sessions into chronicle / topics / cards.",
+      "version": "0.2.0",
+      "source": "./"
+    }
+  ]
+}

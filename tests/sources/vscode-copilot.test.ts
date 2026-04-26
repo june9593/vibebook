@@ -31,8 +31,9 @@ describe("VSCodeCopilotAdapter", () => {
     expect(s.shortId).toBe("sess-aaa");
     expect(s.project).toBe("edge-memvc");
     expect(s.nameSlug).toBe("Add-MCP-server-and-list-active-PRs");
-    expect(s.messages.length).toBe(4);
+    expect(s.messages.length).toBe(3);  // "Thanks" (6 chars) sanitized away
     expect(s.messages[0].role).toBe("user");
     expect(s.messages[1].role).toBe("assistant");
+    expect(s.messages[2].role).toBe("assistant");  // "You're welcome." survives
   });
 });

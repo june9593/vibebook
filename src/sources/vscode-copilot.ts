@@ -5,6 +5,7 @@ import { join, basename } from "node:path";
 import type { SourceAdapter, DiscoveredSession } from "./base.js";
 import type { NormalizedSession, SessionMessage } from "../types.js";
 import { deriveSlug, projectSlugFromPath } from "../slug.js";
+import { sanitizeMessageText } from "./claude-code.js";
 
 function defaultStorageRoot(): string {
   if (process.platform === "darwin")
@@ -147,12 +148,13 @@ function buildSessionFromRequests(
     if (!r) continue;
     const ts = typeof r.timestamp === "number" ? new Date(r.timestamp).toISOString() : undefined;
     if (ts) { if (!startedAt) startedAt = ts; endedAt = ts; }
-    const userText = r?.message?.text;
-    if (typeof userText === "string" && userText) {
-      messages.push({ role: "user", text: userText, timestamp: ts, raw: r.message });
+    const userTextRaw = r?.message?.text;
+    if (typeof userTextRaw === "string" && userTextRaw) {
+      const userText = sanitizeMessageText(userTextRaw);
+      if (userText) messages.push({ role: "user", text: userText, timestamp: ts, raw: r.message });
     }
     const respParts = Array.isArray(r.response) ? r.response : [];
-    const assistantText = respParts
+    const assistantTextRaw = respParts
       .map((p: any) => {
         if (p?.kind === "markdownContent") return p?.content?.value ?? "";
         if (p?.kind === "textEditGroup") return "";
@@ -161,8 +163,11 @@ function buildSessionFromRequests(
       })
       .filter(Boolean)
       .join("\n");
-    if (assistantText) {
-      messages.push({ role: "assistant", text: assistantText, timestamp: ts, raw: respParts });
+    if (assistantTextRaw) {
+      const assistantText = sanitizeMessageText(assistantTextRaw);
+      if (assistantText) {
+        messages.push({ role: "assistant", text: assistantText, timestamp: ts, raw: respParts });
+      }
     }
   }
 
@@ -208,23 +213,28 @@ function parseCopilotTranscript(sourcePath: string, content: string, workspacePa
       continue;
     }
     if (t === "user.message") {
-      const text = typeof obj?.data?.content === "string" ? obj.data.content : "";
+      const raw = typeof obj?.data?.content === "string" ? obj.data.content : "";
+      const text = sanitizeMessageText(raw);
       if (text) messages.push({ role: "user", text, timestamp: ts, raw: obj });
       continue;
     }
     if (t === "assistant.message") {
-      const text = typeof obj?.data?.content === "string" ? obj.data.content : "";
-      const reasoning = typeof obj?.data?.reasoningText === "string" ? obj.data.reasoningText : "";
-      const toolReqs = Array.isArray(obj?.data?.toolRequests) ? obj.data.toolRequests : [];
-      const toolSummary = toolReqs
-        .map((r: any) => `[tool:${r?.name ?? "?"} ${typeof r?.arguments === "string" ? r.arguments : JSON.stringify(r?.arguments ?? "")}]`)
-        .join("\n");
-      const combined = [reasoning, text, toolSummary].filter(Boolean).join("\n");
-      if (combined) messages.push({ role: "assistant", text: combined, timestamp: ts, raw: obj });
+      const rawText = typeof obj?.data?.content === "string" ? obj.data.content : "";
+      const rawReasoning = typeof obj?.data?.reasoningText === "string" ? obj.data.reasoningText : "";
+      const text = sanitizeMessageText(rawText);
+      const reasoning = sanitizeMessageText(rawReasoning);
+      // tool requests are intentionally NOT included — vibebook summarizes
+      // intent + outcome, not tool traces. Drop the message only when both
+      // text AND reasoning are empty.
+      if (text || reasoning) {
+        const msg: SessionMessage = { role: "assistant", text, timestamp: ts, raw: obj };
+        if (reasoning) msg.reasoning = reasoning;
+        messages.push(msg);
+      }
       continue;
     }
     if (t === "tool.execution_start" || t === "tool.execution_complete") {
-      messages.push({ role: "tool", text: JSON.stringify(obj?.data ?? {}), timestamp: ts, raw: obj });
+      // Drop tool execution events entirely — same rationale as above.
       continue;
     }
   }

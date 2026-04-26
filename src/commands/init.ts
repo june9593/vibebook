@@ -51,8 +51,8 @@ export async function initCmd(opts: InitOptions): Promise<void> {
     salt: freshSaltBase64(),
     deviceBranch: opts.device ?? deviceBranchFromHostname(),
     runner: "claude-cli",
-    runnerModel: "",
     enableAggregateCI: false,
+    includeReasoning: true,
     threadingConcurrency: DEFAULT_THREADING_CONCURRENCY,
     threadingMaxAttempts: DEFAULT_THREADING_MAX_ATTEMPTS,
     digestEnabled: opts.digestEnabled !== false,
@@ -60,6 +60,13 @@ export async function initCmd(opts: InitOptions): Promise<void> {
   writeConfig(cfg);
   if (cfg.encrypt) {
     writeRepoSaltFile(cfg.repoPath, cfg.salt);
+    try {
+      const { ensureCryptFilter } = await import("./crypt.js");
+      const r = ensureCryptFilter(cfg.repoPath);
+      if (r.wired) console.log(chalk.gray(`  wired git crypt filter (working tree always plaintext; encrypted on push)`));
+    } catch (err) {
+      console.log(chalk.yellow(`  warning: could not wire git crypt filter: ${(err as Error).message}`));
+    }
   }
   console.log(chalk.green(`vibebook initialized:`));
   console.log(`  repo: ${localPath}`);
@@ -70,4 +77,5 @@ export async function initCmd(opts: InitOptions): Promise<void> {
   if (cfg.encrypt && !opts.passphrase) {
     console.log(chalk.cyan(`  set VIBEBOOK_PASSPHRASE env var (or pass --passphrase) before running sync`));
   }
+  console.log(chalk.cyan(`\n  next: vibebook sync  →  open Claude Code  →  /vibebook`));
 }

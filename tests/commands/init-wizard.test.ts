@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 
 describe("defaultLocalPath", () => {
-  it("returns ./.vibebook/repo under cwd", async () => {
+  it("returns ~/.vibebook/session-repo", async () => {
     const m = await import("../../src/commands/init-wizard.js");
-    expect(m.defaultLocalPath().endsWith("/.vibebook/repo")).toBe(true);
+    expect(m.defaultLocalPath().endsWith("/.vibebook/session-repo")).toBe(true);
   });
 });
 
@@ -53,7 +53,7 @@ describe("applyWizardAnswers", () => {
       passphraseEntered: "secret",
       digestEnabled: true,
       enableAggregateCI: true,
-      runnerModel: "",
+      includeReasoning: true,
     });
     const { existsSync, readFileSync, statSync } = await import("node:fs");
     expect(existsSync(join(localPath, ".git"))).toBe(true);
@@ -78,7 +78,7 @@ describe("applyWizardAnswers", () => {
       encrypt: false,
       digestEnabled: false,
       enableAggregateCI: false,
-      runnerModel: "",
+      includeReasoning: false,
     });
     const { existsSync } = await import("node:fs");
     expect(existsSync(join(tmpHome, ".vibebook", "passphrase"))).toBe(false);
@@ -152,8 +152,8 @@ describe("runWizard end-to-end transcript", () => {
       "secret123",                     // Q4 passphrase
       "secret123",                     // Q4 confirm
       "y",                             // Q5 digest
-      "claude-sonnet-4-6",             // Q6 model
-      "y",                             // Q7 enable aggregate CI
+      "y",                             // Q6 enable aggregate CI
+      "y",                             // Q7 includeReasoning
     ];
     const stdin = new Readable({ read() {} }) as Readable & { isTTY?: boolean };
     stdin.isTTY = true;
@@ -181,15 +181,15 @@ describe("runWizard end-to-end transcript", () => {
     expect(a.encrypt).toBe(true);
     expect(a.passphraseEntered).toBe("secret123");
     expect(a.digestEnabled).toBe(true);
-    expect(a.runnerModel).toBe("claude-sonnet-4-6");
     expect(a.enableAggregateCI).toBe(true);
+    expect(a.includeReasoning).toBe(true);
   });
 
   it("local-only mode (Q0=n) skips remote-only questions (including aggregate CI)", async () => {
     const lines = [
       "n",                              // Q0 sync to remote → no
       "y",                              // Q5 digest
-      "",                               // Q6 model (blank = default)
+      "y",                              // Q7 includeReasoning (Q6 skipped — local-only)
     ];
     const stdin = new Readable({ read() {} }) as Readable & { isTTY?: boolean };
     stdin.isTTY = true;
@@ -217,5 +217,6 @@ describe("runWizard end-to-end transcript", () => {
     expect(a.passphraseEntered).toBeUndefined();
     expect(a.digestEnabled).toBe(true);
     expect(a.enableAggregateCI).toBe(false); // local-only mode → no CI question asked
+    expect(a.includeReasoning).toBe(true);
   });
 });

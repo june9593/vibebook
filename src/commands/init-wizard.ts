@@ -1,4 +1,5 @@
 import { join, resolve } from "node:path";
+import { homedir } from "node:os";
 import chalk from "chalk";
 import { prompt, promptYesNo, promptHidden, closePrompts } from "../prompts.js";
 import { materializeRepoAtPath, expandHome } from "../git-ops.js";
@@ -10,7 +11,6 @@ import {
 } from "../config.js";
 import { deviceBranchFromHostname } from "../device.js";
 import { checkBinary, runnerBinary, runnerInstallUrl } from "../runner-check.js";
-import { createRunner } from "../digest/runner.js";
 
 export interface WizardAnswers {
   repoUrl: string;
@@ -21,15 +21,17 @@ export interface WizardAnswers {
   /** User opted into the CI cross-device aggregation workflow. Only
    *  meaningful when syncToRemote is true. */
   enableAggregateCI: boolean;
-  runnerModel: string;
+  /** Render assistant reasoning into raw_sessions/*.md (Q7). Default true. */
+  includeReasoning: boolean;
 }
 
 /**
  * Returns the path the wizard will use when the user skips the path question.
- * Cwd-local hidden dir per user preference.
+ * Fixed at `~/.vibebook/session-repo` so the /vibebook skill can detect
+ * "global mode" by cwd-equality without per-user configuration.
  */
 export function defaultLocalPath(): string {
-  return join(process.cwd(), ".vibebook", "repo");
+  return join(homedir(), ".vibebook", "session-repo");
 }
 
 /**
@@ -60,7 +62,7 @@ export async function runWizard(): Promise<WizardAnswers> {
 
     // Q2: local path
     const rawPath = await prompt(
-      chalk.cyan("Q2") + ` Where should the repo live locally?`,
+      chalk.cyan("Q2") + ` Where should the repo live locally? (recommend the default — the /vibebook skill detects "global mode" by this exact path)`,
       localPath,
     );
     localPath = resolve(expandHome(rawPath));
@@ -98,40 +100,44 @@ export async function runWizard(): Promise<WizardAnswers> {
     true,
   );
 
-  // Q6: model name for claude-cli. Blank = whatever `claude` ships with.
-  // We used to ask about the runner here (claude-cli vs GitHub Action) but
-  // dropped the GitHub Action path because GitHub Models free tier caps every
-  // request at 8K input tokens and makes useful digests impossible. claude-cli
-  // is the only supported runner now; anthropic-api remains as a stub (Sprint 5).
-  let runnerModel = "";
-  if (digestEnabled) {
-    runnerModel = await prompt(
-      chalk.cyan("Q6") + " claude model (blank = whatever `claude -p` defaults to)",
-      "",
-    );
-  }
-
-  // Q7: opt-in to cross-device CI aggregation. Only offered when syncToRemote
+  // Q6: opt-in to cross-device CI aggregation. Only offered when syncToRemote
   // — local-only repos have no CI to run.
+  // (v0.1 had a "claude model" question here. Removed in v0.2 because the LLM
+  // lives entirely in the user's Claude Code session now — model selection
+  // happens there via /model, not at vibebook init time.)
   let enableAggregateCI = false;
   if (syncToRemote) {
     enableAggregateCI = await promptYesNo(
-      chalk.cyan("Q7") + " Enable CI cross-device book aggregation? (GitHub Actions merges device branches into main)",
+      chalk.cyan("Q6") + " Enable CI cross-device book aggregation? (GitHub Actions merges device branches into main)",
       false,
     );
   }
 
-  return { repoUrl, localPath, encrypt, passphraseEntered, digestEnabled, enableAggregateCI, runnerModel };
+  // Q7: include assistant reasoning in synced md files? Only meaningful when
+  // digest is enabled (otherwise the md is just an archival dump). Reasoning
+  // adds 30-100% to md size; recommend on when the summarizing model has 400K+
+  // context, off when it's a smaller model.
+  let includeReasoning = true;
+  if (digestEnabled) {
+    includeReasoning = await promptYesNo(
+      chalk.cyan("Q7") + " Include assistant 'reasoning/thinking' in synced md? (recommended ON for ≥400K-context models like Opus 1M; OFF for smaller models — adds 30-100% to md size)",
+      true,
+    );
+  }
+
+  return { repoUrl, localPath, encrypt, passphraseEntered, digestEnabled, enableAggregateCI, includeReasoning };
 }
 
 /**
- * Verify the chosen runner's binary is available, then optionally make a real
- * test call. Prints results; returns true iff binary check passed.
+ * Verify the chosen runner's binary is available. v0.2 vibebook never spawns
+ * an LLM from CLI (digest is in-session via /vibebook), so this is a lighter
+ * check than v0.1 — we only confirm `claude` is on PATH so the user can
+ * actually run `/vibebook` in Claude Code afterward.
  */
-export async function verifyRunner(runner: string, model = ""): Promise<boolean> {
+export async function verifyRunner(runner: string): Promise<boolean> {
   const bin = runnerBinary(runner);
   if (!bin) return true; // nothing local to check
-  console.log(chalk.gray(`\nVerifying runner '${runner}'...`));
+  console.log(chalk.gray(`\nChecking '${bin}' is on PATH...`));
   const r = await checkBinary(bin, ["--version"]);
   if (!r.ok) {
     console.log(chalk.red(`  x ${bin} not available: ${r.hint ?? "unknown error"}`));
@@ -140,27 +146,7 @@ export async function verifyRunner(runner: string, model = ""): Promise<boolean>
     return false;
   }
   console.log(chalk.green(`  ok ${bin}: ${r.output.split("\n")[0]}`));
-  const ping = await promptYesNo("  Test a real API call now? (sends 1-token ping)", false);
-  if (!ping) return true;
-  if (runner !== "claude-cli" && runner !== "anthropic-api") {
-    console.log(chalk.yellow(`  ping not supported for runner '${runner}' yet`));
-    return true;
-  }
-  console.log(chalk.gray("  pinging..."));
-  try {
-    const llm = createRunner({ runner, runnerModel: model });
-    const res = await llm.run("Reply with the single word OK and nothing else.", {}, { timeoutMs: 30_000, outputFormat: "text" });
-    if (res.ok) {
-      const preview = res.text.trim().slice(0, 80).replace(/\s+/g, " ");
-      console.log(chalk.green(`  ok ping (${res.durationMs}ms): "${preview}"`));
-      return true;
-    }
-    console.log(chalk.yellow(`  ping failed (${res.durationMs}ms): ${res.error.slice(0, 200)}`));
-    return false;
-  } catch (e) {
-    console.log(chalk.yellow(`  ping threw: ${(e as Error).message}`));
-    return false;
-  }
+  return true;
 }
 
 /**
@@ -203,8 +189,8 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
     salt: freshSaltBase64(),
     deviceBranch: deviceBranchFromHostname(),
     runner: "claude-cli",
-    runnerModel: a.runnerModel,
     enableAggregateCI: a.enableAggregateCI,
+    includeReasoning: a.includeReasoning,
     threadingConcurrency: DEFAULT_THREADING_CONCURRENCY,
     threadingMaxAttempts: DEFAULT_THREADING_MAX_ATTEMPTS,
     digestEnabled: a.digestEnabled,
@@ -213,6 +199,13 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
   if (cfg.encrypt) {
     writeRepoSaltFile(cfg.repoPath, cfg.salt);
     console.log(chalk.gray(`  repo salt written to ${a.localPath}/.vibebook/repo-salt.json`));
+    try {
+      const { ensureCryptFilter } = await import("./crypt.js");
+      const r = ensureCryptFilter(cfg.repoPath);
+      if (r.wired) console.log(chalk.gray(`  wired git crypt filter (working tree always plaintext; encrypted on push)`));
+    } catch (err) {
+      console.log(chalk.yellow(`  warning: could not wire git crypt filter: ${(err as Error).message}`));
+    }
   }
   console.log(chalk.green("\nok vibebook initialized"));
   console.log(chalk.gray(`  config: ~/.vibebook/config.json`));
@@ -224,11 +217,14 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
   // Remote mode: spell out the next steps.
   console.log(chalk.cyan("\nNext steps:"));
   console.log(chalk.cyan("  1. vibebook sync"));
-  console.log(chalk.gray("       → extract, encrypt, commit, push, then run digest locally (claude-cli)."));
+  console.log(chalk.gray(`       → in any project, extract Claude Code + Copilot sessions and push them to ${a.localPath}. No LLM call.`));
+  console.log(chalk.cyan("  2a. (per-project) cd <your-project> && claude → /vibebook"));
+  console.log(chalk.gray("       → digest just this project's sessions into book/<project>/{chronicle,topics,cards}/."));
+  console.log(chalk.cyan(`  2b. (full sweep) cd ${a.localPath} && claude → /vibebook`));
+  console.log(chalk.gray("       → fan-out one subagent per project; skips projects already digested in 2a; regen catalog."));
   if (a.enableAggregateCI) {
-    console.log(chalk.cyan("  2. vibebook workflow init"));
-    console.log(chalk.gray("       → install the CI book-aggregation workflow into your repo + auto push."));
-    console.log(chalk.gray("         The workflow merges every device branch's book/ into main on each push."));
+    console.log(chalk.cyan("  3. vibebook workflow init"));
+    console.log(chalk.gray("       → install the CI workflow that merges every device branch's book/ into main."));
   }
 }
 
@@ -248,7 +244,7 @@ export async function runInitWizard(): Promise<void> {
   try {
     const answers = await runWizard();
     let runnerOk = true;
-    if (answers.digestEnabled) runnerOk = await verifyRunner("claude-cli", answers.runnerModel);
+    if (answers.digestEnabled) runnerOk = await verifyRunner("claude-cli");
     await applyWizardAnswers(answers);
     if (answers.digestEnabled && !runnerOk) {
       console.log(chalk.yellow(

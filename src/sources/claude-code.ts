@@ -79,14 +79,21 @@ function parseClaudeJsonl(sourcePath: string, content: string): NormalizedSessio
     if (obj.type === "user" || obj.type === "assistant") {
       const ts = typeof obj.timestamp === "string" ? obj.timestamp : undefined;
       if (ts) { if (!startedAt) startedAt = ts; endedAt = ts; }
-      const text = extractText(obj.message);
-      if (text) {
-        messages.push({
+      const { text: rawText, reasoning: rawReasoning } = extractParts(obj.message);
+      const text = sanitizeMessageText(rawText);
+      const reasoning = sanitizeMessageText(rawReasoning);
+      // Drop the message only when BOTH text and reasoning are empty after
+      // sanitize. A message that's "just reasoning" still has summarization
+      // value and should be kept.
+      if (text || reasoning) {
+        const msg: SessionMessage = {
           role: obj.type === "user" ? "user" : "assistant",
           text,
           timestamp: ts,
           raw: obj,
-        });
+        };
+        if (reasoning) msg.reasoning = reasoning;
+        messages.push(msg);
       }
     }
   }
@@ -112,13 +119,91 @@ function parseClaudeJsonl(sourcePath: string, content: string): NormalizedSessio
   };
 }
 
-function extractText(message: any): string {
-  if (!message) return "";
+/**
+ * Pull text + reasoning out of a Claude API message.
+ *
+ * Content can be either a string or an array of typed blocks:
+ *   - {type:"text", text:"..."}        → text
+ *   - {type:"thinking", thinking:"..."} → reasoning (usually empty in CLI
+ *     output because the API returns an encrypted signature instead;
+ *     rare cases ship plaintext when the user enabled it)
+ *   - {type:"tool_use" / "tool_result"} → ignored (vibebook doesn't
+ *     summarize tool traces; logex does the same)
+ */
+function extractParts(message: any): { text: string; reasoning: string } {
+  if (!message) return { text: "", reasoning: "" };
   const c = message.content;
-  if (typeof c === "string") return c;
-  if (Array.isArray(c)) {
-    return c.filter((p: any) => p?.type === "text" && typeof p.text === "string")
-      .map((p: any) => p.text).join("\n");
+  if (typeof c === "string") return { text: c, reasoning: "" };
+  if (!Array.isArray(c)) return { text: "", reasoning: "" };
+  const texts: string[] = [];
+  const reasonings: string[] = [];
+  for (const p of c) {
+    if (!p || typeof p !== "object") continue;
+    if (p.type === "text" && typeof p.text === "string") {
+      texts.push(p.text);
+    } else if (p.type === "thinking" && typeof p.thinking === "string" && p.thinking.length > 0) {
+      reasonings.push(p.thinking);
+    }
+    // tool_use / tool_result / image / etc. → drop
   }
-  return "";
+  return { text: texts.join("\n"), reasoning: reasonings.join("\n") };
+}
+
+/**
+ * Strip noise that pollutes summarization quality. The patterns target Claude
+ * Code CLI's command-system markers and ANSI-laden tool output that show up
+ * inside the user's text content but carry zero information about the actual
+ * coding work.
+ *
+ * Categories handled:
+ *   1. Inline tag blocks: <system-reminder>...</system-reminder>,
+ *      <local-command-caveat>...</local-command-caveat>,
+ *      <command-message>, <command-name>, <command-args>,
+ *      <local-command-stdout>...</local-command-stdout>
+ *      (the stdout block can contain heavy ANSI escapes from /context, /model,
+ *       /tasks etc. — strip whole block)
+ *   2. Skill preamble: every text starts with "Base directory for this skill:"
+ *      followed by hundreds of lines of skill template. Drop everything from
+ *      that marker to the next blank-line + "## " heading or end of text.
+ *   3. API error messages: "API Error: 400 ..." replies are noise.
+ *   4. Final length gate: after stripping, drop if < 10 chars (tiny
+ *      acknowledgements like "ok" / "hi" carry no signal for digest).
+ *
+ * NOTE: This intentionally does NOT touch tool_use / tool_result / thinking
+ * content blocks — those are filtered upstream in extractText() (only
+ * type==="text" parts get through). This is purely about cleaning the user's
+ * own text + Claude's text replies of CLI command-shell pollution.
+ */
+export function sanitizeMessageText(text: string): string {
+  if (!text) return "";
+  let s = text;
+
+  // 1. Strip paired tag blocks (greedy match handles nested newlines + ANSI).
+  s = s.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "");
+  s = s.replace(/<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g, "");
+  s = s.replace(/<local-command-stdout>[\s\S]*?<\/local-command-stdout>/g, "");
+  s = s.replace(/<command-message>[\s\S]*?<\/command-message>/g, "");
+  s = s.replace(/<command-name>[\s\S]*?<\/command-name>/g, "");
+  s = s.replace(/<command-args>[\s\S]*?<\/command-args>/g, "");
+  // System-injected pseudo-messages: "Background command completed" / "task
+  // finished" notifications and the user-interrupt markers Claude Code stamps
+  // when the user hits Esc mid-tool-use. These appear under ## User but were
+  // not actually typed by the user.
+  s = s.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, "");
+  s = s.replace(/\[Request interrupted by user[^\]]*\]/g, "");
+
+  // 2. Skill preamble. Skill instructions can be 100s of lines of template;
+  // they always start with "Base directory for this skill:" on its own line.
+  // Cut from that marker to either (a) the next "---" separator on its own
+  // line (skill files standard separator), (b) end of text. Be conservative:
+  // only strip when the marker is at the start of a line.
+  s = s.replace(/(^|\n)Base directory for this skill:[\s\S]*?(?=\n---\n|$)/g, "");
+
+  // 3. Whole-message API errors carry no work signal — drop the whole text.
+  if (/^\s*API Error:\s/.test(s)) return "";
+
+  // 4. Trim and length-gate.
+  s = s.trim();
+  if (s.length < 10) return "";
+  return s;
 }

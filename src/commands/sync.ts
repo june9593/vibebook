@@ -1,6 +1,5 @@
-import { readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { Buffer } from "node:buffer";
 import chalk from "chalk";
 import { ClaudeCodeAdapter } from "../sources/claude-code.js";
 import { VSCodeCopilotAdapter } from "../sources/vscode-copilot.js";
@@ -8,39 +7,41 @@ import type { SourceAdapter } from "../sources/base.js";
 import { loadIndex, saveIndex, hasUnchanged, upsertEntry } from "../index-store.js";
 import type { IndexEntry } from "../types.js";
 import { writeSession } from "../writer.js";
-import { deriveKey, encrypt } from "../crypto.js";
-import { readConfig, writeConfig, writeRepoSaltFile, getPassphrase, DEFAULT_THREADING_CONCURRENCY, DEFAULT_THREADING_MAX_ATTEMPTS, type Config } from "../config.js";
+import { readConfig, writeConfig, writeRepoSaltFile, type Config } from "../config.js";
 import { deviceBranchFromHostname } from "../device.js";
 import { ensureRepo, commitAndPush, ensureDeviceBranch, fastForwardBranch } from "../git-ops.js";
 import { migrateLegacyMainToDevice, migrateLegacyDataDir, migratedDataDirPaths } from "../migrate.js";
-import { loadBookIndex, saveBookIndex } from "../digest/book-index.js";
-import { createRunner } from "../digest/runner.js";
-import { runDigest, type DigestReport } from "../digest/orchestrator.js";
-import { consoleReporter } from "../digest/reporter.js";
-import { sweepScratchDirs } from "../digest/with-isolated-cwd.js";
-import { INDEX_REL, BOOK_INDEX_REL, REPO_SALT_REL, LEGACY_REPO_DATA_DIR } from "../repo-data-dir.js";
+import { INDEX_REL, REPO_SALT_REL, LEGACY_REPO_DATA_DIR } from "../repo-data-dir.js";
+import { ensureCryptFilter } from "./crypt.js";
 
+/**
+ * `vibebook sync` — extract jsonl from local sources (Claude Code + VS Code
+ * Copilot Chat), write per-session raw + md to the user's git repo as
+ * **plaintext**, then commit + push to the device branch.
+ *
+ * Encryption (when enabled) happens transparently via the git clean filter
+ * wired up by `vibebook crypt init`. The working tree is always plaintext;
+ * only git's object database (and therefore the remote) holds ciphertext.
+ *
+ * vibebook v0.2 explicitly does NOT call any LLM here. The book-writing
+ * pipeline is the in-session `/vibebook` slash command driven by skills/
+ * vibebook/SKILL.md, calling `vibebook prepare` + `vibebook publish`.
+ */
 export interface SyncOptions {
   repoPath: string;
   claudeRoot?: string;
   vscodeRoot?: string;
+  /** Whether the configured repo wants encryption. Drives whether we wire
+   *  the git filter; never used to encrypt files in-process. */
   encrypt: boolean;
-  passphrase?: string;
   saltB64?: string;
   push?: boolean;
   repoUrl?: string;
   deviceBranch?: string;
-  /** When true, skip phases 3-7 (digest). Default false. */
-  noDigest?: boolean;
-  /** Runner config — required when noDigest is false and encrypt is false. */
-  runnerConfig?: Pick<Config, "runner" | "runnerModel">;
-  /** Cap on parallel runner calls during the threading phase. Default 4. */
-  threadingConcurrency?: number;
-  /** Attempts per threading batch before soft-failing it. Default 3. */
-  threadingMaxAttempts?: number;
+  /** Render assistant reasoning into raw_sessions/*.md as `> 💭`
+   *  blockquotes. Caller wires this from cfg.includeReasoning. Default true. */
+  includeReasoning?: boolean;
 }
-
-export type DigestStatus = "ok" | "skipped-flag" | "skipped-no-runner" | "failed" | "not-attempted";
 
 export interface SyncResult {
   newCount: number;
@@ -48,34 +49,27 @@ export interface SyncResult {
   pathsWritten: string[];
   committed: boolean;
   pushed: boolean;
-  digestStatus: DigestStatus;
-  digestError?: string;
-  digestReport?: DigestReport;
-  /** True iff a second commit (book branch update) was created. */
-  digestCommitted: boolean;
-  /** True iff the book commit was pushed (only meaningful when digestCommitted is true). */
-  digestPushed: boolean;
 }
 
 export async function runSync(opts: SyncOptions): Promise<SyncResult> {
-  // Sweep leftover scratch dirs from prior crashed/aborted runs BEFORE the
-  // source adapter scans. If a previous digest was killed mid-flight, its
-  // tmp cwd + Claude CLI's stamped session-history dir might still be on
-  // disk and would otherwise show up in the next sync as polluting sessions
-  // (titled with the prompt text itself, e.g. "你是一个代码工程师的助手...").
-  const sweep = sweepScratchDirs();
-  if (sweep.tmpDirsRemoved + sweep.claudeDirsRemoved > 0) {
-    console.log(chalk.gray(
-      `Cleaned up ${sweep.tmpDirsRemoved} tmpdir + ${sweep.claudeDirsRemoved} ~/.claude/projects scratch dirs from prior runs`,
-    ));
-  }
-
   // One-shot migration: rename legacy `.memvc/` → `.vibebook/` if present.
   // Done before loadIndex so the read picks up the file at its new location.
-  // Returns paths to stage so the rename rides the next commit.
   const dataDirMig = await migrateLegacyDataDir(opts.repoPath);
   if (dataDirMig.migrated) {
     console.log(chalk.cyan(`Migrating: renamed legacy ${LEGACY_REPO_DATA_DIR}/ → .vibebook/ ${dataDirMig.viaGit ? "(via git mv; staged for next commit)" : "(non-git mode)"}`));
+  }
+
+  // Wire the git crypt filter idempotently. On a fresh clone, this is also
+  // what re-checks-out raw_sessions/ as plaintext via smudge.
+  if (opts.encrypt && existsSync(join(opts.repoPath, ".git"))) {
+    try {
+      const r = ensureCryptFilter(opts.repoPath);
+      if (r.wired && r.wroteAttrs) {
+        console.log(chalk.cyan(`+ wired git filter \`vibebook\` (also wrote .gitattributes)`));
+      }
+    } catch (err) {
+      console.log(chalk.yellow(`! could not wire git crypt filter: ${(err as Error).message}`));
+    }
   }
 
   const adapters: SourceAdapter[] = [
@@ -84,9 +78,6 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
   ];
 
   const idx = loadIndex(opts.repoPath);
-  const key = opts.encrypt
-    ? deriveKey(opts.passphrase!, Buffer.from(opts.saltB64!, "base64"))
-    : null;
 
   let newCount = 0, skippedCount = 0;
   const pathsWritten: string[] = [];
@@ -104,32 +95,23 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
         skippedCount++;
         continue;
       }
-      const rel = writeSession(opts.repoPath, s);
+      const rel = writeSession(opts.repoPath, s, { includeReasoning: opts.includeReasoning });
 
-      if (key) {
-        const rawAbs = join(opts.repoPath, rel.raw);
-        const mdAbs = join(opts.repoPath, rel.md);
-        const rawEnc = encrypt(readFileSync(rawAbs), key);
-        const mdEnc = encrypt(readFileSync(mdAbs), key);
-        writeFileSync(rawAbs + ".enc", rawEnc);
-        writeFileSync(mdAbs + ".enc", mdEnc);
-        unlinkSync(rawAbs);
-        unlinkSync(mdAbs);
-        pathsWritten.push(rel.raw + ".enc", rel.md + ".enc");
-      } else {
-        pathsWritten.push(rel.raw, rel.md);
-      }
+      // Working tree is always plaintext now; the clean filter handles
+      // encryption on `git add` if enabled.
+      pathsWritten.push(rel.raw, rel.md);
 
       const entry: IndexEntry = {
         sessionId: s.sessionId,
         shortId: s.shortId,
         tool: s.tool,
         project: s.project,
+        projectRaw: s.projectRaw,
         startedAt: s.startedAt,
         endedAt: s.endedAt,
         nameSlug: s.nameSlug,
         displayName: s.displayName,
-        relativePath: key ? rel.raw + ".enc" : rel.raw,
+        relativePath: rel.raw,
         sourcePath: s.sourcePath,
         sourceMtimeMs: d.sourceMtimeMs,
         sourceSha256: d.sourceSha256,
@@ -141,18 +123,11 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
   }
 
   saveIndex(opts.repoPath, idx);
-  const indexPath = INDEX_REL;
 
   // Self-heal: encryption is on but the repo is missing .vibebook/repo-salt.json
-  // (legacy repo initialized before salt-write was wired into init, or someone
-  // git-rm'd it). Write it from the in-memory salt so the GH Action workflow
-  // doesn't fail on its salt-presence guard. Salt is not sensitive — security
-  // relies on the passphrase.
-  //
-  // Also: `vibebook init` writes the file to the worktree but never `git add`s
-  // it. So even when the file exists locally it may be untracked. We stage
-  // the path on every encrypted-mode sync — git no-ops if there's nothing
-  // new to commit.
+  // (legacy repo or someone git-rm'd it). Salt is not sensitive — security
+  // relies on the passphrase. Always restage the path on encrypted-mode sync;
+  // git no-ops if there's nothing new.
   const saltRelPath = REPO_SALT_REL;
   let saltStaged = false;
   if (opts.encrypt && opts.saltB64) {
@@ -186,21 +161,12 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
       const msg = err instanceof Error ? err.message : String(err);
       console.log(chalk.red(`! could not sync local branch with origin: ${msg}`));
       console.log(chalk.cyan(`  Skipping push. Resolve in ${opts.repoPath} and re-run \`vibebook sync\`.`));
-      // Bail before commit — we don't want to leave an orphaned local commit
-      // that the user can't push.
-      return {
-        newCount, skippedCount, pathsWritten,
-        committed: false, pushed: false,
-        digestStatus: "not-attempted",
-        digestCommitted: false, digestPushed: false,
-      };
+      return { newCount, skippedCount, pathsWritten, committed: false, pushed: false };
     }
-    const all = [...pathsWritten, indexPath];
+    const all = [...pathsWritten, INDEX_REL];
     if (saltStaged) all.push(saltRelPath);
+    if (opts.encrypt) all.push(".gitattributes");
     if (dataDirMig.migrated && dataDirMig.viaGit) {
-      // Stage the renamed dir contents so `git mv` is recorded in this commit.
-      // (git mv already staged them, but adding by path is idempotent and keeps
-      // commitAndPush's add+status logic uniform.)
       for (const p of migratedDataDirPaths(opts.repoPath)) all.push(p);
     }
     console.log(chalk.gray(`Staging ${all.length} paths and committing...`));
@@ -223,23 +189,8 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
           "\n  Push blocked by GitHub secret-scanning (GH013). Your raw_sessions contain something that looks like a real secret (token, API key) — typically because past AI conversations included one verbatim.",
         ));
         console.log(chalk.cyan(
-          "  Tip: enable encryption to scrub secrets from future syncs — set `encrypt: true` in ~/.vibebook/config.json, save a passphrase to ~/.vibebook/passphrase, then delete raw_sessions/ + .vibebook/index.json and re-sync.",
+          "  Tip: enable encryption (`encrypt: true` in ~/.vibebook/config.json) so the git filter scrubs raw_sessions before push, then re-sync.",
         ));
-        console.log(chalk.gray(
-          "  Or unblock manually via the GitHub URL above (not recommended for real tokens).",
-        ));
-        const { promptYesNo, closePrompts } = await import("../prompts.js");
-        const cont = await promptYesNo("\n  Continue with digest phase? (you can `git push` manually later)", true);
-        closePrompts();
-        if (!cont) {
-          console.log(chalk.gray("Aborted."));
-          return {
-            newCount, skippedCount, pathsWritten,
-            committed, pushed,
-            digestStatus: "not-attempted",
-            digestCommitted: false, digestPushed: false,
-          };
-        }
       } else {
         console.log(chalk.yellow("Commit done, push failed or skipped."));
       }
@@ -248,103 +199,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     console.log(chalk.gray("Local-only mode (no remote URL configured); skipping commit/push."));
   }
 
-  // -------------------- Phases 3-7 (digest) + phase 8 (book push) --------------------
-  let digestStatus: DigestStatus = "not-attempted";
-  let digestError: string | undefined;
-  let digestReport: DigestReport | undefined;
-  let digestCommitted = false, digestPushed = false;
-
-  if (opts.noDigest) {
-    digestStatus = "skipped-flag";
-  } else if (!opts.runnerConfig) {
-    digestStatus = "skipped-no-runner";
-    console.log(chalk.yellow("Digest pipeline skipped: no runnerConfig provided."));
-  } else {
-    console.log(chalk.gray("\nRunning digest pipeline (phases 3-7)..."));
-    const bookIndex = loadBookIndex(opts.repoPath);
-    const runner = createRunner(opts.runnerConfig);
-    try {
-      digestReport = await runDigest(runner, opts.repoPath, idx, bookIndex, key, opts.threadingConcurrency ?? DEFAULT_THREADING_CONCURRENCY, opts.threadingMaxAttempts ?? DEFAULT_THREADING_MAX_ATTEMPTS, consoleReporter());
-      saveBookIndex(opts.repoPath, bookIndex);
-      digestStatus = "ok";
-      const failedBatchSuffix = digestReport.threadingBatchesFailed > 0
-        ? `; ${digestReport.threadingBatchesFailed} threading batch${digestReport.threadingBatchesFailed === 1 ? "" : "es"} failed (will retry next sync)`
-        : "";
-      console.log(chalk.gray(
-        `  digest: +${digestReport.articlesOk} articles, ${digestReport.threadsSkipped} skip, ${digestReport.articlesFailed} fail; chapters [${digestReport.chaptersRewritten.join(", ")}]${failedBatchSuffix}`,
-      ));
-      if (digestReport.articleFailures.length > 0) {
-        for (const f of digestReport.articleFailures) {
-          console.log(chalk.yellow(`    ! article ${f.threadId} failed: ${f.error.replace(/\s+/g, " ").slice(0, 200)}`));
-        }
-      }
-    } catch (e) {
-      digestStatus = "failed";
-      digestError = e instanceof Error ? e.message : String(e);
-      console.log(chalk.red(`! digest failed: ${digestError}`));
-    }
-
-    // -------------------- Phase 8 (book push) --------------------
-    if (digestStatus === "ok" && opts.push && opts.repoUrl && opts.deviceBranch && digestReport) {
-      const git = await ensureRepo(opts.repoPath, opts.repoUrl);
-      // We're already on opts.deviceBranch from the raw commit above. Stage all
-      // book paths the digest touched + the BookIndex, and commit if dirty.
-      const bookPaths = collectDigestPaths(digestReport, opts.repoPath);
-      const r = await commitAndPush(
-        git,
-        `vibebook digest: +${digestReport.articlesOk} articles, ${digestReport.chaptersRewritten.length} chapters`,
-        bookPaths,
-        opts.deviceBranch,
-        (stage) => console.log(chalk.gray(`  ${stage}`)),
-      );
-      digestCommitted = r.committed;
-      digestPushed = r.pushed;
-      if (digestCommitted && !digestPushed) {
-        console.log(chalk.yellow("Digest commit done, push failed or skipped."));
-      }
-    }
-  }
-
-  return {
-    newCount, skippedCount, pathsWritten,
-    committed, pushed,
-    digestStatus, digestError, digestReport,
-    digestCommitted, digestPushed,
-  };
-}
-
-/**
- * Collect repo-rooted paths the digest produced or might have produced:
- *   - .vibebook/index.book.json
- *   - every entry in digestReport.tocFilesWritten
- *   - book/<project>/articles/* for articles touched (we glob the project dirs)
- *   - book/<project>/chapter.md for each rewritten chapter
- *
- * commitAndPush handles missing files gracefully (git add of a non-existent
- * path is a no-op when the path was previously committed; otherwise git just
- * stages what's there). We avoid a recursive walk to keep this fast.
- */
-function collectDigestPaths(report: DigestReport, repoRoot: string): string[] {
-  const out = new Set<string>();
-  out.add(BOOK_INDEX_REL);
-  for (const p of report.tocFilesWritten) out.add(p);
-  for (const project of report.chaptersRewritten) out.add(`book/${project}/chapter.md`);
-  // Articles: rather than enumerate per-thread, stage the whole articles dir
-  // for any project we touched. git add accepts directory paths and stages
-  // every file under them.
-  const projectsTouched = new Set<string>();
-  for (const project of report.chaptersRewritten) projectsTouched.add(project);
-  // tocFilesWritten includes book/<project>/timeline.md for non-empty projects;
-  // pull project names from those.
-  for (const path of report.tocFilesWritten) {
-    const m = path.match(/^book\/([^/]+)\/timeline\.md$/);
-    if (m && m[1]) projectsTouched.add(m[1]);
-  }
-  for (const project of projectsTouched) {
-    const dir = `book/${project}/articles`;
-    if (existsSync(join(repoRoot, dir))) out.add(dir);
-  }
-  return [...out];
+  return { newCount, skippedCount, pathsWritten, committed, pushed };
 }
 
 /**
@@ -365,7 +220,7 @@ export function ensureDeviceBranchOnConfig(cfg: Config): { migrated: boolean; cf
 /**
  * Loads ~/.vibebook/config.json and applies any in-place migrations needed by
  * current code (currently: deviceBranch self-heal). On migration, writes the
- * fixed config back to disk. Used by both syncCmd and digestCmd.
+ * fixed config back to disk.
  */
 export function readConfigWithMigration(): Config {
   const rawCfg = readConfig();
@@ -379,37 +234,20 @@ export function readConfigWithMigration(): Config {
   return heal.cfg;
 }
 
-export async function syncCmd(opts: { noDigest?: boolean } = {}): Promise<void> {
+export async function syncCmd(): Promise<void> {
   const cfg = readConfigWithMigration();
-  const passphrase = cfg.encrypt ? getPassphrase() : undefined;
-  // Honor config.digestEnabled: treat digestEnabled=false like --no-digest.
-  const noDigest = opts.noDigest || cfg.digestEnabled === false;
   const r = await runSync({
     repoPath: cfg.repoPath,
     encrypt: cfg.encrypt,
-    passphrase,
     saltB64: cfg.salt,
     push: true,
     repoUrl: cfg.repoUrl,
     deviceBranch: cfg.deviceBranch,
-    noDigest,
-    runnerConfig: { runner: cfg.runner, runnerModel: cfg.runnerModel },
-    threadingConcurrency: cfg.threadingConcurrency,
-    threadingMaxAttempts: cfg.threadingMaxAttempts,
+    includeReasoning: cfg.includeReasoning,
   });
   console.log(chalk.bold(`\nSynced: +${r.newCount} new, ${r.skippedCount} unchanged`));
-  if (r.committed) console.log(chalk.cyan(r.pushed ? "Pushed (raw)." : "Committed raw (push failed)."));
-  if (r.digestStatus === "ok") {
-    console.log(chalk.cyan(
-      r.digestCommitted
-        ? (r.digestPushed ? "Pushed (book)." : "Committed book (push failed).")
-        : "Digest produced no changes to commit.",
-    ));
-  } else if (r.digestStatus === "failed") {
-    console.log(chalk.red(`Digest failed: ${r.digestError}`));
-  } else if (r.digestStatus === "skipped-flag") {
-    console.log(chalk.gray("Digest skipped (--no-digest)."));
-  } else if (r.digestStatus === "skipped-no-runner") {
-    console.log(chalk.yellow("Digest skipped (no runner configured)."));
+  if (r.committed) console.log(chalk.cyan(r.pushed ? "Pushed." : "Committed (push failed)."));
+  if (r.newCount > 0) {
+    console.log(chalk.cyan("\nNext: in Claude Code, run `/vibebook` to digest into chronicle/topics/cards."));
   }
 }

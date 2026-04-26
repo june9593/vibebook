@@ -3,39 +3,49 @@
 //
 // Called from .github/workflows/vibebook-aggregate.yml — checked-in on main,
 // runs on every push to a non-main branch. Purely mechanical; never touches
-// an LLM. The LLM work happens locally on each device's `vibebook sync`.
+// an LLM. The LLM work happens in-session via the /vibebook skill on each
+// device, then `vibebook publish` writes per-device chronicle/topic/card
+// files into that device's branch. This script merges all those device
+// branches into main.
+//
+// vibebook v0.2 schema (book index v2):
+//
+//   chronicles/  — thread-grain diary entries, INSERT-only on each device.
+//                  Across devices, dedup by threadId (latest updatedAt wins).
+//
+//   topics/      — mid-grain knowledge pages, FULL-REWRITTEN per session.
+//                  We CANNOT mechanically merge two devices' rewrites of the
+//                  same topic — they diverge in voice and structure. So we
+//                  preserve each as <topicSlug>.<device>.md.
+//
+//   cards/       — atomic insight cards, INSERT/UPDATE per slug per project.
+//                  Across devices, union by (project, slug); slug collision
+//                  resolves to latest updatedAt. _global/cards/ unioned
+//                  unconditionally.
 //
 // Algorithm:
-//   1. List remote device branches (refs/remotes/origin/*, minus main and HEAD).
-//   2. For each, read its BookIndex (.vibebook/index.book.json) via `git show`.
-//      Skip branches that don't have one.
-//   3. Collect every publishable article (ok && !skip && articlePath). Group
-//      by threadId; keep the latest-updatedAt version per thread.
-//   4. For each kept article, `git show <branch>:<articlePath>` → write to
-//      main's worktree at the same path. Prune any book/<project>/articles/*
-//      files in main that don't appear in the merged set.
-//   5. For each (branch, project) chapter.md, copy to
-//      book/<project>/chapter.<device>.md so readers can see each device's
-//      take on the project without one overwriting another.
-//   6. Regenerate book/index.md + book/_meta/timeline.md from the merged data.
+//   1. List remote device branches (refs/remotes/origin/*, minus main + HEAD).
+//   2. For each, read its BookIndex v2 via `git show`. Skip if missing or v1.
+//   3. Walk each per-device entries; bucket into 3 collections.
+//   4. Apply per-collection merge rules; copy files from origin device branch.
+//   5. Prune main-side files that no live device claims.
+//   6. Regen book/index.md + book/_meta/timeline.md + per-project index pages.
 //   7. git add book/ + commit (no-op if nothing changed).
 //
 // The caller (yaml step) takes care of `git push`.
 
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, readdirSync, statSync, rmSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 
 const REPO_ROOT = process.cwd();
 const BOOK_INDEX_PATH = ".vibebook/index.book.json";
 
 function sh(cmd, args) {
-  // Returns stdout as a string; throws on non-zero exit.
   return execSync([cmd, ...args].join(" "), { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 }
 
 function shOk(cmd, args) {
-  // Returns { ok, stdout } — doesn't throw.
   try {
     return { ok: true, stdout: sh(cmd, args) };
   } catch (err) {
@@ -43,7 +53,6 @@ function shOk(cmd, args) {
   }
 }
 
-/** List device branches on origin, excluding main and HEAD. */
 function listDeviceBranches() {
   const raw = sh("git", ["for-each-ref", "--format='%(refname:short)'", "refs/remotes/origin/"]);
   return raw
@@ -51,152 +60,39 @@ function listDeviceBranches() {
     .map((s) => s.trim().replace(/^'|'$/g, ""))
     .filter(Boolean)
     .filter((ref) => ref !== "origin/HEAD" && ref !== "origin/main")
-    .filter((ref) => !ref.includes("->"))  // skip "origin/HEAD -> origin/main" style
-    .map((ref) => ({
-      ref,
-      device: ref.replace(/^origin\//, ""),
-    }));
+    .filter((ref) => !ref.includes("->"))
+    .map((ref) => ({ ref, device: ref.replace(/^origin\//, "") }));
 }
 
-/** Read a file from a branch via `git show`. Returns null if it doesn't exist. */
 function readFileFromBranch(ref, path) {
   const r = shOk("git", ["show", `${ref}:${path}`]);
   return r.ok ? r.stdout : null;
 }
 
-/** Parse BookIndex from a branch. Returns null if missing / malformed. */
 function loadBookIndexFromBranch(ref) {
   const content = readFileFromBranch(ref, BOOK_INDEX_PATH);
   if (content === null) return null;
   try {
     const parsed = JSON.parse(content);
-    if (parsed.version !== 1 || !parsed.threads || !parsed.chapters) return null;
+    if (parsed.version !== 2) {
+      // Pre-v0.2 device — silently skip. The device just needs to upgrade
+      // vibebook + run /vibebook once to get a v2 index.
+      return null;
+    }
+    if (!parsed.chronicles || !parsed.topics || !parsed.cards) return null;
     return parsed;
   } catch {
     return null;
   }
 }
 
-/** Publishable = ok and not skipped and has a path. */
-function isPublishable(entry) {
-  return entry.articleStatus === "ok" && !entry.skip && entry.articlePath && entry.articlePath !== "";
-}
-
-/** Group entries by threadId across devices; keep the latest by updatedAt. */
-function dedupeByThreadLatestWins(perDevice) {
-  const best = new Map(); // threadId -> { entry, device, ref }
-  for (const { ref, device, bookIndex } of perDevice) {
-    for (const entry of Object.values(bookIndex.threads)) {
-      if (!isPublishable(entry)) continue;
-      const existing = best.get(entry.threadId);
-      if (!existing || entry.updatedAt > existing.entry.updatedAt) {
-        best.set(entry.threadId, { entry, device, ref });
-      }
-    }
-  }
-  return [...best.values()];
-}
-
-/** Write content to repoRoot/relPath, creating dirs as needed. */
 function writeRel(relPath, content) {
   const abs = join(REPO_ROOT, relPath);
   mkdirSync(dirname(abs), { recursive: true });
   writeFileSync(abs, content);
 }
 
-/** Delete any book/<project>/articles/* files in main that are NOT in keepPaths. */
-function pruneStaleArticles(keepPaths) {
-  const keepSet = new Set(keepPaths);
-  const articlesRoot = join(REPO_ROOT, "book");
-  if (!existsSync(articlesRoot)) return;
-  for (const project of readdirSync(articlesRoot)) {
-    const projDir = join(articlesRoot, project);
-    if (project === "_meta" || !statSync(projDir).isDirectory()) continue;
-    const articlesDir = join(projDir, "articles");
-    if (!existsSync(articlesDir)) continue;
-    for (const name of readdirSync(articlesDir)) {
-      const relPath = join("book", project, "articles", name).replace(/\\/g, "/");
-      if (!keepSet.has(relPath)) {
-        rmSync(join(articlesDir, name), { force: true });
-      }
-    }
-  }
-}
-
-/** Delete chapter.<device>.md files that no longer correspond to a live device. */
-function pruneStaleChapters(liveDevices) {
-  const liveSet = new Set(liveDevices);
-  const bookRoot = join(REPO_ROOT, "book");
-  if (!existsSync(bookRoot)) return;
-  for (const project of readdirSync(bookRoot)) {
-    if (project === "_meta") continue;
-    const projDir = join(bookRoot, project);
-    if (!statSync(projDir).isDirectory()) continue;
-    for (const name of readdirSync(projDir)) {
-      const m = name.match(/^chapter\.(.+)\.md$/);
-      if (!m) continue;
-      if (!liveSet.has(m[1])) {
-        rmSync(join(projDir, name), { force: true });
-      }
-    }
-  }
-}
-
-/** Render book/index.md from the merged view. */
-function renderBookIndex({ projects, articleCountByProject, chapterDevicesByProject, totalArticles, totalDevices, latestUpdatedAt }) {
-  const lines = [];
-  lines.push("# Book index");
-  lines.push("");
-  lines.push(`Aggregated across ${totalDevices} device(s). ${totalArticles} articles across ${projects.length} project(s). Last updated: ${latestUpdatedAt}.`);
-  lines.push("");
-  lines.push("> Generated by `scripts/merge-books.mjs` in GitHub Actions. Do not edit by hand.");
-  lines.push("");
-  lines.push("## Chapters");
-  lines.push("");
-  for (const p of projects) {
-    const n = articleCountByProject.get(p) ?? 0;
-    const devices = chapterDevicesByProject.get(p) ?? [];
-    const chapterLinks = devices.length > 0
-      ? devices.map((d) => `[${d}](./${p}/chapter.${d}.md)`).join(", ")
-      : "_(no chapter)_";
-    lines.push(`- **${p}** — ${n} article(s) • chapter by: ${chapterLinks}`);
-  }
-  lines.push("");
-  lines.push("See [`_meta/timeline.md`](./_meta/timeline.md) for the global timeline.");
-  lines.push("");
-  return lines.join("\n");
-}
-
-/** Render book/_meta/timeline.md from all kept entries, newest first. */
-function renderGlobalTimeline(entries) {
-  const lines = [];
-  lines.push("# Timeline");
-  lines.push("");
-  lines.push("Every article across every device, newest first.");
-  lines.push("");
-  const sorted = [...entries].sort((a, b) => (a.entry.updatedAt < b.entry.updatedAt ? 1 : -1));
-  let lastDate = "";
-  for (const { entry, device } of sorted) {
-    const date = entry.updatedAt.slice(0, 10);
-    if (date !== lastDate) {
-      lines.push("");
-      lines.push(`## ${date}`);
-      lines.push("");
-      lastDate = date;
-    }
-    const title = escapeMd(entry.title || entry.threadId);
-    const path = entry.articlePath;
-    lines.push(`- [${title}](../${relative("book", path).replace(/\\/g, "/")}) — _${entry.project}_ • ${device}`);
-  }
-  lines.push("");
-  return lines.join("\n");
-}
-
-function escapeMd(s) {
-  return String(s).replace(/([\[\]\\])/g, "\\$1");
-}
-
-// -------------------- main --------------------
+// ---------------- main ----------------
 
 function main() {
   const branches = listDeviceBranches();
@@ -204,92 +100,361 @@ function main() {
     console.log("no device branches found — nothing to aggregate");
     return;
   }
-  console.log(`found ${branches.length} device branch(es):`, branches.map((b) => b.device).join(", "));
+  console.log(`found ${branches.length} device branch(es): ${branches.map((b) => b.device).join(", ")}`);
 
   const perDevice = [];
   for (const { ref, device } of branches) {
     const bookIndex = loadBookIndexFromBranch(ref);
     if (!bookIndex) {
-      console.log(`  skip ${device}: no .vibebook/index.book.json`);
+      console.log(`  skip ${device}: no v2 .vibebook/index.book.json`);
       continue;
     }
     perDevice.push({ ref, device, bookIndex });
   }
   if (perDevice.length === 0) {
-    console.log("no device branch had a BookIndex — nothing to aggregate");
+    console.log("no device branch had a v2 BookIndex — nothing to aggregate");
     return;
   }
 
-  // Step 3: dedupe articles by threadId, latest updatedAt wins.
-  const kept = dedupeByThreadLatestWins(perDevice);
-  console.log(`merged to ${kept.length} unique article(s)`);
-
-  // Step 4: copy article files + prune stale.
-  const keepPaths = [];
-  for (const { ref, entry } of kept) {
-    const body = readFileFromBranch(ref, entry.articlePath);
+  // -------- chronicles: dedup by threadId, latest updatedAt wins --------
+  const chronicleByThread = new Map(); // threadId -> { ref, device, entry }
+  for (const { ref, device, bookIndex } of perDevice) {
+    for (const c of Object.values(bookIndex.chronicles)) {
+      if (c.skip || !c.path) continue;
+      const existing = chronicleByThread.get(c.threadId);
+      if (!existing || c.updatedAt > existing.entry.updatedAt) {
+        chronicleByThread.set(c.threadId, { ref, device, entry: c });
+      }
+    }
+  }
+  const keptChroniclePaths = [];
+  for (const { ref, entry } of chronicleByThread.values()) {
+    const body = readFileFromBranch(ref, entry.path);
     if (body === null) {
-      console.log(`  warn: ${ref}:${entry.articlePath} missing despite BookEntry; skipping`);
+      console.log(`  warn: ${ref}:${entry.path} missing despite index ref; skipping`);
       continue;
     }
-    writeRel(entry.articlePath, body);
-    keepPaths.push(entry.articlePath);
+    writeRel(entry.path, body);
+    keptChroniclePaths.push(entry.path);
   }
-  pruneStaleArticles(keepPaths);
+  console.log(`chronicles: kept ${keptChroniclePaths.length} unique threads`);
 
-  // Step 5: per-device chapters.
-  const liveDevices = [];
-  const chapterDevicesByProject = new Map();
-  const projectSet = new Set();
+  // -------- topics: each device's rewrite preserved as <slug>.<device>.md --------
+  // We never overwrite "the" topic file because two devices' rewrites diverge
+  // in narrative structure and merging mechanically would garble both.
+  const keptTopicPaths = [];
   for (const { ref, device, bookIndex } of perDevice) {
-    liveDevices.push(device);
-    for (const project of Object.keys(bookIndex.chapters)) {
-      projectSet.add(project);
-      const chapterBody = readFileFromBranch(ref, `book/${project}/chapter.md`);
-      if (chapterBody === null) continue;
-      writeRel(`book/${project}/chapter.${device}.md`, chapterBody);
-      const arr = chapterDevicesByProject.get(project) ?? [];
-      arr.push(device);
-      chapterDevicesByProject.set(project, arr);
-    }
-    // Add projects found via article entries too, even if there's no chapter.
-    for (const e of Object.values(bookIndex.threads)) {
-      if (isPublishable(e)) projectSet.add(e.project);
+    for (const t of Object.values(bookIndex.topics)) {
+      const body = readFileFromBranch(ref, t.path);
+      if (body === null) continue;
+      // book/<project>/topics/<slug>.<device>.md
+      const targetPath = `book/${t.project}/topics/${t.topicSlug}.${device}.md`;
+      writeRel(targetPath, body);
+      keptTopicPaths.push(targetPath);
     }
   }
-  pruneStaleChapters(liveDevices);
+  console.log(`topics: wrote ${keptTopicPaths.length} per-device topic files`);
 
-  // Step 6: regen book/index.md + book/_meta/timeline.md.
-  const projects = [...projectSet].sort();
-  const articleCountByProject = new Map();
-  for (const p of projects) articleCountByProject.set(p, 0);
-  for (const { entry } of kept) {
-    articleCountByProject.set(entry.project, (articleCountByProject.get(entry.project) ?? 0) + 1);
+  // -------- cards: union by (project, slug); collision → latest updatedAt --------
+  // _global/cards/ same rule (project="_global").
+  const cardByKey = new Map(); // "<project>/<slug>" -> { ref, entry }
+  for (const { ref, bookIndex } of perDevice) {
+    for (const c of Object.values(bookIndex.cards)) {
+      const k = `${c.project}/${c.cardSlug}`;
+      const existing = cardByKey.get(k);
+      if (!existing || c.updatedAt > existing.entry.updatedAt) {
+        cardByKey.set(k, { ref, entry: c });
+      }
+    }
   }
-  let latestUpdatedAt = "—";
-  for (const { entry } of kept) {
-    if (entry.updatedAt > latestUpdatedAt) latestUpdatedAt = entry.updatedAt;
+  const keptCardPaths = [];
+  for (const { ref, entry } of cardByKey.values()) {
+    const body = readFileFromBranch(ref, entry.path);
+    if (body === null) continue;
+    writeRel(entry.path, body);
+    keptCardPaths.push(entry.path);
   }
-  writeRel("book/index.md", renderBookIndex({
-    projects,
-    articleCountByProject,
-    chapterDevicesByProject,
-    totalArticles: kept.length,
-    totalDevices: perDevice.length,
-    latestUpdatedAt,
-  }));
-  writeRel("book/_meta/timeline.md", renderGlobalTimeline(kept));
+  console.log(`cards: kept ${keptCardPaths.length} unique slugs (incl. _global)`);
 
-  // Step 7: commit.
+  // -------- prune --------
+  pruneStale(keptChroniclePaths, keptTopicPaths, keptCardPaths, perDevice);
+
+  // -------- regen catalog --------
+  const catalogPaths = regenCatalog({
+    chronicles: [...chronicleByThread.values()].map((x) => x.entry),
+    topics: [...perDevice.flatMap(({ device, bookIndex }) =>
+      Object.values(bookIndex.topics).map((t) => ({ ...t, device }))
+    )],
+    cards: [...cardByKey.values()].map((x) => x.entry),
+    devices: perDevice.map((x) => x.device),
+  });
+  console.log(`catalog: wrote ${catalogPaths.length} files`);
+
+  // -------- commit --------
   sh("git", ["add", "book/"]);
-  const statusOut = sh("git", ["status", "--porcelain"]);
-  if (!statusOut.trim()) {
+  const status = sh("git", ["status", "--porcelain"]);
+  if (!status.trim()) {
     console.log("no changes to commit");
     return;
   }
-  const msg = `vibebook aggregate: ${kept.length} articles across ${perDevice.length} device(s)`;
+  const msg = `vibebook aggregate: ${chronicleByThread.size} chronicles, ${keptTopicPaths.length} topic-versions, ${cardByKey.size} cards across ${perDevice.length} device(s)`;
   sh("git", ["commit", "-m", JSON.stringify(msg)]);
   console.log(`committed: ${msg}`);
+}
+
+// ---------------- pruning ----------------
+
+/**
+ * Remove main-side files no live device claims.
+ *
+ * Without pruning, deleting a chronicle / topic / card on a device wouldn't
+ * propagate to main — files would accumulate as ghosts. We rebuild the
+ * "live" set from the kept paths above, then walk main's book/<proj>/
+ * subdirs and delete anything not in that set.
+ *
+ * For per-device topic files (<slug>.<device>.md), we additionally delete
+ * topic files whose device suffix isn't in the current `liveDevices` list,
+ * so retiring a device cleans up its old topic forks.
+ */
+function pruneStale(chroniclePaths, topicPaths, cardPaths, perDevice) {
+  const liveSet = new Set([...chroniclePaths, ...topicPaths, ...cardPaths]);
+  const liveDevices = new Set(perDevice.map((d) => d.device));
+  const bookRoot = join(REPO_ROOT, "book");
+  if (!existsSync(bookRoot)) return;
+
+  for (const projectName of readdirSync(bookRoot)) {
+    if (projectName === "_meta") continue;
+    const projDir = join(bookRoot, projectName);
+    if (!statSync(projDir).isDirectory()) continue;
+
+    pruneSubdir(projDir, "chronicle", liveSet);
+    pruneSubdir(projDir, "cards", liveSet);
+    // For topics, also enforce device suffix: <slug>.<device>.md
+    pruneTopicsDir(projDir, liveSet, liveDevices, projectName);
+  }
+}
+
+function pruneSubdir(projDir, sub, liveSet) {
+  const dir = join(projDir, sub);
+  if (!existsSync(dir)) return;
+  const proj = projDir.split("/").pop();
+  for (const name of readdirSync(dir)) {
+    const rel = `book/${proj}/${sub}/${name}`;
+    if (!liveSet.has(rel)) {
+      rmSync(join(dir, name), { force: true });
+    }
+  }
+}
+
+function pruneTopicsDir(projDir, liveSet, _liveDevices, projectName) {
+  const dir = join(projDir, "topics");
+  if (!existsSync(dir)) return;
+  // liveSet already encodes which <slug>.<device>.md files this run produced;
+  // anything else (retired-device leftovers, stale slugs) is stale. Don't
+  // pattern-match the device suffix — device names contain dots ("Mac.lan").
+  for (const name of readdirSync(dir)) {
+    const rel = `book/${projectName}/topics/${name}`;
+    if (!liveSet.has(rel)) rmSync(join(dir, name), { force: true });
+  }
+}
+
+// ---------------- catalog regen ----------------
+
+/**
+ * Render book/index.md + book/_meta/timeline.md + book/<project>/index.md.
+ *
+ * Logically duplicates src/digest/book-catalog.ts but lives here so the CI
+ * yaml only needs node 20 + this file (no npm install of vibebook on every
+ * workflow run).
+ */
+function regenCatalog({ chronicles, topics, cards, devices }) {
+  const written = [];
+
+  const chrsByProj = bucketBy(chronicles, (c) => c.project);
+  const topsByProj = bucketBy(topics, (t) => t.project);
+  const crdsByProj = bucketBy(cards, (c) => c.project);
+
+  const projectSet = new Set();
+  for (const p of chrsByProj.keys()) projectSet.add(p);
+  for (const p of topsByProj.keys()) projectSet.add(p);
+  for (const p of crdsByProj.keys()) projectSet.add(p);
+  const projects = [...projectSet].sort((a, b) => {
+    if (a === "_global") return 1;
+    if (b === "_global") return -1;
+    return a.localeCompare(b);
+  });
+
+  // Front page.
+  writeRel("book/index.md", renderFront({
+    projects, chrsByProj, topsByProj, crdsByProj,
+    latestUpdate: latestUpdate({ chronicles, topics, cards }),
+    devices,
+  }));
+  written.push("book/index.md");
+
+  // Global timeline.
+  writeRel("book/_meta/timeline.md", renderTimeline({ chronicles, topics, cards }));
+  written.push("book/_meta/timeline.md");
+
+  // Per-project index pages.
+  for (const p of projects) {
+    const path = `book/${p}/index.md`;
+    writeRel(path, renderProjectIndex(p, {
+      chronicles: chrsByProj.get(p) ?? [],
+      topics: topsByProj.get(p) ?? [],
+      cards: crdsByProj.get(p) ?? [],
+    }));
+    written.push(path);
+  }
+
+  return written;
+}
+
+function renderFront({ projects, chrsByProj, topsByProj, crdsByProj, latestUpdate, devices }) {
+  const totalChrs = sumMap(chrsByProj);
+  const totalTops = sumMap(topsByProj);
+  const totalCrds = sumMap(crdsByProj);
+  const lines = [];
+  lines.push("---");
+  lines.push("title: 笔记本");
+  lines.push(`updated: ${latestUpdate}`);
+  lines.push("---");
+  lines.push("");
+  lines.push("# 笔记本");
+  lines.push("");
+  lines.push(`聚合自 ${devices.length} 台设备 · 更新于 ${latestUpdate}`);
+  lines.push("");
+  lines.push(`${projects.length} 项目 · ${totalChrs} 篇流水账 · ${totalTops} 个 topic · ${totalCrds} 张卡片`);
+  lines.push("");
+  lines.push("> Generated by `scripts/merge-books.mjs` in CI. Don't edit by hand.");
+  lines.push("");
+  lines.push(`**设备**: ${devices.map((d) => `\`${d}\``).join(", ")}`);
+  lines.push("");
+  lines.push("## 项目");
+  lines.push("");
+  for (const p of projects) {
+    const chrs = chrsByProj.get(p) ?? [];
+    const tops = topsByProj.get(p) ?? [];
+    const crds = crdsByProj.get(p) ?? [];
+    if (chrs.length === 0 && tops.length === 0 && crds.length === 0) continue;
+    lines.push(`### [${p}](${p}/index.md)`);
+    if (chrs.length > 0) lines.push(`- ${chrs.length} 篇流水账`);
+    if (tops.length > 0) {
+      const slugs = [...new Set(tops.map((t) => t.topicSlug))];
+      lines.push(`- ${slugs.length} 个 topic (${tops.length} 个 device-versions)`);
+    }
+    if (crds.length > 0) lines.push(`- ${crds.length} 张卡片`);
+    lines.push("");
+  }
+  lines.push("---");
+  lines.push("- [全局时间线](_meta/timeline.md)");
+  lines.push("");
+  return lines.join("\n");
+}
+
+function renderTimeline({ chronicles, topics, cards }) {
+  const events = [];
+  for (const c of chronicles) {
+    events.push({ ts: c.updatedAt, line: `📝 [${c.title}](../${c.path}) — _${c.project}_ chronicle` });
+  }
+  for (const t of topics) {
+    events.push({ ts: t.updatedAt, line: `📚 ${t.topicSlug} — _${t.project}_ topic by ${t.device}` });
+  }
+  for (const c of cards) {
+    events.push({ ts: c.updatedAt, line: `💡 [${c.cardSlug}](../${c.path}) — _${c.project}_ ${c.type} card` });
+  }
+  events.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
+  const lines = [];
+  lines.push("# 全局时间线");
+  lines.push("");
+  lines.push("Newest first across every project + device.");
+  lines.push("");
+  let lastDate = "";
+  for (const e of events) {
+    const date = (e.ts || "").slice(0, 10);
+    if (date !== lastDate) { lines.push(""); lines.push(`## ${date}`); lines.push(""); lastDate = date; }
+    lines.push(`- ${e.line}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+function renderProjectIndex(project, args) {
+  const chrs = (args.chronicles ?? []).filter((c) => !c.skip && c.path);
+  const tops = args.topics ?? [];
+  const crds = args.cards ?? [];
+  const lines = [];
+  lines.push("---");
+  lines.push(`title: ${project}`);
+  lines.push("---");
+  lines.push("");
+  lines.push(`# ${project}`);
+  lines.push("");
+  lines.push(`${chrs.length} chronicles · ${new Set(tops.map((t) => t.topicSlug)).size} topics · ${crds.length} cards`);
+  lines.push("");
+  if (tops.length > 0) {
+    const bySlug = bucketBy(tops, (t) => t.topicSlug);
+    lines.push("## Topics (per-device versions)");
+    lines.push("");
+    for (const [slug, list] of [...bySlug.entries()].sort()) {
+      const versions = list.map((v) => `[${v.device}](topics/${slug}.${v.device}.md)`).join(" · ");
+      lines.push(`- **${slug}**: ${versions}`);
+    }
+    lines.push("");
+  }
+  if (chrs.length > 0) {
+    lines.push("## Chronicles (newest first)");
+    lines.push("");
+    for (const c of [...chrs].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))) {
+      lines.push(`- [${c.title}](chronicle/${baseName(c.path)}) — ${c.updatedAt}`);
+    }
+    lines.push("");
+  }
+  if (crds.length > 0) {
+    lines.push("## Cards");
+    lines.push("");
+    const byType = bucketBy(crds, (c) => c.type);
+    for (const [type, list] of [...byType.entries()].sort()) {
+      lines.push(`### ${type}`);
+      for (const c of list.sort((a, b) => a.cardSlug.localeCompare(b.cardSlug))) {
+        lines.push(`- [${c.cardSlug}](cards/${c.cardSlug}.md)`);
+      }
+      lines.push("");
+    }
+  }
+  return lines.join("\n");
+}
+
+function bucketBy(xs, key) {
+  const m = new Map();
+  for (const x of xs) {
+    const k = key(x);
+    let arr = m.get(k);
+    if (!arr) { arr = []; m.set(k, arr); }
+    arr.push(x);
+  }
+  return m;
+}
+
+function sumMap(m) {
+  let n = 0;
+  for (const list of m.values()) n += list.length;
+  return n;
+}
+
+function latestUpdate({ chronicles, topics, cards }) {
+  const ts = [];
+  for (const c of chronicles) ts.push(c.updatedAt);
+  for (const t of topics) ts.push(t.updatedAt);
+  for (const c of cards) ts.push(c.updatedAt);
+  if (ts.length === 0) return "—";
+  ts.sort();
+  return ts[ts.length - 1].slice(0, 10);
+}
+
+function baseName(path) {
+  const ix = path.lastIndexOf("/");
+  return ix < 0 ? path : path.slice(ix + 1);
 }
 
 main();

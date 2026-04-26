@@ -8,32 +8,62 @@ import { simpleGit } from "simple-git";
 /**
  * Integration test for assets/scripts/merge-books.mjs.
  *
- * Sets up a fake bare remote with two device branches, each carrying a
- * .vibebook/index.book.json + book/<proj>/articles/ + book/<proj>/chapter.md.
- * Runs merge-books.mjs on a clone of main (orphan-created here) and asserts:
- *   - article files are copied, deduped by threadId, latest-updatedAt wins
- *   - each device's chapter.md becomes book/<proj>/chapter.<device>.md
- *   - book/index.md + book/_meta/timeline.md are regenerated
- *   - commit is created on main
+ * Sets up a fake bare remote with two device branches, each carrying a v2
+ * BookIndex (.vibebook/index.book.json) + book/<proj>/chronicle/ +
+ * book/<proj>/topics/ + book/<proj>/cards/. Runs merge-books.mjs on a
+ * clone of main and asserts:
+ *   - chronicles deduped by threadId (latest updatedAt wins) + file copied
+ *   - topics preserved per-device as <slug>.<device>.md
+ *   - cards unioned by (project, slug); collision → latest updatedAt
+ *   - book/index.md + book/_meta/timeline.md regenerated with v2 vocabulary
+ *   - commit created on main
  */
 
 const SCRIPT_PATH = new URL("../../assets/scripts/merge-books.mjs", import.meta.url).pathname;
 
+interface ChronicleSeed {
+  threadId: string;
+  title: string;
+  updatedAt: string;
+  body: string;
+}
+
+interface TopicSeed {
+  topicSlug: string;
+  updatedAt: string;
+  contributingThreads: string[];
+  body: string;
+}
+
+interface CardSeed {
+  cardSlug: string;
+  type: "gotcha" | "pattern" | "decision" | "howto" | "tool" | "other";
+  updatedAt: string;
+  body: string;
+}
+
 interface BranchSeed {
   device: string;
-  /** project → article-path → { title, threadId, updatedAt, body } */
-  articles: Record<string, Record<string, {
-    threadId: string;
-    title: string;
-    updatedAt: string;
-    body: string;
-  }>>;
-  /** project → chapter body */
-  chapters: Record<string, string>;
+  /** project → chronicles[] */
+  chronicles?: Record<string, ChronicleSeed[]>;
+  /** project → topics[] (project may be "_global") */
+  topics?: Record<string, TopicSeed[]>;
+  /** project → cards[] (project may be "_global") */
+  cards?: Record<string, CardSeed[]>;
 }
 
 let bareRemote: string;
 let workspace: string;
+
+// git init/clone/push under load easily exceed vitest's 5s default. Each
+// it() spins up a bare remote + 2-3 clones; bump per-test + per-hook budget.
+const T = 60_000;
+
+function chroniclePath(project: string, c: ChronicleSeed): string {
+  const date = c.updatedAt.slice(0, 10);
+  const tid8 = c.threadId.slice(0, 8);
+  return `book/${project}/chronicle/${date}__${c.threadId}__${tid8}.md`;
+}
 
 async function setupBranch(seed: BranchSeed): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), `vibebook-merge-seed-${seed.device}-`));
@@ -47,38 +77,61 @@ async function setupBranch(seed: BranchSeed): Promise<void> {
     await g.checkout(seed.device);
   }
 
-  // Build BookIndex + article files.
   const bookIndex = {
-    version: 1,
-    threads: {} as Record<string, unknown>,
-    chapters: {} as Record<string, { chapterVersion: number; lastFullRewrite: string; latestArticleHash: string }>,
+    version: 2,
+    chronicles: {} as Record<string, unknown>,
+    topics: {} as Record<string, unknown>,
+    cards: {} as Record<string, unknown>,
   };
-  for (const [project, articles] of Object.entries(seed.articles)) {
-    for (const [articlePath, info] of Object.entries(articles)) {
-      const absPath = join(dir, articlePath);
-      mkdirSync(dirname(absPath), { recursive: true });
-      writeFileSync(absPath, info.body);
-      bookIndex.threads[info.threadId] = {
-        threadId: info.threadId,
+
+  for (const [project, chrs] of Object.entries(seed.chronicles ?? {})) {
+    for (const c of chrs) {
+      const path = chroniclePath(project, c);
+      writeFileTo(dir, path, c.body);
+      bookIndex.chronicles[c.threadId] = {
+        threadId: c.threadId,
         project,
-        title: info.title,
-        sessionIds: [`sess-${info.threadId}`],
-        articlePath,
-        articleVersion: 2,
-        latestSourceSha: "shafake",
-        articleStatus: "ok",
-        updatedAt: info.updatedAt,
-      };
-    }
-    if (seed.chapters[project]) {
-      writeFileSync(join(dir, `book/${project}/chapter.md`), seed.chapters[project]);
-      bookIndex.chapters[project] = {
-        chapterVersion: 1,
-        lastFullRewrite: "2026-04-23T00:00:00.000Z",
-        latestArticleHash: "hashfake",
+        title: c.title,
+        sessionIds: [`sess-${c.threadId}`],
+        path,
+        createdAt: c.updatedAt,
+        updatedAt: c.updatedAt,
+        tags: [],
       };
     }
   }
+
+  for (const [project, tops] of Object.entries(seed.topics ?? {})) {
+    for (const t of tops) {
+      const path = `book/${project}/topics/${t.topicSlug}.md`;
+      writeFileTo(dir, path, t.body);
+      bookIndex.topics[`${project}/${t.topicSlug}`] = {
+        topicSlug: t.topicSlug,
+        project,
+        path,
+        createdAt: t.updatedAt,
+        updatedAt: t.updatedAt,
+        contributingThreads: t.contributingThreads,
+      };
+    }
+  }
+
+  for (const [project, crds] of Object.entries(seed.cards ?? {})) {
+    for (const c of crds) {
+      const path = `book/${project}/cards/${c.cardSlug}.md`;
+      writeFileTo(dir, path, c.body);
+      bookIndex.cards[`${project}/${c.cardSlug}`] = {
+        cardSlug: c.cardSlug,
+        project,
+        type: c.type,
+        path,
+        createdAt: c.updatedAt,
+        updatedAt: c.updatedAt,
+        tags: [],
+      };
+    }
+  }
+
   mkdirSync(join(dir, ".vibebook"), { recursive: true });
   writeFileSync(join(dir, ".vibebook", "index.book.json"), JSON.stringify(bookIndex, null, 2));
 
@@ -86,6 +139,12 @@ async function setupBranch(seed: BranchSeed): Promise<void> {
   await g.commit(`seed ${seed.device}`);
   await g.push("origin", seed.device, ["-u"]);
   rmSync(dir, { recursive: true, force: true });
+}
+
+function writeFileTo(dir: string, rel: string, body: string) {
+  const abs = join(dir, rel);
+  mkdirSync(dirname(abs), { recursive: true });
+  writeFileSync(abs, body);
 }
 
 async function setupMainOrphan(): Promise<void> {
@@ -106,18 +165,16 @@ async function setupMainOrphan(): Promise<void> {
 beforeEach(async () => {
   bareRemote = mkdtempSync(join(tmpdir(), "vibebook-merge-bare-"));
   await simpleGit(bareRemote).init({ "--bare": null });
-  // Seed main first so device branches clone from a non-empty remote.
   await setupMainOrphan();
   workspace = mkdtempSync(join(tmpdir(), "vibebook-merge-work-"));
-});
+}, T);
 
 afterEach(() => {
-  rmSync(bareRemote, { recursive: true, force: true });
-  rmSync(workspace, { recursive: true, force: true });
+  if (bareRemote) rmSync(bareRemote, { recursive: true, force: true, maxRetries: 3 });
+  if (workspace) rmSync(workspace, { recursive: true, force: true, maxRetries: 3 });
 });
 
 async function runMerge(): Promise<{ clone: string }> {
-  // Clone main into workspace, switch to main, run the script, return path.
   await simpleGit().clone(bareRemote, workspace);
   const g = simpleGit(workspace);
   await g.addConfig("user.email", "bot@example.com");
@@ -127,151 +184,175 @@ async function runMerge(): Promise<{ clone: string }> {
   return { clone: workspace };
 }
 
-describe("merge-books.mjs", () => {
-  it("merges articles from two devices, dedupes by threadId (latest-updatedAt wins)", async () => {
+describe("merge-books.mjs (v2 schema)", () => {
+  it("dedups chronicles by threadId, latest-updatedAt wins", async () => {
     await setupBranch({
       device: "Mac.lan",
-      articles: {
-        "proj-a": {
-          "book/proj-a/articles/2026-04-20__thread-shared__t1234567.md": {
-            threadId: "thread-shared",
-            title: "Shared thread (Mac.lan older)",
+      chronicles: {
+        "edge-src": [
+          { threadId: "thread-shared", title: "Shared (older)",
             updatedAt: "2026-04-20T10:00:00.000Z",
-            body: "# Old version from Mac.lan\n",
-          },
-          "book/proj-a/articles/2026-04-21__mac-only__m1111111.md": {
-            threadId: "mac-only",
-            title: "Mac only",
+            body: "# Old version from Mac.lan\n" },
+          { threadId: "mac-only", title: "Mac only",
             updatedAt: "2026-04-21T10:00:00.000Z",
-            body: "# Mac.lan exclusive\n",
-          },
-        },
+            body: "# Mac.lan exclusive\n" },
+        ],
       },
-      chapters: { "proj-a": "# proj-a chapter from Mac.lan\n" },
     });
     await setupBranch({
       device: "Mac-mini.local",
-      articles: {
-        "proj-a": {
-          "book/proj-a/articles/2026-04-22__thread-shared__t1234567.md": {
-            threadId: "thread-shared",
-            title: "Shared thread (Mac-mini newer)",
+      chronicles: {
+        "edge-src": [
+          { threadId: "thread-shared", title: "Shared (newer)",
             updatedAt: "2026-04-22T10:00:00.000Z",
-            body: "# NEW version from Mac-mini\n",
-          },
-          "book/proj-a/articles/2026-04-22__mini-only__n2222222.md": {
-            threadId: "mini-only",
-            title: "Mini only",
+            body: "# NEW version from Mac-mini\n" },
+          { threadId: "mini-only", title: "Mini only",
             updatedAt: "2026-04-22T11:00:00.000Z",
-            body: "# Mac-mini exclusive\n",
-          },
-        },
+            body: "# Mac-mini exclusive\n" },
+        ],
       },
-      chapters: { "proj-a": "# proj-a chapter from Mac-mini\n" },
     });
 
     await runMerge();
 
-    // Shared article: Mac-mini's newer body wins.
-    const sharedMiniPath = join(workspace, "book/proj-a/articles/2026-04-22__thread-shared__t1234567.md");
-    const sharedMacPath = join(workspace, "book/proj-a/articles/2026-04-20__thread-shared__t1234567.md");
-    expect(existsSync(sharedMiniPath)).toBe(true);
-    expect(readFileSync(sharedMiniPath, "utf8")).toContain("NEW version from Mac-mini");
-    // Old version pruned.
-    expect(existsSync(sharedMacPath)).toBe(false);
-    // Each device's exclusive article is present.
-    expect(existsSync(join(workspace, "book/proj-a/articles/2026-04-21__mac-only__m1111111.md"))).toBe(true);
-    expect(existsSync(join(workspace, "book/proj-a/articles/2026-04-22__mini-only__n2222222.md"))).toBe(true);
-  });
+    // Shared: Mac-mini's newer body wins; the old chronicle path (different
+    // because filename embeds date) is pruned.
+    const sharedNew = join(workspace, "book/edge-src/chronicle/2026-04-22__thread-shared__thread-s.md");
+    const sharedOld = join(workspace, "book/edge-src/chronicle/2026-04-20__thread-shared__thread-s.md");
+    expect(existsSync(sharedNew)).toBe(true);
+    expect(readFileSync(sharedNew, "utf8")).toContain("NEW version from Mac-mini");
+    expect(existsSync(sharedOld)).toBe(false);
+    // Each device's exclusive chronicle survives.
+    expect(existsSync(join(workspace, "book/edge-src/chronicle/2026-04-21__mac-only__mac-only.md"))).toBe(true);
+    expect(existsSync(join(workspace, "book/edge-src/chronicle/2026-04-22__mini-only__mini-onl.md"))).toBe(true);
+  }, T);
 
-  it("writes per-device chapter files so neither device overwrites the other", async () => {
+  it("preserves per-device topic versions as <slug>.<device>.md", async () => {
     await setupBranch({
       device: "Mac.lan",
-      articles: {
-        "proj-a": {
-          "book/proj-a/articles/2026-04-20__a1__aaaaaaaa.md": {
-            threadId: "a1",
-            title: "A1",
-            updatedAt: "2026-04-20T10:00:00.000Z",
-            body: "x",
-          },
-        },
-      },
-      chapters: { "proj-a": "# From Mac.lan\n" },
+      topics: { "edge-src": [{
+        topicSlug: "fullscreen", updatedAt: "2026-04-20T10:00:00.000Z",
+        contributingThreads: ["fix-1"], body: "# Mac.lan version\n",
+      }] },
     });
     await setupBranch({
       device: "Mac-mini.local",
-      articles: {
-        "proj-a": {
-          "book/proj-a/articles/2026-04-22__b1__bbbbbbbb.md": {
-            threadId: "b1",
-            title: "B1",
-            updatedAt: "2026-04-22T10:00:00.000Z",
-            body: "y",
-          },
-        },
-      },
-      chapters: { "proj-a": "# From Mac-mini\n" },
+      topics: { "edge-src": [{
+        topicSlug: "fullscreen", updatedAt: "2026-04-22T10:00:00.000Z",
+        contributingThreads: ["fix-2"], body: "# Mac-mini version\n",
+      }] },
     });
 
     await runMerge();
 
-    const macChapter = join(workspace, "book/proj-a/chapter.Mac.lan.md");
-    const miniChapter = join(workspace, "book/proj-a/chapter.Mac-mini.local.md");
-    expect(existsSync(macChapter)).toBe(true);
-    expect(readFileSync(macChapter, "utf8")).toContain("From Mac.lan");
-    expect(existsSync(miniChapter)).toBe(true);
-    expect(readFileSync(miniChapter, "utf8")).toContain("From Mac-mini");
-  });
+    const macTopic = join(workspace, "book/edge-src/topics/fullscreen.Mac.lan.md");
+    const miniTopic = join(workspace, "book/edge-src/topics/fullscreen.Mac-mini.local.md");
+    expect(existsSync(macTopic)).toBe(true);
+    expect(readFileSync(macTopic, "utf8")).toContain("Mac.lan version");
+    expect(existsSync(miniTopic)).toBe(true);
+    expect(readFileSync(miniTopic, "utf8")).toContain("Mac-mini version");
+    // No bare fullscreen.md
+    expect(existsSync(join(workspace, "book/edge-src/topics/fullscreen.md"))).toBe(false);
+  }, T);
 
-  it("regenerates book/index.md + book/_meta/timeline.md listing every article", async () => {
+  it("unions cards across devices; slug collision picks latest updatedAt", async () => {
     await setupBranch({
       device: "Mac.lan",
-      articles: {
-        "proj-a": {
-          "book/proj-a/articles/2026-04-20__a1__aaaaaaaa.md": {
-            threadId: "a1",
-            title: "First article",
-            updatedAt: "2026-04-20T10:00:00.000Z",
-            body: "# First\n",
-          },
-        },
+      cards: {
+        "edge-src": [
+          { cardSlug: "gotcha-x", type: "gotcha",
+            updatedAt: "2026-04-20T10:00:00.000Z", body: "OLD card\n" },
+          { cardSlug: "pattern-mac-only", type: "pattern",
+            updatedAt: "2026-04-20T10:00:00.000Z", body: "Mac-only card\n" },
+        ],
       },
-      chapters: { "proj-a": "# c\n" },
     });
     await setupBranch({
       device: "Mac-mini.local",
-      articles: {
-        "proj-b": {
-          "book/proj-b/articles/2026-04-22__b1__bbbbbbbb.md": {
-            threadId: "b1",
-            title: "Second article",
-            updatedAt: "2026-04-22T10:00:00.000Z",
-            body: "# Second\n",
-          },
-        },
+      cards: {
+        "edge-src": [
+          { cardSlug: "gotcha-x", type: "gotcha",
+            updatedAt: "2026-04-22T10:00:00.000Z", body: "NEW card\n" },
+          { cardSlug: "tool-mini-only", type: "tool",
+            updatedAt: "2026-04-22T10:00:00.000Z", body: "Mini-only card\n" },
+        ],
       },
-      chapters: {},
     });
 
     await runMerge();
 
-    const index = readFileSync(join(workspace, "book/index.md"), "utf8");
-    expect(index).toContain("Aggregated across 2 device(s)");
-    expect(index).toContain("proj-a");
-    expect(index).toContain("proj-b");
+    const collision = join(workspace, "book/edge-src/cards/gotcha-x.md");
+    expect(readFileSync(collision, "utf8")).toBe("NEW card\n");
+    expect(existsSync(join(workspace, "book/edge-src/cards/pattern-mac-only.md"))).toBe(true);
+    expect(existsSync(join(workspace, "book/edge-src/cards/tool-mini-only.md"))).toBe(true);
+  }, T);
+
+  it("supports _global cards (cross-project pool)", async () => {
+    await setupBranch({
+      device: "Mac.lan",
+      cards: {
+        "_global": [{ cardSlug: "tool-rg", type: "tool",
+          updatedAt: "2026-04-20T10:00:00.000Z", body: "ripgrep tips\n" }],
+      },
+    });
+    await setupBranch({
+      device: "Mac-mini.local",
+      cards: {
+        "_global": [{ cardSlug: "howto-git-worktree", type: "howto",
+          updatedAt: "2026-04-22T10:00:00.000Z", body: "git worktree howto\n" }],
+      },
+    });
+
+    await runMerge();
+
+    expect(existsSync(join(workspace, "book/_global/cards/tool-rg.md"))).toBe(true);
+    expect(existsSync(join(workspace, "book/_global/cards/howto-git-worktree.md"))).toBe(true);
+  }, T);
+
+  it("regenerates book/index.md + book/_meta/timeline.md with v2 vocabulary", async () => {
+    await setupBranch({
+      device: "Mac.lan",
+      chronicles: { "edge-src": [{
+        threadId: "fix-foo", title: "Fix foo",
+        updatedAt: "2026-04-20T10:00:00.000Z", body: "# Fix foo\n",
+      }] },
+      topics: { "edge-src": [{
+        topicSlug: "fullscreen", updatedAt: "2026-04-20T10:00:00.000Z",
+        contributingThreads: ["fix-foo"], body: "# Fullscreen\n",
+      }] },
+      cards: { "_global": [{
+        cardSlug: "tool-rg", type: "tool",
+        updatedAt: "2026-04-20T10:00:00.000Z", body: "rg\n",
+      }] },
+    });
+    await setupBranch({
+      device: "Mac-mini.local",
+      chronicles: { "chromium-src": [{
+        threadId: "trace-leak", title: "Trace memory leak",
+        updatedAt: "2026-04-22T10:00:00.000Z", body: "# leak\n",
+      }] },
+    });
+
+    await runMerge();
+
+    const front = readFileSync(join(workspace, "book/index.md"), "utf8");
+    expect(front).toContain("聚合自 2 台设备");
+    expect(front).toContain("edge-src");
+    expect(front).toContain("chromium-src");
+    expect(front).toContain("_global");
+    expect(front).toContain("流水账");
 
     const timeline = readFileSync(join(workspace, "book/_meta/timeline.md"), "utf8");
-    expect(timeline).toContain("First article");
-    expect(timeline).toContain("Second article");
-    expect(timeline).toContain("Mac.lan");
-    expect(timeline).toContain("Mac-mini.local");
-    // Newest-first ordering check: Second article (2026-04-22) appears before First (2026-04-20)
-    expect(timeline.indexOf("Second article")).toBeLessThan(timeline.indexOf("First article"));
-  });
+    expect(timeline).toContain("📝 [Fix foo]");
+    expect(timeline).toContain("📝 [Trace memory leak]");
+    expect(timeline).toContain("📚 fullscreen");
+    expect(timeline).toContain("💡 [tool-rg]");
+    // Newest first: chromium fix on 04-22 > edge-src on 04-20
+    expect(timeline.indexOf("Trace memory leak")).toBeLessThan(timeline.indexOf("Fix foo"));
+  }, T);
 
-  it("skips branches without a BookIndex and exits cleanly when no device has one", async () => {
-    // Create a branch with no .vibebook/index.book.json
+  it("skips branches without a v2 BookIndex and exits cleanly when none have one", async () => {
+    // Branch with no .vibebook/index.book.json
     const dir = mkdtempSync(join(tmpdir(), "vibebook-merge-noindex-"));
     await simpleGit().clone(bareRemote, dir);
     const g = simpleGit(dir);
@@ -285,28 +366,47 @@ describe("merge-books.mjs", () => {
     rmSync(dir, { recursive: true, force: true });
 
     await expect(runMerge()).resolves.toBeDefined();
-    // Main branch shouldn't have gained a book/ directory.
     expect(existsSync(join(workspace, "book"))).toBe(false);
-  });
+  }, T);
 
-  it("creates a commit with aggregate message when there's work to do", async () => {
+  it("creates a commit with v2 aggregate message", async () => {
     await setupBranch({
       device: "Mac.lan",
-      articles: {
-        "proj-a": {
-          "book/proj-a/articles/2026-04-20__a1__aaaaaaaa.md": {
-            threadId: "a1",
-            title: "t",
-            updatedAt: "2026-04-20T10:00:00.000Z",
-            body: "x",
-          },
-        },
-      },
-      chapters: {},
+      chronicles: { "edge-src": [{
+        threadId: "a1", title: "t",
+        updatedAt: "2026-04-20T10:00:00.000Z", body: "x",
+      }] },
     });
     const { clone } = await runMerge();
     const g = simpleGit(clone);
     const log = await g.log();
     expect(log.all[0].message).toMatch(/vibebook aggregate/);
-  });
+    expect(log.all[0].message).toMatch(/chronicles?/);
+  }, T);
+
+  it("v1 BookIndex on a device branch is silently skipped (no migration)", async () => {
+    // simulate an old-vibebook device that hasn't run v0.2 yet
+    const dir = mkdtempSync(join(tmpdir(), "vibebook-merge-v1-"));
+    await simpleGit().clone(bareRemote, dir);
+    const g = simpleGit(dir);
+    await g.addConfig("user.email", "t@t");
+    await g.addConfig("user.name", "t");
+    await g.checkout(["-b", "old-device"]);
+    mkdirSync(join(dir, ".vibebook"), { recursive: true });
+    writeFileSync(join(dir, ".vibebook", "index.book.json"), JSON.stringify({
+      version: 1, threads: { "x": { threadId: "x", project: "p", title: "X",
+        sessionIds: [], articlePath: "book/p/articles/x.md",
+        articleVersion: 2, latestSourceSha: "s", articleStatus: "ok",
+        updatedAt: "2026-04-20T10:00:00Z" }}, chapters: {},
+    }));
+    writeFileTo(dir, "book/p/articles/x.md", "old article\n");
+    await g.add(".");
+    await g.commit("v1 device");
+    await g.push("origin", "old-device", ["-u"]);
+    rmSync(dir, { recursive: true, force: true });
+
+    await expect(runMerge()).resolves.toBeDefined();
+    // Old article path was NOT carried over (we only read v2)
+    expect(existsSync(join(workspace, "book/p/articles/x.md"))).toBe(false);
+  }, T);
 });

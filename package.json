@@ -1,7 +1,7 @@
 {
   "name": "vibebook",
-  "version": "0.1.19",
-  "description": "Vibe coding memory book — sync AI coding sessions to a private repo",
+  "version": "0.2.0",
+  "description": "Sync AI coding sessions across machines + digest into a per-project chronicle/topics/cards book via in-session Claude. Ships as both an npm CLI and a Claude Code plugin.",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -26,6 +26,10 @@
   "files": [
     "dist/",
     "assets/",
+    "skills/",
+    "commands/",
+    "hooks/",
+    ".claude-plugin/",
     "README.md"
   ],
   "scripts": {
