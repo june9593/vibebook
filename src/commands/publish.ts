@@ -245,6 +245,7 @@ function registerChronicle(
   assertNonEmpty("chronicle.project", c.project);
   assertNonEmpty("chronicle.threadId", c.threadId);
   assertNonEmpty("chronicle.title", c.title);
+  assertNonEmptyArray("chronicle.sessionIds", c.sessionIds);
 
   // SKIP'd chronicles are recorded in the index (so re-runs don't reconsider
   // the same sessions) but NO file is written.
@@ -395,6 +396,15 @@ function assertNonEmpty(label: string, v: unknown): asserts v is string {
   if (typeof v !== "string" || v.trim().length === 0) {
     throw new Error(
       `${label} is required and must be a non-empty string (got ${JSON.stringify(v)}). ` +
+      `If you wrote the value only in YAML frontmatter, also add it to the top level of the JSON entry.`,
+    );
+  }
+}
+
+function assertNonEmptyArray(label: string, v: unknown): asserts v is string[] {
+  if (!Array.isArray(v) || v.length === 0 || !v.every((x) => typeof x === "string" && x.trim().length > 0)) {
+    throw new Error(
+      `${label} is required and must be a non-empty array of strings (got ${JSON.stringify(v)}). ` +
       `If you wrote the value only in YAML frontmatter, also add it to the top level of the JSON entry.`,
     );
   }

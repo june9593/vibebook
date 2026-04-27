@@ -57,7 +57,7 @@ export function buildListProjectsPayload(cwd: string = process.cwd()): ListProje
 
   const consumed = new Set<string>();
   for (const c of Object.values(bookIndex.chronicles)) {
-    for (const sid of c.sessionIds) consumed.add(sid);
+    for (const sid of c.sessionIds ?? []) consumed.add(sid);
   }
 
   const stats = new Map<string, ProjectStats>();

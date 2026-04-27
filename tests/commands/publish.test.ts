@@ -83,10 +83,10 @@ describe("publish — chronicles", () => {
 
   it("throws on threadId collision (insert-only)", async () => {
     const chrs1: ChronicleInput[] = [{
-      threadId: "x", project: "p", title: "X", sessionIds: [], body: "first\n",
+      threadId: "x", project: "p", title: "X", sessionIds: ["s1"], body: "first\n",
     }];
     const chrs2: ChronicleInput[] = [{
-      threadId: "x", project: "p", title: "X again", sessionIds: [], body: "second\n",
+      threadId: "x", project: "p", title: "X again", sessionIds: ["s1"], body: "second\n",
     }];
     const p1 = writeJson("a.json", chrs1);
     const p2 = writeJson("b.json", chrs2);
