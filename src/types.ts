@@ -24,6 +24,13 @@ export interface NormalizedSession {
   displayName: string;      // un-slugged version for display
   messages: SessionMessage[];
   sourcePath: string;       // absolute path to original file
+  /** When the project field was overridden by content-based inference (the
+   *  session's tool-uses pointed to a different project than the cwd
+   *  suggested), this records the original cwd-derived project so callers
+   *  can audit and the chronicle can carry it as metadata. Absent on the
+   *  default cwd-only path. */
+  projectInferredFrom?: "content";
+  cwdProject?: string;
 }
 
 export interface IndexEntry {

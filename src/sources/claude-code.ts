@@ -5,6 +5,19 @@ import { join, basename } from "node:path";
 import type { SourceAdapter, DiscoveredSession } from "./base.js";
 import type { NormalizedSession, SessionMessage } from "../types.js";
 import { deriveSlug, projectSlugFromPath } from "../slug.js";
+import {
+  inferProjectFromContent,
+  listKnownProjectRoots,
+  MIN_CONFIDENCE,
+} from "../content-project-inference.js";
+
+// Cached at module scope: listing ~/.claude/projects/ on every parse is
+// fine but redundant when sync touches hundreds of jsonls in one run.
+let cachedRoots: { path: string; slug: string }[] | null = null;
+function getRoots(): { path: string; slug: string }[] {
+  if (cachedRoots === null) cachedRoots = listKnownProjectRoots();
+  return cachedRoots;
+}
 
 export class ClaudeCodeAdapter implements SourceAdapter {
   readonly name = "claude" as const;
@@ -104,11 +117,22 @@ function parseClaudeJsonl(sourcePath: string, content: string): NormalizedSessio
   const finalId = sessionId || fallbackId;
   const shortId = finalId.slice(0, 8);
 
-  return {
+  // Default project from cwd; override only if content inference is
+  // confident AND disagrees with cwd. We carry the original cwd-project
+  // in `cwdProject` for auditing — caller (prepare/digest) can show it.
+  const cwdProject = projectSlugFromPath(cwd);
+  const inference = inferProjectFromContent(messages, getRoots());
+  const useInferred =
+    inference.inferredProject !== null &&
+    inference.inferredProject !== cwdProject &&
+    inference.confidence >= MIN_CONFIDENCE;
+  const project = useInferred ? inference.inferredProject! : cwdProject;
+
+  const out: NormalizedSession = {
     tool: "claude",
     sessionId: finalId,
     shortId,
-    project: projectSlugFromPath(cwd),
+    project,
     projectRaw: cwd,
     startedAt: startedAt || new Date(0).toISOString(),
     endedAt: endedAt || new Date(0).toISOString(),
@@ -117,6 +141,11 @@ function parseClaudeJsonl(sourcePath: string, content: string): NormalizedSessio
     messages,
     sourcePath,
   };
+  if (useInferred) {
+    out.projectInferredFrom = "content";
+    out.cwdProject = cwdProject;
+  }
+  return out;
 }
 
 /**
