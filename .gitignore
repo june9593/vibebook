@@ -6,3 +6,5 @@ dist
 .DS_Store
 .claude/
 tmp/
+site-template/.astro
+site-template/package-lock.json

@@ -30,6 +30,7 @@
     "commands/",
     "hooks/",
     ".claude-plugin/",
+    "site-template/",
     "README.md"
   ],
   "scripts": {

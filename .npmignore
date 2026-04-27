@@ -17,3 +17,9 @@ vitest.config.ts
 .gitignore
 .npmignore
 .memvc-local/
+
+# Site template ships as source; never ship its installed deps or build output.
+site-template/node_modules/
+site-template/dist/
+site-template/.astro/
+site-template/package-lock.json

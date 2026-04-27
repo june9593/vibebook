@@ -1,0 +1,87 @@
+---
+import Base from "../layouts/Base.astro";
+import { listProjects, listChronicles, chronicleRouteSlug } from "../lib/content";
+
+const base = import.meta.env.BASE_URL;
+const projects = listProjects().filter((p) => p.slug !== "_global");
+const recent = listChronicles().slice(0, 8);
+const totalChronicles = projects.reduce((s, p) => s + p.chronicleCount, 0);
+const totalTopics = projects.reduce((s, p) => s + p.topicCount, 0);
+const totalCards = projects.reduce((s, p) => s + p.cardCount, 0);
+---
+<Base title="vibebook" description="A reading view of your synced AI coding sessions.">
+  <section class="hero container">
+    <h1>Notes from the work bench.</h1>
+    <p class="lede">
+      你的 AI coding session 被整理成 chronicle、topic、card 三种粒度的笔记。
+      没有营销文案，没有博客腔——只是一份诚实的工作记录。
+    </p>
+    <p class="meta" style="margin-top: var(--space-6);">
+      <span>{projects.length} projects</span>
+      <span> · </span>
+      <span>{totalChronicles} chronicles</span>
+      <span> · </span>
+      <span>{totalTopics} topics</span>
+      <span> · </span>
+      <span>{totalCards} cards</span>
+    </p>
+  </section>
+
+  <section class="container" style="padding-top: var(--space-12);">
+    <h2 style="font-size: 1.6rem; margin-bottom: var(--space-6);">最近的 chronicle</h2>
+    <ul class="entry-list">
+      {recent.map((c) => (
+        <li>
+          <a class="title" href={`${base}projects/${c.project}/chronicle/${chronicleRouteSlug(c)}/`}>
+            {c.displayTitle}
+          </a>
+          <div class="row-meta">
+            <span class="chip">{c.project}</span>
+            <span>{c.updatedAt.slice(0, 10)}</span>
+            {c.tags.slice(0, 3).map((t) => <span class="subtle">#{t}</span>)}
+          </div>
+        </li>
+      ))}
+    </ul>
+  </section>
+
+  <section class="container" style="padding-top: var(--space-16);">
+    <h2 style="font-size: 1.6rem; margin-bottom: var(--space-6);">所有项目</h2>
+    <div class="project-grid">
+      {projects.map((p) => (
+        <a class="project-card" href={`${base}projects/${p.slug}/`}>
+          <h3>{p.slug}</h3>
+          <p class="meta">
+            {p.chronicleCount} chronicle · {p.topicCount} topic · {p.cardCount} card
+          </p>
+          {p.lastTouched && (
+            <p class="subtle">last touched {p.lastTouched.slice(0, 10)}</p>
+          )}
+        </a>
+      ))}
+    </div>
+  </section>
+</Base>
+
+<style>
+  .project-card {
+    display: block;
+    background: var(--ivory);
+    border: 1px solid var(--border-cream);
+    border-radius: var(--r-soft);
+    padding: var(--space-6);
+    color: inherit;
+    transition: box-shadow 0.16s ease, border-color 0.16s ease;
+    border-bottom: 1px solid var(--border-cream);
+  }
+  .project-card:hover {
+    box-shadow: var(--whisper);
+    border-color: var(--border-warm);
+  }
+  .project-card h3 {
+    margin: 0 0 var(--space-2);
+    font-size: 1.3rem;
+  }
+  .project-card .meta { margin: 0; }
+  .project-card .subtle { margin: var(--space-2) 0 0; font-size: 0.81rem; }
+</style>

@@ -68,6 +68,22 @@ export async function run(argv: string[]) {
       console.log(JSON.stringify(r, null, 2));
     });
   program
+    .command("serve")
+    .description("Local dev server (astro dev) for the vibebook site, reading book/ + .vibebook/index.book.json from the configured session-repo. Open http://localhost:4321.")
+    .action(async () => {
+      const { serveSiteCmd } = await import("./commands/site.js");
+      await serveSiteCmd({});
+    });
+  program
+    .command("build-site")
+    .description("Build the static vibebook site into <repoPath>/site-dist/. Suitable for GitHub Pages / Vercel / Netlify.")
+    .option("--base <path>", "site base path (default '/'); for project-page deploys use '/<repo>/'")
+    .option("--site-url <url>", "absolute site URL used for canonical / OG tags")
+    .action(async (opts: { base?: string; siteUrl?: string }) => {
+      const { buildSiteCmd } = await import("./commands/site.js");
+      await buildSiteCmd({ base: opts.base, siteUrl: opts.siteUrl });
+    });
+  program
     .command("catalog-regen")
     .description("Regenerate book/index.md + book/_meta/timeline.md + book/<proj>/index.md from the existing book index. Used by global-mode /vibebook after subagent fan-out finishes.")
     .option("--no-commit", "write files locally but don't commit/push")
@@ -88,6 +104,16 @@ export async function run(argv: string[]) {
           const { workflowInitCmd } = await import("./commands/workflow.js");
           // commander's --no-X sets opts.X=false when flag present, true otherwise.
           await workflowInitCmd({ force: opts.force, noPush: opts.push === false });
+        }),
+    )
+    .addCommand(
+      new Command("pages-init")
+        .description("Write .github/workflows/vibebook-pages.yml — builds the static site and publishes to GitHub Pages on every push to main.")
+        .option("--force", "overwrite if file already exists")
+        .option("--no-push", "write the file locally but don't auto commit + push to main")
+        .action(async (opts: { force?: boolean; push?: boolean }) => {
+          const { workflowPagesInitCmd } = await import("./commands/workflow.js");
+          await workflowPagesInitCmd({ force: opts.force, noPush: opts.push === false });
         }),
     );
   program

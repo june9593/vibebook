@@ -1,0 +1,35 @@
+---
+import Base from "../../layouts/Base.astro";
+import { listProjects } from "../../lib/content";
+
+const base = import.meta.env.BASE_URL;
+const projects = listProjects().filter((p) => p.slug !== "_global");
+---
+<Base title="Projects · vibebook">
+  <section class="container">
+    <h1 style="font-size: 2.4rem; margin-bottom: var(--space-3);">Projects</h1>
+    <p class="meta" style="margin-bottom: var(--space-10);">
+      {projects.length} 个项目，按字母排序。
+    </p>
+    <ul class="entry-list">
+      {projects.map((p) => (
+        <li>
+          <a class="title" href={`${base}projects/${p.slug}/`}>{p.slug}</a>
+          <div class="row-meta">
+            <span>{p.chronicleCount} chronicle</span>
+            <span class="dot">·</span>
+            <span>{p.topicCount} topic</span>
+            <span class="dot">·</span>
+            <span>{p.cardCount} card</span>
+            {p.lastTouched && (
+              <>
+                <span class="dot">·</span>
+                <span>last touched {p.lastTouched.slice(0, 10)}</span>
+              </>
+            )}
+          </div>
+        </li>
+      ))}
+    </ul>
+  </section>
+</Base>

@@ -96,3 +96,67 @@ export async function workflowInitCmd(opts: { force?: boolean; noPush?: boolean 
   console.log(chalk.gray("\nThe workflow fires on every push to a non-main branch."));
   console.log(chalk.gray("Each device's `vibebook sync` will trigger it; the CI merges all device book/s into main."));
 }
+
+/**
+ * Install the GitHub Pages workflow that builds + publishes the site
+ * (`vibebook build-site` output) on every push to main. Mirror of
+ * workflowInitCmd's auto-commit/push behavior.
+ */
+export async function workflowPagesInitCmd(opts: { force?: boolean; noPush?: boolean } = {}): Promise<void> {
+  const cfg = readConfig();
+  const yamlTarget = join(cfg.repoPath, ".github", "workflows", "vibebook-pages.yml");
+
+  if (existsSync(yamlTarget) && !opts.force) {
+    console.log(chalk.yellow(`already exists: ${yamlTarget}`));
+    console.log(chalk.gray("  re-run with --force to overwrite"));
+    return;
+  }
+
+  mkdirSync(dirname(yamlTarget), { recursive: true });
+  writeFileSync(yamlTarget, readFileSync(assetPath("assets/workflows/vibebook-pages.yml"), "utf8"));
+  console.log(chalk.green(`pages workflow written: ${yamlTarget}`));
+  console.log(chalk.cyan(`\nNext: GitHub Settings → Pages → Source: GitHub Actions`));
+
+  const wantPush = !opts.noPush && cfg.repoUrl && cfg.deviceBranch;
+  if (!wantPush) {
+    console.log(chalk.gray("\nLocal-only mode: workflow file written but not committed/pushed."));
+    return;
+  }
+
+  // For pages we want the workflow on main, not the device branch — the
+  // workflow only fires when present on main. We push to main directly,
+  // refusing if that would clobber unpushed work.
+  console.log(chalk.gray(`\nCommitting + pushing to 'main'...`));
+  const git = await ensureRepo(cfg.repoPath, cfg.repoUrl);
+  try { await git.fetch(); } catch { /* offline / empty */ }
+  // Switch to a temp worktree-style commit on main: simplest to ask the
+  // user to handle this manually if they aren't already on main.
+  const status = await git.status();
+  const onMain = status.current === "main";
+  if (!onMain) {
+    console.log(chalk.yellow(
+      `\n  Currently on '${status.current}'. The pages workflow must be on main to fire.\n` +
+      `  Easiest path:\n` +
+      `    cd ${cfg.repoPath}\n` +
+      `    git checkout main && git pull\n` +
+      `    git add .github/workflows/vibebook-pages.yml && git commit -m 'add pages workflow'\n` +
+      `    git push origin main`,
+    ));
+    return;
+  }
+  await fastForwardBranch(git, "main", (s) => console.log(chalk.gray(`  ${s}`)));
+  const r = await commitAndPush(
+    git,
+    "vibebook: add GitHub Pages workflow",
+    [".github/workflows/vibebook-pages.yml"],
+    "main",
+    (stage) => console.log(chalk.gray(`  ${stage}`)),
+  );
+  if (r.committed && r.pushed) {
+    console.log(chalk.green(`✓ pushed to main; first build will start shortly`));
+  } else if (r.committed && !r.pushed) {
+    console.log(chalk.yellow(`Committed locally but push failed. Run \`git push\` manually from ${cfg.repoPath}.`));
+  } else {
+    console.log(chalk.gray("Nothing to commit (workflow already up to date)."));
+  }
+}
