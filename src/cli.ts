@@ -49,6 +49,22 @@ export async function run(argv: string[]) {
       await listProjectsCmd();
     });
   program
+    .command("recall")
+    .description("Emit a lightweight catalog of book artifacts (chronicle/topic/card titles + 1-line summaries + paths) so an in-session Claude in any project repo can decide which past notes to Read. Defaults to the project matching cwd; pass --all for every project.")
+    .option("--cwd <path>", "auto-detect project from this absolute cwd (default process.cwd)")
+    .option("--project <slug>", "override cwd resolution; catalog this project explicitly")
+    .option("--all", "catalog every project (no project filter)")
+    .option("--no-global", "exclude _global cards from a project-scoped catalog")
+    .action(async (opts: { cwd?: string; project?: string; all?: boolean; global?: boolean }) => {
+      const { recallCmd } = await import("./commands/recall.js");
+      await recallCmd({
+        cwd: opts.cwd ?? process.cwd(),
+        project: opts.project,
+        all: opts.all,
+        includeGlobalCards: opts.global !== false,
+      });
+    });
+  program
     .command("publish")
     .description("Read JSON inputs from /vibebook skill, write chronicles + topics + cards into book/, regen catalog, commit + push.")
     .option("--chronicles <path>", "JSON file with ChronicleInput[]")

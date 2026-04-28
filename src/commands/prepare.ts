@@ -6,6 +6,7 @@ import { loadBookIndexV2 } from "../digest/book-index-v2.js";
 import { extractSessionSignals, isVibebookMetaSession } from "../digest/session-signal.js";
 import { isRealProjectPath } from "../digest/project-filter.js";
 import { projectSlugFromPath } from "../slug.js";
+import { resolveProjectFromCwdWithIndex } from "../project-resolve.js";
 import type { IndexEntry } from "../types.js";
 
 export interface PreparePayload {
@@ -88,7 +89,7 @@ export function buildPreparePayload(opts: PrepareOptions = {}): PreparePayload {
   // nothing, throw — no point pretending the user is in a known project.
   let projectFilter = opts.project?.trim() || null;
   if (!projectFilter && opts.cwd) {
-    projectFilter = resolveProjectFromCwd(opts.cwd, indexFile);
+    projectFilter = resolveProjectFromCwdWithIndex(opts.cwd, indexFile.entries);
     if (!projectFilter) {
       throw new Error(
         `no synced sessions found for cwd '${opts.cwd}' (derived slug '${projectSlugFromPath(opts.cwd)}'). Run \`vibebook sync\` first or pass --project explicitly.`,
@@ -192,26 +193,4 @@ function mdPathFor(entry: IndexEntry): string {
 export async function prepareCmd(opts: PrepareOptions): Promise<void> {
   const payload = buildPreparePayload(opts);
   process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
-}
-
-/**
- * Resolve a cwd to a project slug.
- *   1. Try the slug derived from the path (`projectSlugFromPath`) and
- *      check the index has at least one session for it.
- *   2. If not, scan index entries for one whose `projectRaw` matches cwd
- *      (handles cwd-symlink cases where the path-derived slugs differ).
- *   3. Return null if nothing matches — caller decides how to error.
- */
-function resolveProjectFromCwd(
-  cwd: string,
-  indexFile: { entries: Record<string, IndexEntry> },
-): string | null {
-  const slug = projectSlugFromPath(cwd);
-  for (const e of Object.values(indexFile.entries)) {
-    if (e.project === slug) return slug;
-  }
-  for (const e of Object.values(indexFile.entries)) {
-    if (e.projectRaw === cwd) return e.project;
-  }
-  return null;
 }
