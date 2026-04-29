@@ -246,12 +246,48 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
     console.log(chalk.gray("       → install the CI workflow that merges every device branch's book/ into main."));
   }
   if (a.recommendMemex) {
-    console.log(chalk.cyan("\n  Optional — install memex for richer atomic-card management:"));
-    console.log(chalk.cyan("    npm install -g @touchskyer/memex"));
-    console.log(chalk.gray("    Then in Claude Code, install the memex plugin (it ships SessionStart + Stop hooks"));
-    console.log(chalk.gray("    that proactively recall + retro after every task). vibebook recall will pick up"));
-    console.log(chalk.gray("    memex search results automatically when memex is on PATH."));
+    await offerMemexInstall();
   }
+}
+
+/**
+ * If memex isn't installed, attempt to install it automatically (the user
+ * already opted in via Q8). Two install steps:
+ *   1. `npm install -g @touchskyer/memex` — gets the CLI.
+ *   2. Print the `/plugin` commands to wire the Claude Code plugin —
+ *      this we cannot do for the user since `/plugin` runs inside the
+ *      Claude Code REPL, not from a shell.
+ *
+ * Both steps are best-effort + chatty so the user can see what failed
+ * and re-run by hand.
+ */
+async function offerMemexInstall(): Promise<void> {
+  console.log(chalk.cyan("\n=== memex setup ==="));
+  const { spawnSync } = await import("node:child_process");
+
+  // Step 1: CLI install.
+  const have = spawnSync("memex", ["--version"], { encoding: "utf8" });
+  if (have.status === 0) {
+    console.log(chalk.green(`  ✓ memex already installed (${have.stdout.trim()})`));
+  } else {
+    console.log(chalk.gray("  → npm install -g @touchskyer/memex"));
+    const r = spawnSync("npm", ["install", "-g", "@touchskyer/memex"], { stdio: "inherit" });
+    if (r.status === 0) {
+      console.log(chalk.green("  ✓ memex CLI installed"));
+    } else {
+      console.log(chalk.yellow("  ! npm install failed (you may need to retry with sudo, or fix npm permissions)"));
+      console.log(chalk.gray("    Run manually:  npm install -g @touchskyer/memex"));
+    }
+  }
+
+  // Step 2: Claude Code plugin — user runs these in the REPL, not in a shell.
+  console.log(chalk.cyan("\n  In Claude Code, run these to install the memex plugin"));
+  console.log(chalk.cyan("  (they ship SessionStart + Stop hooks that recall + retro for you):"));
+  console.log(chalk.gray("    /plugin marketplace add iamtouchskyer/memex"));
+  console.log(chalk.gray("    /plugin install memex@memex"));
+
+  console.log(chalk.gray("\n  Once both are installed, vibebook recall will fold memex's catalog into its own"));
+  console.log(chalk.gray("  automatically. No further config needed."));
 }
 
 /** Top-level entry — composes wizard + verify + apply, with cleanup. */
