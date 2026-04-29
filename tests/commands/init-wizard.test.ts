@@ -154,6 +154,7 @@ describe("runWizard end-to-end transcript", () => {
       "y",                             // Q5 digest
       "y",                             // Q6 enable aggregate CI
       "y",                             // Q7 includeReasoning
+      "n",                             // Q8 recommend memex
     ];
     const stdin = new Readable({ read() {} }) as Readable & { isTTY?: boolean };
     stdin.isTTY = true;
@@ -190,6 +191,7 @@ describe("runWizard end-to-end transcript", () => {
       "n",                              // Q0 sync to remote → no
       "y",                              // Q5 digest
       "y",                              // Q7 includeReasoning (Q6 skipped — local-only)
+      "n",                              // Q8 recommend memex
     ];
     const stdin = new Readable({ read() {} }) as Readable & { isTTY?: boolean };
     stdin.isTTY = true;

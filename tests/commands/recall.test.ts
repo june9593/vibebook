@@ -266,3 +266,53 @@ function entry(id: string, project: string, projectRaw: string) {
     sourcePath: "/x.jsonl", sourceMtimeMs: 1, sourceSha256: "abc",
   };
 }
+
+describe("recall — memex index parser", () => {
+  it("extracts slug + summary + category from a memex `read index` page", async () => {
+    const { parseMemexIndex } = await import("../../src/commands/recall.js");
+    const md = `# Memex Knowledge Map
+
+## Debugging
+
+- [[gotcha-jwt-revocation]] — stateless JWTs can't be revoked; use a blacklist
+- [[howto-stack-trace-bisect|Stack trace bisect]] — narrow a regression to one commit
+
+## Patterns
+
+- [[pattern-event-sourced-projection]]
+`;
+    const out = parseMemexIndex(md);
+    expect(out.length).toBe(3);
+    expect(out[0]!.slug).toBe("gotcha-jwt-revocation");
+    expect(out[0]!.title).toBe("Jwt revocation");
+    expect(out[0]!.summary).toContain("stateless JWTs");
+    expect(out[0]!.cardType).toBe("gotcha");
+    expect(out[0]!.tags).toEqual(["Debugging"]);
+    expect(out[0]!.path).toBe("memex:gotcha-jwt-revocation");
+    expect(out[1]!.title).toBe("Stack trace bisect");      // alt text wins
+    expect(out[2]!.cardType).toBe("pattern");
+    expect(out[2]!.tags).toEqual(["Patterns"]);
+  });
+
+  it("handles an empty / heading-only memex index gracefully", async () => {
+    const { parseMemexIndex } = await import("../../src/commands/recall.js");
+    expect(parseMemexIndex("")).toEqual([]);
+    expect(parseMemexIndex("# Just a heading\n")).toEqual([]);
+  });
+});
+
+describe("recall — memex absent (graceful fallback)", () => {
+  // memex is intentionally NOT installed in CI / dev machines; we want to
+  // assert the no-memex code path returns vibebook-only results without
+  // crashing or polluting meta.
+  it("does not query memex when --no-memex passed; meta.memexQueried absent", async () => {
+    writeConfig({ repoPath });
+    writeIndex({});
+    writeBook({ version: 2, chronicles: {}, topics: {}, cards: {} });
+
+    const { buildRecallPayload } = await import("../../src/commands/recall.js");
+    const out = buildRecallPayload({ project: "edge-src", noMemex: true });
+    expect(out.meta.memexQueried).toBeUndefined();
+    expect(out.entries.filter((e) => e.kind === "memex-card")).toEqual([]);
+  });
+});

@@ -252,6 +252,15 @@ For each chronicle, extract **0 to N atomic insight cards**. Most chronicles
 yield 0–2 cards. A few yield 5+. **Don't pad** — a card is for future-you,
 not for completeness.
 
+> **Memex integration.** If `memex` is on the user's PATH (check with
+> `command -v memex`), **prefer `/memex-retro` for atomic cards** instead
+> of vibebook's built-in card path. Memex (https://github.com/iamtouchskyer/memex)
+> is purpose-built for Zettelkasten-style cards with backlinks, organize,
+> and orphan detection — vibebook's card model was inspired by it. The
+> rules below still apply (atomic / Fact Hygiene / dedup / wikilink in
+> context); just delegate the *write* to memex via `memex write <slug>`.
+> vibebook's recall skill picks up memex cards automatically.
+
 **Hard rules:**
 
 1. **Atomic** — one card, one fact. If it can be split, split it.

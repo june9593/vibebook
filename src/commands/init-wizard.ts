@@ -23,6 +23,10 @@ export interface WizardAnswers {
   enableAggregateCI: boolean;
   /** Render assistant reasoning into raw_sessions/*.md (Q7). Default true. */
   includeReasoning: boolean;
+  /** User said yes to "recommend memex for cards?" (Q8). Drives the
+   *  next-steps printer + (later) the recall skill's memex source toggle.
+   *  Optional so old config.json files without this field still parse. */
+  recommendMemex?: boolean;
 }
 
 /**
@@ -125,7 +129,22 @@ export async function runWizard(): Promise<WizardAnswers> {
     );
   }
 
-  return { repoUrl, localPath, encrypt, passphraseEntered, digestEnabled, enableAggregateCI, includeReasoning };
+  // Q8: opt-in memex integration. The CLI doesn't *require* memex to be
+  // installed — vibebook works fine on its own. But memex
+  // (https://github.com/iamtouchskyer/memex) is purpose-built for atomic
+  // Zettelkasten-style cards with proactive Stop-hook reminders, and its
+  // model is more refined than vibebook's built-in card path. So we
+  // *recommend* it when the user wants serious card management. The
+  // wizard just hints; actual install + hook wiring is the user's call.
+  let recommendMemex = false;
+  if (digestEnabled) {
+    recommendMemex = await promptYesNo(
+      chalk.cyan("Q8") + " Recommend memex (https://github.com/iamtouchskyer/memex) for atomic card management? It's a separate tool that handles Zettelkasten-style cards with proactive retro-after-task hooks. /vibebook-recall will pull memex search results into its catalog when memex is on PATH.",
+      false,
+    );
+  }
+
+  return { repoUrl, localPath, encrypt, passphraseEntered, digestEnabled, enableAggregateCI, includeReasoning, recommendMemex };
 }
 
 /**
@@ -225,6 +244,13 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
   if (a.enableAggregateCI) {
     console.log(chalk.cyan("  3. vibebook workflow init"));
     console.log(chalk.gray("       → install the CI workflow that merges every device branch's book/ into main."));
+  }
+  if (a.recommendMemex) {
+    console.log(chalk.cyan("\n  Optional — install memex for richer atomic-card management:"));
+    console.log(chalk.cyan("    npm install -g @touchskyer/memex"));
+    console.log(chalk.gray("    Then in Claude Code, install the memex plugin (it ships SessionStart + Stop hooks"));
+    console.log(chalk.gray("    that proactively recall + retro after every task). vibebook recall will pick up"));
+    console.log(chalk.gray("    memex search results automatically when memex is on PATH."));
   }
 }
 

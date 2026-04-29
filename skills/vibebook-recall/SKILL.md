@@ -66,10 +66,18 @@ The output is a JSON payload:
 }
 ```
 
-Entries are sorted **cards first, then topics, then chronicles**, newest
-within each kind. That's deliberate — cards are the most surgical
-context (one atomic insight you can apply right away), topics give
-subsystem context, chronicles are the full diary.
+Entries are sorted **cards first, then memex-cards, then topics, then
+chronicles**, newest within each kind. That's deliberate — cards are the
+most surgical context (one atomic insight you can apply right away),
+topics give subsystem context, chronicles are the full diary.
+
+**About memex-card entries.** If `meta.memexQueried === true`, vibebook
+detected the optional [memex](https://github.com/iamtouchskyer/memex) CLI
+on PATH and folded its catalog in. memex-card entries have `path`
+prefixed `memex:<slug>` — to read the body, run `memex read <slug>`
+(NOT the `Read` tool with that path). They're project-agnostic by
+construction (memex is global, not per-project), but their tags often
+encode the category memex assigned them.
 
 ## Step 2 — Triage
 

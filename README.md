@@ -261,8 +261,16 @@ permission/credit):
 - **edge-dev** (Microsoft Edge knowledge base) — YAML frontmatter
   conventions, "index is a curated catalog, not a TOC", Related Pages
   backlink culture, no-dead-ends rule
-- **memex** — atomic card prompt rules: atomic / non-obvious / Feynman
-  own-words / Fact Hygiene Check (WHO / WHAT-WHEN / RELATIONSHIP)
+- **[memex](https://github.com/iamtouchskyer/memex)** — atomic card prompt
+  rules (atomic / non-obvious / Feynman own-words / Fact Hygiene Check),
+  proactive Stop-hook reminders for retro-after-task. **vibebook
+  optionally integrates with memex**: install
+  `npm install -g @touchskyer/memex` and add the memex Claude Code plugin,
+  and `vibebook recall` will fold memex's catalog into its own. Use
+  `/memex-retro` for atomic cards instead of vibebook's built-in card
+  path — it has richer Zettelkasten support (backlinks, organize,
+  archive). vibebook still owns sync, chronicle, topic, and the per-project
+  scoping.
 
 ## License
 

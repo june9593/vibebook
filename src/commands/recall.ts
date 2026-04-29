@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { readConfig } from "../config.js";
 import { loadBookIndexV2 } from "../digest/book-index-v2.js";
@@ -28,16 +29,21 @@ import { projectSlugFromPath } from "../slug.js";
  */
 
 export interface RecallEntry {
-  /** chronicle | topic | card */
-  kind: "chronicle" | "topic" | "card";
-  /** Project slug ("_global" for cross-project cards). */
+  /** chronicle | topic | card | memex-card.
+   *  memex-card entries come from the optional memex CLI when it's
+   *  installed; everything else from vibebook's BookIndex. */
+  kind: "chronicle" | "topic" | "card" | "memex-card";
+  /** Project slug ("_global" for cross-project cards; "_memex" for entries
+   *  sourced from memex's flat or category-prefixed slug tree). */
   project: string;
   /** Display title (frontmatter title → first `# heading` → slug). */
   title: string;
   /** First non-heading paragraph, ~200 chars max. The "is this relevant?"
    *  preview the LLM looks at before deciding to Read. */
   summary: string;
-  /** Repo-relative path so the LLM knows what to pass to `Read`. */
+  /** Repo-relative path so the LLM knows what to pass to `Read`.
+   *  For memex-card entries this is the absolute memex card path
+   *  (e.g. ~/.memex/cards/foo-bar.md) — the LLM should `Read` it directly. */
   path: string;
   /** Stable id within its kind: threadId / topicSlug / cardSlug. */
   slug: string;
@@ -61,8 +67,14 @@ export interface RecallPayload {
     chronicles: number;
     topics: number;
     cards: number;
+    /** Memex-card count, only populated when memex was detected. */
+    memexCards?: number;
     /** True when we couldn't resolve cwd → project. */
     cwdUnresolved?: boolean;
+    /** True when the optional memex source was queried (regardless of
+     *  whether it returned any entries). Lets the skill say
+     *  "checked memex too — nothing matched" vs "memex unavailable". */
+    memexQueried?: boolean;
   };
 }
 
@@ -76,6 +88,10 @@ export interface RecallOptions {
   /** Include the user's `_global` cards in the project-scoped catalog
    *  (default true — _global cards by definition apply across projects). */
   includeGlobalCards?: boolean;
+  /** Skip the memex source even if memex is available. Useful when the
+   *  caller wants only vibebook artifacts (e.g. to count what vibebook
+   *  itself has produced without the memex layer in the way). */
+  noMemex?: boolean;
 }
 
 export function buildRecallPayload(opts: RecallOptions = {}): RecallPayload {
@@ -152,10 +168,27 @@ export function buildRecallPayload(opts: RecallOptions = {}): RecallPayload {
     });
   }
 
+  // --- memex cards (optional, only when memex is on PATH) ---
+  // Pulled into the same RecallPayload so the in-session Claude sees ONE
+  // catalog, not two. Memex is the second-source-of-truth for atomic
+  // insights — it has its own better-fitted slug conventions, archive,
+  // organize loop, etc. We just borrow its catalog as a read.
+  let memexQueried = false;
+  if (!opts.noMemex) {
+    const memexEntries = loadMemexCatalog();
+    if (memexEntries !== null) {
+      memexQueried = true;
+      entries.push(...memexEntries);
+    }
+  }
+
   // Sort: cards first (most useful for "did I solve this before?"), then
-  // topics (subsystem context), then chronicles (full diary). Within each
-  // kind, newest first.
-  const kindOrder: Record<RecallEntry["kind"], number> = { card: 0, topic: 1, chronicle: 2 };
+  // memex-cards (also card-grain, but lower-priority because they may not
+  // be project-scoped), then topics (subsystem context), then chronicles
+  // (full diary). Within each kind, newest first.
+  const kindOrder: Record<RecallEntry["kind"], number> = {
+    card: 0, "memex-card": 1, topic: 2, chronicle: 3,
+  };
   entries.sort((a, b) => {
     if (a.kind !== b.kind) return kindOrder[a.kind] - kindOrder[b.kind];
     return a.updatedAt < b.updatedAt ? 1 : -1;
@@ -165,6 +198,10 @@ export function buildRecallPayload(opts: RecallOptions = {}): RecallPayload {
     chronicles: entries.filter((e) => e.kind === "chronicle").length,
     topics: entries.filter((e) => e.kind === "topic").length,
     cards: entries.filter((e) => e.kind === "card").length,
+    ...(memexQueried ? {
+      memexQueried: true,
+      memexCards: entries.filter((e) => e.kind === "memex-card").length,
+    } : {}),
     ...(cwdUnresolved ? { cwdUnresolved: true } : {}),
   };
 
@@ -248,3 +285,78 @@ export async function recallCmd(opts: RecallOptions): Promise<void> {
 }
 
 void projectSlugFromPath; // re-exposed for downstream callers if needed
+
+// ---------- memex source ----------
+
+/**
+ * Optional second-source catalog from the memex CLI.
+ * (memex = https://github.com/iamtouchskyer/memex — purpose-built atomic
+ * Zettelkasten cards with proactive Stop-hook reminders.)
+ *
+ * We deliberately don't depend on memex as an npm package: it has its own
+ * release cadence and ships a separate Claude Code plugin. We just shell
+ * out to its `read index` command if it happens to be on PATH. Returns:
+ *   - `null` when memex isn't available (timeout / not in PATH / errored)
+ *   - `[]` when memex is there but has zero cards
+ *   - the catalog otherwise
+ *
+ * This is intentionally fail-open — vibebook recall must keep working
+ * even when memex is broken.
+ */
+function loadMemexCatalog(): RecallEntry[] | null {
+  // Hard 2s timeout. If memex is slow we'd rather degrade than hang
+  // the recall skill while the user waits to start work.
+  const r = spawnSync("memex", ["read", "index"], {
+    encoding: "utf8",
+    timeout: 2000,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (r.error || r.status !== 0) return null;
+  return parseMemexIndex(r.stdout);
+}
+
+/**
+ * `memex read index` outputs a markdown index page that memex itself
+ * generates from `memex organize`. Format (lines we care about):
+ *
+ *   ## <category>
+ *   - [[<slug>]] — <one-line summary>
+ *   - [[<slug>|<title>]] — <one-line summary>
+ *
+ * We turn each `- [[...]]` line into a RecallEntry. memex doesn't give
+ * us per-card updatedAt cheaply, so all entries get today's date — fine
+ * for sort stability, not as informative as vibebook's own dates.
+ */
+export function parseMemexIndex(md: string): RecallEntry[] {
+  const out: RecallEntry[] = [];
+  const today = new Date().toISOString().slice(0, 10);
+  let category = "_memex";
+  for (const raw of md.split("\n")) {
+    const line = raw.trim();
+    const catMatch = line.match(/^##\s+(.+?)\s*$/);
+    if (catMatch) {
+      category = catMatch[1].trim();
+      continue;
+    }
+    const linkMatch = line.match(/^[-*]\s+\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\](?:\s*[—\-:]\s*(.+))?\s*$/);
+    if (!linkMatch) continue;
+    const slug = linkMatch[1].trim();
+    const altText = linkMatch[2]?.trim();
+    const summary = (linkMatch[3] ?? "").trim();
+    out.push({
+      kind: "memex-card",
+      project: "_memex",
+      title: altText || prettifySlug(slug),
+      summary,
+      // The LLM should run `memex read <slug>` (the skill description
+      // explains this) — we surface the slug as the path so the LLM has
+      // exactly what it needs to fetch the body.
+      path: `memex:${slug}`,
+      slug,
+      cardType: typeFromSlug(slug),
+      updatedAt: today,
+      tags: category && category !== "_memex" ? [category] : [],
+    });
+  }
+  return out;
+}
