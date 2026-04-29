@@ -9,8 +9,8 @@ const cards = listCards().filter((c) => c.project === "_global");
   <section class="container">
     <h1 style="font-size: 2.4rem; margin-bottom: var(--space-3);">Global cards</h1>
     <p class="meta" style="margin-bottom: var(--space-10);">
-      跨项目的 insight：工具 / 语言 / OS / 通用 best practice。
-      共 {cards.length} 张。
+      Cross-project insights: tools / languages / OS / generic best practices.
+      {cards.length} card{cards.length === 1 ? "" : "s"} total.
     </p>
     <ul class="entry-list">
       {cards.map((c) => (

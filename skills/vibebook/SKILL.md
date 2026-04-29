@@ -131,7 +131,7 @@ default, not the conservative choice.
 In particular, you must NOT SKIP:
 - "Continue from where you left off" — read the previous session and merge.
 - Sessions whose body has any of: a commit hash, a code block, a file path,
-  an error message, a decision marker ("决定 / let's go with / ok merged").
+  an error message, a decision marker ("decided / let's go with / ok merged").
 - Sessions where the user attached an image or a log and asked for analysis,
   even if your reply was short.
 - Sessions with `untitled` filename — read the body; usually they're real
@@ -142,12 +142,12 @@ Write the segmentation to `/tmp/vibebook-groups.json`:
 ```json
 [
   { "threadId": "fix-fullscreen-bookmark-bar",
-    "title": "修复 Edge 全屏书签条 bug",
+    "title": "Fix Edge fullscreen bookmark-bar bug",
     "sessionIds": ["abc12345", "def67890"],
     "skip": false },
   { "threadId": "ping-test",
     "sessionIds": ["xyz99999"],
-    "skip": true, "skipReason": "纯 ping 测试,无任何工作内容" }
+    "skip": true, "skipReason": "pure ping test, no real work content" }
 ]
 ```
 
@@ -173,10 +173,13 @@ For each non-skip thread, write a chronicle markdown using the strict
 4-section format. Refer to `references/chronicle-format.md` (same directory)
 for the schema; keep the rules:
 
-- 周报风,流水账;不要博客叙事
-- 保留 commit hash / 文件路径 / code block / command line verbatim
-- 不要 hallucinate: 没说成的写 "**未完成**" / "**未验证**" / "**阻塞:<原因>**"
-- 写 Why 和 Outcome 时,扫一下原 session 末尾几条消息
+- Weekly-report voice, factual log style — NOT blog narrative
+- Preserve commit hashes / file paths / code blocks / command lines verbatim
+- Do NOT hallucinate. If something didn't land, write
+  "**unfinished**" / "**unverified**" / "**blocked: <reason>**"
+- When writing Why and Outcome, scan the last few messages of the
+  source session — users often signal "ok merged" / "didn't work" /
+  "continuing tomorrow" right at the end
 
 **Build the JSON incrementally** — `Write` to `/tmp/vibebook-chronicles.json`
 one chronicle at a time, OR write each chronicle to
@@ -194,7 +197,7 @@ top level to compute paths; if `project` is missing publish refuses with
 ```json
 [
   { "threadId": "fix-fullscreen", "project": "edge-src",
-    "title": "修复 Edge 全屏书签条 bug",
+    "title": "Fix Edge fullscreen bookmark-bar bug",
     "sessionIds": ["abc12345"], "tags": ["fullscreen"],
     "body": "---\nproject: edge-src\n...\n---\n# ...\n## What...\n" }
 ]
@@ -251,38 +254,48 @@ not for completeness.
 
 **Hard rules:**
 
-1. **Atomic** — 一张卡一个事。能拆就拆。
-2. **Non-obvious** — "下次做类似事会失去这个 insight 吗?不会就别写。"
-   API 文档里有的东西不写。
-3. **Own words / Feynman** — 用自己的话复述。**不要粘 API 文档原文 / 错误信息原文**.
-4. **Fact Hygiene** — 写完每张卡自检三问 (一条不过关就重写):
-   - **WHO** — 项目/库/工具是用户自己的还是外部的?陌生人能分清吗?
-   - **WHAT-WHEN** — 数字 (耗时/token/commit hash) 是否绑定到具体场景和时间?
-   - **RELATIONSHIP** — "基于/参照" 这类词展开成具体关系
-     (fork from / benchmark against / inspired by / extends / contradicts)。
-5. **Dedup before write** — `Glob book/<project>/cards/*.md` 和
-   `Glob book/_global/cards/*.md`,看有没有相似的:
-   - 内容增量 → `action: "update"` 在已有卡片末尾追加一段。
-   - 内容重复 → 跳过。
-6. **Wikilink in context** — `[[link]]` 必须嵌在解释关系的句子里。
+1. **Atomic** — one card, one fact. If it can be split, split it.
+2. **Non-obvious** — "Next time I do similar work, would I lose this
+   insight?" If no, don't write the card. Don't card things already in
+   the API docs.
+3. **Own words / Feynman** — paraphrase in your own voice. **Do NOT
+   paste raw API docs or raw error messages**. If pasting is the only
+   way you can express it, you didn't actually understand it.
+4. **Fact Hygiene** — after writing, ask three questions; if any fail,
+   rewrite:
+   - **WHO** — projects/libraries/tools mentioned: user's own or
+     external? Can a stranger tell them apart?
+   - **WHAT-WHEN** — numbers (time / tokens / commit hashes): pinned to
+     a concrete scenario and time?
+   - **RELATIONSHIP** — words like "based on / refer to" should expand
+     into a concrete verb (fork from / benchmark against / inspired by /
+     extends / contradicts).
+5. **Dedup before writing** — `Glob book/<project>/cards/*.md` +
+   `Glob book/_global/cards/*.md`, check for similar entries:
+   - New material on top of an existing card → `action: "update"`,
+     append.
+   - Duplicate → skip.
+6. **Wikilink in context** — `[[link]]` must be embedded in a sentence
+   that explains the relationship.
    ❌ `Related: [[x]]`
-   ✅ `这与 [[gotcha-foo]] 的修法相反 — 那里用 widget 监听,这里用 NSWindow API`
+   ✅ `This contrasts with [[gotcha-foo]] — that one listens via the
+   widget; here we use the NSWindow API directly.`
 
 **Slug naming**:
 
-- `gotcha-<具体名>` — 一个坑 (UAF / order dependency / 配置陷阱)
-- `pattern-<具体名>` — 一个可复用的做法
-- `decision-<具体名>` — 一个架构决策 (含理由)
-- `howto-<具体名>` — 一个具体怎么做
-- `tool-<具体名>` — 工具用法/配置
+- `gotcha-<name>` — a trap (UAF / order dependency / configuration gotcha)
+- `pattern-<name>` — a reusable approach
+- `decision-<name>` — an architectural decision (with reasoning)
+- `howto-<name>` — a concrete how-to
+- `tool-<name>` — tool usage / config
 
 **Per-project vs `_global/`**:
 
-| 卡片关于... | 放哪 |
+| Card is about... | Goes in |
 |---|---|
-| 跟具体 codebase / 业务 / 公司项目绑定 | `book/<project>/cards/` |
-| 跟工具 / 语言 / OS / 通用 best-practice 绑定 | `book/_global/cards/` |
-| 二者都涉及 | per-project (主),`_global/` 留 wikilink 入口 |
+| A specific codebase / product / company project | `book/<project>/cards/` |
+| A tool / language / OS / generic best practice | `book/_global/cards/` |
+| Both | per-project (primary); leave a wikilink in `_global/` |
 
 Card schema in `references/card-format.md`. Write cards to
 `/tmp/vibebook-cards.json`.
@@ -384,8 +397,9 @@ verbatim from skills/vibebook/SKILL.md sections P1–P7:
      pure-error sessions get skipped; everything else gets a chronicle).
   3. Segment one-thread-per-session by default; merge only when it's the
      same continuous effort.
-  4. Write a 4-section chronicle for each non-skip thread (周报风, no blogger
-     narrative, preserve commit hashes / file paths / code blocks verbatim).
+  4. Write a 4-section chronicle for each non-skip thread (weekly-report
+     voice, no blogger narrative, preserve commit hashes / file paths /
+     code blocks verbatim).
   5. Update or insert topic pages (mid-grain subsystem level). Read existing
      topic pages and preserve historical facts when rewriting.
   6. Extract 0..N atomic cards per chronicle (Fact Hygiene check; dedup vs
@@ -453,5 +467,5 @@ This regenerates `book/index.md`, `book/_meta/timeline.md`, and
 - ✅ Be conservative with SKIP — write the chronicle if in any doubt.
 - ✅ Use Read / Glob / Grep to inspect existing book/ before writing cards.
 - ✅ Preserve exact code blocks, command lines, file paths, commit hashes.
-- ✅ Mark uncertainty: "未完成", "未验证", "阻塞".
+- ✅ Mark uncertainty: "unfinished", "unverified", "blocked".
 - ✅ Stop and ask if user said something contradicting your plan.

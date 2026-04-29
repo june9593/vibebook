@@ -15,31 +15,38 @@ relatedCards: [cards/<slug>.md, ...]
 
 # <title>
 
-## What — 做了什么
-- <按时间或任务粒度列点;尽量保留 commit hash / 文件路径 / 命令行>
+## What — what was done
+- <bullet by time or task granularity; preserve commit hashes / file paths / command lines>
 - ...
 
-## Why — 为什么要做
-- <立项动机 / bug 触发场景 / 上游决定 / 用户痛点>
+## Why — why it was needed
+- <triggering motivation / bug scenario / upstream decision / user pain point>
 
-## How — 怎么做的
-<可以多段;贴关键 code block / 命令行;讲清楚选了哪个方案、放弃了哪个>
+## How — how it was done
+<can span multiple paragraphs; paste the key code blocks / command lines;
+explain which approach was chosen and which was rejected>
 
 \`\`\`<lang>
 <verbatim code or shell here>
 \`\`\`
 
-## Outcome — 结果
-- <merged / 推 PR / 回退 / 阻塞 / 未验证>
-- <commit hash 或 PR 链接>
-- <next step 如果有>
+## Outcome — result
+- <merged / PR pushed / rolled back / blocked / unverified>
+- <commit hash or PR link>
+- <next step, if any>
 ```
 
 Rules:
 
-- 周报风,流水账;不要博客叙事
-- 不要 hallucinate: 没说成的写 "**未完成**" / "**未验证**" / "**阻塞:<原因>**"
-- 写 Why 和 Outcome 时,扫一下原 session 末尾几条消息 — user 经常说
-  "ok merged" / "didn't work" / "次日继续",这些是关键信号
-- 保留 commit hash / 文件路径 / code block / command line verbatim
-- Wikilinks: `[[chronicle/<threadId>]]`, `[[<cardSlug>]]`
+- Weekly-report voice, factual log style — NOT blog narrative.
+- Do NOT hallucinate. If something didn't land, write
+  "**unfinished**" / "**unverified**" / "**blocked: <reason>**".
+- When writing Why and Outcome, scan the last few messages of the
+  source session — users often drop key signals like "ok merged",
+  "didn't work", "continuing tomorrow" right at the end.
+- Preserve commit hashes / file paths / code blocks / command lines verbatim.
+- Use the same language as the source session for the body content
+  (Chinese sessions → Chinese chronicle; English sessions → English).
+  The frontmatter + section headings stay in this template's language
+  for consistency.
+- Wikilinks: `[[chronicle/<threadId>]]`, `[[<cardSlug>]]`.

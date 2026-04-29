@@ -13,8 +13,9 @@ const totalCards = projects.reduce((s, p) => s + p.cardCount, 0);
   <section class="hero container">
     <h1>Notes from the work bench.</h1>
     <p class="lede">
-      你的 AI coding session 被整理成 chronicle、topic、card 三种粒度的笔记。
-      没有营销文案，没有博客腔——只是一份诚实的工作记录。
+      Your AI coding sessions, organized into three grains of notes —
+      chronicles, topics, and cards. No marketing copy, no blog voice —
+      just an honest record of the work.
     </p>
     <p class="meta" style="margin-top: var(--space-6);">
       <span>{projects.length} projects</span>
@@ -28,7 +29,7 @@ const totalCards = projects.reduce((s, p) => s + p.cardCount, 0);
   </section>
 
   <section class="container" style="padding-top: var(--space-12);">
-    <h2 style="font-size: 1.6rem; margin-bottom: var(--space-6);">最近的 chronicle</h2>
+    <h2 style="font-size: 1.6rem; margin-bottom: var(--space-6);">Recent chronicles</h2>
     <ul class="entry-list">
       {recent.map((c) => (
         <li>
@@ -46,7 +47,7 @@ const totalCards = projects.reduce((s, p) => s + p.cardCount, 0);
   </section>
 
   <section class="container" style="padding-top: var(--space-16);">
-    <h2 style="font-size: 1.6rem; margin-bottom: var(--space-6);">所有项目</h2>
+    <h2 style="font-size: 1.6rem; margin-bottom: var(--space-6);">All projects</h2>
     <div class="project-grid">
       {projects.map((p) => (
         <a class="project-card" href={`${base}projects/${p.slug}/`}>

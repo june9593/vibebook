@@ -52,8 +52,8 @@ The output is a JSON payload:
     {
       "kind": "card",
       "project": "edge-src",
-      "title": "Frameless 浮窗外 NSWindow 圆角必须 = 内容圆角",
-      "summary": "Chromium views frameless NSWindow 圆角...DCHECK 直接挂...",
+      "title": "Frameless NSWindow corner radius must match the content radius",
+      "summary": "Chromium views frameless NSWindow rounded corners must equal the content radius — otherwise the DCHECK fires and you see blue triangle artifacts at the joins...",
       "path": "book/edge-src/cards/gotcha-rounded-corners-must-match.md",
       "slug": "gotcha-rounded-corners-must-match",
       "cardType": "gotcha",
