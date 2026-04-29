@@ -1,25 +1,44 @@
-# Belt-and-suspenders: package.json `files` is the primary allowlist
-# (only dist/, assets/, README.md, LICENSE go to npm). This file blocks
-# common offenders if `files` is ever loosened or removed.
+# Belt-and-suspenders: package.json `files` is the primary allowlist.
+# Anything below is what `files` must not accidentally include.
+
+# Editor / IDE
 .claude/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# CI / dev infra
 .github/
+
+# Internal docs / sprint planning (private)
 docs/
-tests/
 plans/
 tmp/
-*.tgz
-*.log
-.DS_Store
+
+# Project sources (we ship dist/ instead)
 src/
 bin/
+tests/
 tsconfig.json
 vitest.config.ts
+
+# Workspace / repo plumbing
 .gitignore
 .npmignore
 .memvc-local/
+
+# Logs / packed tarballs
+*.tgz
+*.log
+.DS_Store
 
 # Site template ships as source; never ship its installed deps or build output.
 site-template/node_modules/
 site-template/dist/
 site-template/.astro/
 site-template/package-lock.json
+
+# Secrets
+.env
+.env.*

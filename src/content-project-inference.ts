@@ -43,7 +43,7 @@ export interface InferenceResult {
 /**
  * Decode a Claude project-dir name back to its filesystem path prefix.
  *
- *   "-Users-yueliu-edge-memvc"  →  "/Users/yueliu/edge/memvc"
+ *   "-Users-me-edge-memvc"  →  "/Users/me/edge/memvc"
  *
  * Note this is one-way and lossy — Claude itself uses the same encoding so
  * actual hyphens in path components become indistinguishable from `/`.
@@ -82,9 +82,9 @@ export function listKnownProjectRoots(
  * Match an absolute path to a known project root, or fall back to
  * deriving a slug from the path's parent component.
  *
- *   "/Users/yueliu/edge/memvc/src/foo.ts"  →  "edge-memvc"  (matched)
- *   "/Users/yueliu/edge/random/file.ts"    →  "edge-random" (no match, slug from parent)
- *   "/etc/hosts"                           →  "etc-hosts"   (still slug; caller can ignore)
+ *   "/Users/me/edge/memvc/src/foo.ts"  →  "edge-memvc"  (matched)
+ *   "/Users/me/edge/random/file.ts"    →  "edge-random" (no match, slug from parent)
+ *   "/etc/hosts"                       →  "etc-hosts"   (still slug; caller can ignore)
  */
 export function pathToProjectSlug(
   absPath: string,

@@ -13,7 +13,7 @@ const session: NormalizedSession = {
   sessionId: "abc12345-cbf6-41f0-ab88-5cb425caba57",
   shortId: "abc12345",
   project: "edge-memvc",
-  projectRaw: "/Users/yueliu/edge/memvc",
+  projectRaw: "/Users/me/edge/memvc",
   startedAt: "2026-04-17T10:00:00Z",
   endedAt: "2026-04-17T10:30:00Z",
   nameSlug: "Fix-the-auth-bug",

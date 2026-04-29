@@ -36,9 +36,9 @@ describe("ClaudeCodeAdapter — pollution filter", () => {
 
   it("skips top-level project dirs that look like vibebook scratch", async () => {
     // Real-looking project dir
-    const realProj = join(claudeRoot, "-Users-yueliu-edge-memvc");
+    const realProj = join(claudeRoot, "-Users-me-edge-memvc");
     mkdirSync(realProj, { recursive: true });
-    writeFileSync(join(realProj, "session-1.jsonl"), '{"sessionId":"s1","cwd":"/Users/yueliu/edge/memvc"}\n');
+    writeFileSync(join(realProj, "session-1.jsonl"), '{"sessionId":"s1","cwd":"/Users/me/edge/memvc"}\n');
 
     // Polluted dirs — different shapes
     const polluted1 = join(claudeRoot, "-private-var-folders-zm-x-T-vibebook-claude-Abc");
@@ -69,7 +69,7 @@ describe("ClaudeCodeAdapter — pollution filter", () => {
       sourcePaths.push(ds.sourcePath);
     }
     // Real session yielded.
-    expect(sourcePaths.some((p) => p.includes("-Users-yueliu-edge-memvc"))).toBe(true);
+    expect(sourcePaths.some((p) => p.includes("-Users-me-edge-memvc"))).toBe(true);
     // Legit tmp-rooted developer work also yielded — we only filter vibebook's own scratch.
     expect(sourcePaths.some((p) => p.includes("-tmp-experiment"))).toBe(true);
     // No vibebook-claude scratch yielded — assertion is on discover() itself,
@@ -83,22 +83,22 @@ describe("ClaudeCodeAdapter — pollution filter", () => {
   });
 
   it("skips subagents/ subdirs at any depth", async () => {
-    const proj = join(claudeRoot, "-Users-yueliu-real-project");
+    const proj = join(claudeRoot, "-Users-me-real-project");
     mkdirSync(proj, { recursive: true });
     // A real top-level session.
-    writeFileSync(join(proj, "real.jsonl"), '{"sessionId":"real","cwd":"/Users/yueliu/real-project"}\n');
+    writeFileSync(join(proj, "real.jsonl"), '{"sessionId":"real","cwd":"/Users/me/real-project"}\n');
     // A subagents/ subdir nested inside an outer session's dir.
     const outerSession = join(proj, "outer-session-id");
     mkdirSync(join(outerSession, "subagents"), { recursive: true });
     writeFileSync(
       join(outerSession, "subagents", "agent-foo.jsonl"),
-      '{"sessionId":"agent-foo","cwd":"/Users/yueliu/real-project"}\n',
+      '{"sessionId":"agent-foo","cwd":"/Users/me/real-project"}\n',
     );
     // A nested subagents/ deeper still (defensive).
     mkdirSync(join(outerSession, "subagents", "nested-stuff"), { recursive: true });
     writeFileSync(
       join(outerSession, "subagents", "nested-stuff", "agent-bar.jsonl"),
-      '{"sessionId":"agent-bar","cwd":"/Users/yueliu/real-project"}\n',
+      '{"sessionId":"agent-bar","cwd":"/Users/me/real-project"}\n',
     );
 
     const adapter = new ClaudeCodeAdapter(claudeRoot);

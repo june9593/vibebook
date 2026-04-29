@@ -1,10 +1,33 @@
+# Build artifacts
 node_modules
 dist
+
+# Workspace / private notes
 .memvc-local
+docs/
+tmp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.claude/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Secrets — defense in depth
+.env
+.env.*
+!.env.example
+
+# Logs / packed tarballs
 *.log
 *.tgz
-.DS_Store
-.claude/
-tmp/
+
+# Site-template caches
 site-template/.astro
 site-template/package-lock.json

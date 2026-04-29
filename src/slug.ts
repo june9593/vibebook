@@ -18,7 +18,7 @@ export function projectSlugFromPath(cwdOrPath: string): string {
   const parts = cwdOrPath.split("/").filter(Boolean);
   if (parts.length === 0) return "root";
   if (parts.length === 1) return parts[0];
-  // Prefer "parent-basename" so `/Users/yueliu/edge/memvc` → "edge-memvc"
+  // Prefer "parent-basename" so `/Users/me/edge/memvc` → "edge-memvc"
   const last = parts[parts.length - 1];
   const parent = parts[parts.length - 2];
   if (parent === "Users" || parent === "home") return "home";

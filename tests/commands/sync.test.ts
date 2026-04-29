@@ -68,7 +68,7 @@ describe("runSync — extract + raw push only (v0.2: no LLM)", () => {
   beforeEach(() => {
     repo = mkdtempSync(join(tmpdir(), "memvc-repo-"));
     claudeRoot = mkdtempSync(join(tmpdir(), "vibebook-test-claude-fixture-"));
-    const proj = join(claudeRoot, "-Users-yueliu-edge-memvc");
+    const proj = join(claudeRoot, "-Users-me-edge-memvc");
     mkdirSync(proj, { recursive: true });
     cpSync(join(fixturesDir, "claude-session.jsonl"), join(proj, "abc12345.jsonl"));
     vscodeRoot = mkdtempSync(join(tmpdir(), "memvc-vscode-"));
