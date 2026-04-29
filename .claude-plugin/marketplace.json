@@ -8,9 +8,10 @@
   "plugins": [
     {
       "name": "vibebook",
-      "description": "Run /vibebook in Claude Code to digest your synced sessions into chronicle / topics / cards.",
-      "version": "0.2.0",
-      "source": "./"
+      "description": "Run /vibebook in Claude Code to digest your synced sessions into chronicle / topics / cards. Run /vibebook-recall before starting work to surface past notes that bear on the current task.",
+      "version": "0.3.1",
+      "source": "./",
+      "category": "productivity"
     }
   ]
 }

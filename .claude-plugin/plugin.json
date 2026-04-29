@@ -1,7 +1,7 @@
 {
   "name": "vibebook",
   "description": "Sync Claude Code + VS Code Copilot Chat sessions across machines via a private git repo, then digest them into a per-project chronicle / topics / cards book using the in-session Claude (no extra LLM call).",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "license": "MIT",
   "keywords": [
     "claude-code",

@@ -234,7 +234,16 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
   }
 
   // Remote mode: spell out the next steps.
-  console.log(chalk.cyan("\nNext steps:"));
+  // The plugin install MUST come first — without it, /vibebook +
+  // /vibebook-recall don't show up in Claude Code, and steps 2a/2b
+  // wouldn't work even though everything else is set up.
+  console.log(chalk.cyan("\n=== Install the Claude Code plugin ==="));
+  console.log(chalk.gray("  The vibebook CLI alone doesn't make /vibebook or /vibebook-recall appear"));
+  console.log(chalk.gray("  in Claude Code. Run these in the Claude Code REPL once per machine:"));
+  console.log(chalk.cyan("    /plugin marketplace add june9593/vibebook"));
+  console.log(chalk.cyan("    /plugin install vibebook@vibebook"));
+
+  console.log(chalk.cyan("\n=== Daily usage ==="));
   console.log(chalk.cyan("  1. vibebook sync"));
   console.log(chalk.gray(`       → in any project, extract Claude Code + Copilot sessions and push them to ${a.localPath}. No LLM call.`));
   console.log(chalk.cyan("  2a. (per-project) cd <your-project> && claude → /vibebook"));

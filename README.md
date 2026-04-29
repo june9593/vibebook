@@ -32,15 +32,25 @@ insights (git tricks, OS quirks, tool configs).
 
 ## Install
 
+vibebook ships in two pieces — both required:
+
+**1. The CLI** (handles sync, prepare, publish, recall, site, …):
+
 ```sh
 npm install -g vibebook
 ```
 
-The npm package ships:
-- `vibebook` CLI (sync, prepare, publish, recall, serve, build-site, …)
-- Claude Code plugin (skills + slash commands + Stop hook) under
-  `~/.claude/skills/vibebook*` and `~/.claude/commands/vibebook*.md`
-  (you symlink or copy these from `node_modules/vibebook/`)
+**2. The Claude Code plugin** (registers `/vibebook` and `/vibebook-recall`
+skills + slash commands + Stop hook). Run these inside Claude Code's REPL,
+once per machine:
+
+```
+/plugin marketplace add june9593/vibebook
+/plugin install vibebook@vibebook
+```
+
+Without step 2 the slash commands won't appear in Claude Code — `vibebook init`
+prints a reminder of these two lines at the end of the wizard.
 
 ## Setup
 
