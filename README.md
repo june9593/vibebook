@@ -148,6 +148,30 @@ merges device branches into `main`:
 
 No GitHub secrets needed — uses the default `GITHUB_TOKEN`.
 
+### Why no CI digest?
+
+vibebook used to support summarizing sessions inside GitHub Actions
+(`vibebook digest` running `claude -p` in the workflow). We **removed
+that path** in v0.2 because of two compounding limits:
+
+- GitHub-hosted runners have an 8 KB / 4 KB token cap on the free tier
+  for hosted models, far below the 50–200 KB a typical session needs.
+- Self-hosting a runner with a real LLM key just to write three files
+  per push is the wrong amount of effort for the wrong audience.
+
+The CI lane that survived is **mechanical** only: `vibebook workflow
+init` installs a cross-device merge job that deterministically combines
+each machine's `book/` into `main` — no LLM in CI, no API keys, no rate
+limits.
+
+If you want summarization, run `vibebook sync` then `/vibebook` in your
+local Claude Code session — that's where context, interrupt-ability, and
+quality all live. If you really want to summarize in CI, write your own
+`.github/workflows/*.yml` that calls `vibebook prepare`, pipes the
+output to your LLM of choice, then calls `vibebook publish` with the
+result. We're happy to keep the I/O surface stable for that use case;
+we just don't ship the LLM glue ourselves.
+
 ## CLI reference
 
 | Command | Purpose |

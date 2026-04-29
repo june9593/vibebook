@@ -1,8 +1,30 @@
 import { Command } from "commander";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
+/** Read version straight from the bundled package.json so we can never
+ *  ship a CLI whose --version lies. Two layouts to handle:
+ *    dev: src/cli.ts → ../package.json
+ *    built: dist/src/cli.js → ../../package.json */
+function readPackageVersion(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  for (const rel of ["../package.json", "../../package.json", "../../../package.json"]) {
+    try {
+      return JSON.parse(readFileSync(resolve(here, rel), "utf8")).version as string;
+    } catch { /* try next */ }
+  }
+  return "0.0.0-unknown";
+}
 
 export async function run(argv: string[]) {
   const program = new Command();
-  program.name("vibebook").description("Vibe coding memory book").version("0.2.0");
+  program
+    .name("vibebook")
+    .description("Vibe coding memory book")
+    // Standard CLI convention: -v + --version. Commander defaults to -V
+    // (uppercase) which most users don't reach for; we override to lowercase.
+    .version(readPackageVersion(), "-v, --version", "print the installed vibebook version");
   program
     .command("init [repoUrl]")
     .description("Initialize vibebook. Run with no arguments for the interactive wizard, or pass a repoUrl + flags for non-interactive setup.")
