@@ -234,14 +234,31 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
   }
 
   // Remote mode: spell out the next steps.
-  // The plugin install MUST come first — without it, /vibebook +
-  // /vibebook-recall don't show up in Claude Code, and steps 2a/2b
-  // wouldn't work even though everything else is set up.
+  // Plugin install MUST come first — without it /vibebook + /vibebook-recall
+  // don't show up in Claude Code. We try to install automatically (mirrors
+  // what /plugin marketplace add + /plugin install do). If that fails, we
+  // fall back to printing the manual REPL commands.
   console.log(chalk.cyan("\n=== Install the Claude Code plugin ==="));
-  console.log(chalk.gray("  The vibebook CLI alone doesn't make /vibebook or /vibebook-recall appear"));
-  console.log(chalk.gray("  in Claude Code. Run these in the Claude Code REPL once per machine:"));
-  console.log(chalk.cyan("    /plugin marketplace add june9593/vibebook"));
-  console.log(chalk.cyan("    /plugin install vibebook@vibebook"));
+  try {
+    const { installPluginFromGitHub } = await import("./plugin-install.js");
+    const r = await installPluginFromGitHub();
+    if (r.ok) {
+      console.log(chalk.green(`  ✓ ${r.message}`));
+      if (r.changed) {
+        console.log(chalk.gray("    Restart Claude Code (or open a new session) so it picks up the new plugin."));
+      }
+    } else {
+      console.log(chalk.yellow(`  ! auto-install skipped: ${r.message}`));
+      console.log(chalk.gray("    Fall back to running these in the Claude Code REPL once per machine:"));
+      console.log(chalk.cyan("      /plugin marketplace add june9593/vibebook"));
+      console.log(chalk.cyan("      /plugin install vibebook@vibebook"));
+    }
+  } catch (e) {
+    console.log(chalk.yellow(`  ! auto-install errored: ${(e as Error).message}`));
+    console.log(chalk.gray("    Run these in the Claude Code REPL:"));
+    console.log(chalk.cyan("      /plugin marketplace add june9593/vibebook"));
+    console.log(chalk.cyan("      /plugin install vibebook@vibebook"));
+  }
 
   console.log(chalk.cyan("\n=== Daily usage ==="));
   console.log(chalk.cyan("  1. vibebook sync"));

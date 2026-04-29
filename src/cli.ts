@@ -133,6 +133,17 @@ export async function run(argv: string[]) {
       console.log(JSON.stringify(r, null, 2));
     });
   program
+    .command("plugin-install")
+    .description("Install vibebook as a Claude Code plugin (~/.claude/plugins/marketplaces/vibebook + cache). Equivalent to running `/plugin marketplace add june9593/vibebook` + `/plugin install vibebook@vibebook` from inside Claude Code, but works from a shell. Idempotent: re-runs as a no-op when already at the latest commit.")
+    .option("--repo <owner/name>", "GitHub repo to install from (default: june9593/vibebook)")
+    .action(async (opts: { repo?: string }) => {
+      const { installPluginFromGitHub } = await import("./commands/plugin-install.js");
+      const r = await installPluginFromGitHub({ repo: opts.repo });
+      if (r.ok) console.log(`✓ ${r.message}`);
+      else console.error(`✗ ${r.message}`);
+      process.exit(r.ok ? 0 : 1);
+    });
+  program
     .command("workflow")
     .description("Manage the GitHub Action that aggregates device branches into main")
     .addCommand(
