@@ -393,6 +393,43 @@ with `pendingSessions > 0`. Let user exclude any.
 
 ### Step G2 — Fan out subagents (one per project)
 
+#### Permission warm-up — DO THIS BEFORE THE FIRST FAN-OUT, ONCE PER MACHINE
+
+Subagents **cannot interactively prompt the user for Bash / Write
+permission** — that ability is exclusive to the main session. If your
+fan-out fires before the user has approved the broad permission patterns
+that subagents need, every subagent will silently get denied and stall.
+
+To avoid that, run these warm-up commands **inline from the main session
+first** (each will trigger a `[Always allow ?]` prompt that the user can
+accept once). After the user accepts, every subagent inherits those
+permissions for the rest of the session:
+
+```bash
+# Trigger Bash(mkdir -p /tmp/vibebook/*) approval
+mkdir -p /tmp/vibebook/_warmup && rmdir /tmp/vibebook/_warmup
+
+# Trigger Bash(vibebook prepare *) and Bash(vibebook publish *) approval
+# by running a no-op variant of each (just --help is enough)
+vibebook prepare --help >/dev/null
+vibebook publish --help >/dev/null
+
+# If the user's settings.local.json doesn't already allow shell redirects
+# inside /tmp/vibebook/, also trigger that:
+echo "warmup" > /tmp/vibebook/_warmup.json && rm /tmp/vibebook/_warmup.json
+```
+
+When the user sees the `[Always allow]` prompt for any of these, ask
+them to approve the BROAD pattern (e.g. `Bash(vibebook prepare *)`,
+not the literal `vibebook prepare --help`). One acceptance covers
+every project subagent.
+
+**Skip the warm-up only if** you've already done it earlier in the
+same session, or the user has pre-approved these patterns in
+`~/.claude/settings.json`.
+
+#### The actual fan-out
+
 For each project to process, dispatch a `general-purpose` Agent in parallel
 (via multiple Agent tool calls in one message). Each agent's prompt:
 
@@ -420,13 +457,19 @@ collide with sibling subagents.
 
 Return a one-line summary of counts. Do NOT regen the catalog — the
 orchestrating session will do that once after all subagents finish.
+
+If you hit a `permission denied` on a Bash or Write tool: STOP, return
+"permission denied: <pattern>" as your summary, and let the orchestrator
+re-run the warm-up. Do NOT retry the same command — you can't escalate.
 ```
 
 **Don't run them all at once if there are 10+ projects** — Claude Code has
 limits on concurrent subagents. Cap at 4 in flight; queue the rest.
 
-If a subagent fails, log it but continue — the user can re-run
-`/vibebook` against that one project later in project-mode.
+If a subagent fails (especially with `permission denied`), log it but
+continue with the next batch — the user can re-run `/vibebook` against
+that project later in project-mode after the warm-up has approved the
+needed patterns.
 
 ### Step G3 — Catalog regen
 

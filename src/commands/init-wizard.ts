@@ -267,6 +267,10 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
   console.log(chalk.gray("       → digest just this project's sessions into book/<project>/{chronicle,topics,cards}/."));
   console.log(chalk.cyan(`  2b. (full sweep) cd ${a.localPath} && claude → /vibebook`));
   console.log(chalk.gray("       → fan-out one subagent per project; skips projects already digested in 2a; regen catalog."));
+  console.log(chalk.gray("       NOTE: the first global-mode run will prompt you to approve a few Bash patterns"));
+  console.log(chalk.gray("       (vibebook prepare *, vibebook publish *, mkdir -p /tmp/vibebook/*). Accept the"));
+  console.log(chalk.gray("       BROAD pattern (with the *) — subagents inherit your approval and won't be able"));
+  console.log(chalk.gray("       to ask for it themselves."));
   if (a.enableAggregateCI) {
     console.log(chalk.cyan("  3. vibebook workflow init"));
     console.log(chalk.gray("       → install the CI workflow that merges every device branch's book/ into main."));
