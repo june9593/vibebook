@@ -1,34 +1,40 @@
 # vibebook — Vibe Coding Memory Book
 
+**[Project page](https://june9593.github.io/vibebook/) · [npm](https://www.npmjs.com/package/vibebook) · [GitHub](https://github.com/june9593/vibebook)**
+
 > Sync your AI coding sessions across machines. Digest them into a
-> per-project book of **chronicles**, **topics**, and **cards**. Read the
-> book back through a Claude Code skill so future-you doesn't re-discover
-> what past-you already wrote down.
+> per-project book of **chronicles** and **topics**. Read the book back
+> through a Claude Code skill so future-you (and future AI agents)
+> don't re-discover what past-you already wrote down.
 
 vibebook captures every Claude Code + VS Code Copilot Chat session, syncs
 them to a private Git repo, and gives you two Claude Code slash commands:
 
 - **`/vibebook`** — write the book. In-session Claude reads new sessions and
-  produces three artifact types per project (chronicles / topics / cards).
+  produces two artifact types per project (chronicles + topics).
 - **`/vibebook-recall`** — read the book. When you start work in any repo,
-  Claude pulls the matching project's catalog (~30 KB of titles + summaries),
-  triages what's relevant, and reads the entries that bear on the task.
+  Claude does **three-stage progressive recall**: a project's topic list
+  first (~5 KB), then drill into the relevant topic for chronicle frontmatter,
+  then `Read` the full body of the chronicles that match.
 
 The CLI never spawns an LLM itself. All writing + recall happens in your
 own Claude Code session, where the model has full context and you can
 interrupt at any time.
 
-## Why three artifact types
+For atomic Zettelkasten cards, vibebook **delegates to
+[memex](https://github.com/iamtouchskyer/memex)** when it's installed.
+See "Memex hand-off" below.
+
+## Two artifact types
 
 | | grain | example |
 |---|---|---|
-| **chronicle** | one thread = one piece of work | "Fix Edge fullscreen bookmark bar bug" — 4 sections (What/Why/How/Outcome), preserves commit hashes & code blocks verbatim |
-| **topic** | one subsystem | "Edge macOS Menu Bar Copilot" — full-rewritten as new threads land, preserves historical fact |
-| **card** | one atomic insight | `gotcha-rounded-corners-must-match` — "next time I do similar work, will I lose this?" If no, don't write it |
+| **chronicle** | one thread = one piece of work | "Fix Edge fullscreen bookmark bar bug" — AI-first frontmatter (files_touched / commits / decisions / blockers / status) + a short 4-section body |
+| **topic** | one subsystem | "Edge macOS Menu Bar Copilot" — full-rewritten as new threads land, preserves historical fact, indexes contributing chronicles |
 
 Per-project isolation is **enforced**: `edge-src` content lives only in
-`book/edge-src/`. `_global/cards/` is the one exception, for cross-project
-insights (git tricks, OS quirks, tool configs).
+`book/edge-src/`. (Cross-project atomic insights belong in memex, not
+vibebook — see Memex hand-off.)
 
 ## Install
 
@@ -111,8 +117,8 @@ ciphertext.
 
 `/vibebook` auto-detects mode by cwd:
 - **Project mode** (cwd ≠ session-repo): digests just the project matching
-  cwd. Writes into `book/<project>/{chronicle,topics,cards}/` without
-  touching anything else.
+  cwd. Writes into `book/<project>/{chronicle,topics}/` without touching
+  anything else.
 - **Global mode** (cwd = session-repo): fans out one subagent per project
   with pending sessions, then regenerates the global catalog.
 
@@ -125,8 +131,8 @@ vibebook build-site    # static dist → ~/.vibebook/session-repo/site-dist/
 
 The site is styled after the Anthropic palette in `DESIGN.md` — warm
 parchment, serif headlines, no chrome. Pages: home (recent chronicles +
-project list), per-project landing, chronicle / topic / card readers, and
-a `_global` cards index.
+project list), per-project landing, chronicle reader, topic reader.
+(No card pages — cards live in memex; see Memex hand-off.)
 
 To publish to GitHub Pages on every push to `main`:
 
@@ -134,6 +140,34 @@ To publish to GitHub Pages on every push to `main`:
 vibebook workflow pages-init    # writes .github/workflows/vibebook-pages.yml
 # Then in GitHub: Settings → Pages → Source: GitHub Actions
 ```
+
+## Memex hand-off
+
+vibebook covers chronicle + topic; for atomic Zettelkasten-style cards
+(one insight per card, with backlinks, organize, orphan detection), it
+**delegates to [memex](https://github.com/iamtouchskyer/memex)**.
+
+When you install memex:
+
+```sh
+npm install -g @touchskyer/memex
+# In Claude Code REPL:
+/plugin marketplace add iamtouchskyer/memex
+/plugin install memex@memex
+```
+
+then:
+
+- `/vibebook` asks once at the start of every run: "after I finish, also
+  kick off /memex-retro?" — if you say yes, vibebook chains into the
+  memex skill at the end of project mode (P8) or global mode (G4).
+- `/vibebook-recall` folds memex's catalog (`memex read index`) into its
+  stage-1 result, so an in-session Claude sees both layers in one
+  triage pass. Memex card entries appear with `path: "memex:<slug>"`;
+  the agent calls `memex read <slug>` to fetch the body.
+
+memex isn't required. vibebook works fine without it; you just won't
+have an atomic-card layer.
 
 ## Cross-device aggregation (optional)
 
@@ -151,10 +185,12 @@ merges device branches into `main`:
 - **chronicles** deduped by `threadId`; latest `updatedAt` wins
 - **topics** preserved per-device as `<slug>.<device>.md` (LLM rewrites
   diverge in voice; mechanical merge would garble both)
-- **cards** unioned by `(project, slug)`; collisions resolve to latest
-  `updatedAt`. `_global/cards/` unioned unconditionally
 - **catalog** — `book/index.md`, `book/_meta/timeline.md`, per-project
   `index.md` regenerated
+
+(Legacy `cards/` directories from pre-0.4 vibebook runs are unioned by
+`(project, slug)` for backward compat, but new vibebook runs no longer
+generate cards — that workflow is now memex's.)
 
 No GitHub secrets needed — uses the default `GITHUB_TOKEN`.
 
@@ -189,9 +225,9 @@ we just don't ship the LLM glue ourselves.
 | `vibebook init [repoUrl]` | Interactive wizard or flag-mode setup |
 | `vibebook sync` | Extract Claude/Copilot sessions; commit + push to device branch |
 | `vibebook prepare [--cwd \| --project]` | Emit JSON: which sessions need digesting (used by `/vibebook`) |
-| `vibebook publish --chronicles … --topics … --cards … [--no-catalog]` | Write artifacts + resolve `[[wikilinks]]` + commit + push |
+| `vibebook publish --chronicles … --topics … [--no-catalog]` | Write artifacts + resolve `[[wikilinks]]` + commit + push. (`--cards` accepted for back-compat with vibebook ≤ 0.3 skill versions; deprecated.) |
 | `vibebook list-projects` | Per-project session + artifact counts (used by global-mode `/vibebook`) |
-| `vibebook recall [--cwd \| --project \| --all]` | Lightweight catalog of book artifacts (used by `/vibebook-recall`) |
+| `vibebook recall [--cwd \| --project] [--topic <slug>] [--all] [--no-memex]` | Three-stage catalog (used by `/vibebook-recall`). Default: project's topic list + 1-line summaries. `--topic <slug>`: chronicles for that topic with frontmatter. |
 | `vibebook catalog-regen` | Regenerate `book/index.md` + `_meta/timeline.md` + per-project indexes |
 | `vibebook serve` | Local dev server for the site |
 | `vibebook build-site [--base \| --site-url]` | Build static site to `<repoPath>/site-dist/` |
@@ -209,19 +245,22 @@ we just don't ship the LLM glue ourselves.
   raw_sessions/<tool>/<project>/<YYYY-MM-DD>/<slug>__<shortId>.{raw.json,md}
   .vibebook/
     index.json              # raw-session catalog (per-device)
-    index.book.json         # book index v2: chronicles, topics, cards
+    index.book.json         # book index v2: chronicles + topics
     repo-salt.json          # crypto material (only when --encrypt)
   book/
     <project>/
       chronicle/<YYYY-MM-DD>__<threadId>__<short>.md
       topics/<slug>.md      # or <slug>.<device>.md after CI merge
-      cards/<slug>.md
       index.md
-    _global/cards/<slug>.md # cross-project insights
     _meta/timeline.md
     index.md
   site-dist/                # `vibebook build-site` output (gitignored or pushed for Pages)
 ```
+
+(Pre-0.4 repos may also have `book/<project>/cards/` and
+`book/_global/cards/` from the time vibebook still wrote cards. They're
+read-only now; new chronicles + topics keep getting added but no new
+cards are created. Atomic cards have moved to memex.)
 
 ## Encryption
 

@@ -39,6 +39,9 @@ site-template/dist/
 site-template/.astro/
 site-template/package-lock.json
 
+# Marketing-site is for the project landing page only; never goes to npm.
+marketing-site/
+
 # Secrets
 .env
 .env.*

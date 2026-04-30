@@ -1,10 +1,11 @@
-# Chronicle format (AI-first frontmatter, short body)
+# Chronicle format (AI-first frontmatter, agent-reuse body)
 
-vibebook chronicles are read by AI agents far more often than by humans.
-The frontmatter is the index — it MUST contain everything an agent
-needs to decide "is this chronicle relevant to my task?" without
-reading the body. The body is the receipt — short prose that backs
-up the frontmatter facts.
+vibebook chronicles are read by AI agents. The frontmatter is the
+**index** — everything an agent needs to triage "is this relevant?"
+without reading the body. The body is **structured experience an agent
+can directly reuse**: what worked, what didn't, what's still open.
+
+This is NOT a weekly report. Drop the human-narrative voice.
 
 ```markdown
 ---
@@ -23,9 +24,9 @@ files_touched:                         # absolute repo paths the work changed
 commits:                               # git SHAs that landed
   - 7bc9ef48b654
   - abcd1234ef56
-decisions:                             # 1-line architectural calls
-  - Use Glic widget framework over CopilotBubbleView for floating window
-  - Move init from startup to idle task (perf)
+decisions:                             # architectural calls + the rejected alternative
+  - Used Glic widget framework over CopilotBubbleView (CopilotBubbleView's lifecycle didn't fit floating UI)
+  - Moved init from startup to idle task (saved ~80ms perceived launch)
 blockers:                              # what's still in the way
   - macOS 26 NSVisualEffectMaterialGlass requires private SDK fork
 next_steps:                            # what would the next session do
@@ -36,43 +37,82 @@ status: shipped | in-progress | blocked | abandoned
 
 # <title>
 
-## What — what was done
-1-3 sentences. NOT 1-3 paragraphs. The bullet list of work is in
-`files_touched` + `commits`; here you give the *narrative* glue.
+## Context
+1-2 sentences. The triggering scenario. Just enough that an agent
+landing here cold knows what kind of problem this chronicle is about.
 
-## Why — why it was needed
-1-3 sentences. Trigger / motivation. The bug ticket or PRD reference
-goes in tags or wikilinks.
+## What worked
+The path we ended up shipping. Each bullet 1-2 sentences, written so an
+agent can directly reuse the approach.
 
-## How — how it was done
-2-5 sentences. Cite the key code path. Paste at most ONE small code
-block (≤10 lines) when verbatim form genuinely matters (DCHECK message,
-critical regex, magic constant). Otherwise reference by file path.
+- Use `[NSStatusBar systemStatusBar]` + `sendActionOn:NSEventMaskLeftMouseUp|RightMouseUp`
+  to dispatch left/right click — runtime checks `NSApp.currentEvent.type`.
+  Commit `7bc9ef48`.
+- Set widget level to `NSPopUpMenuWindowLevel` and collection behavior
+  to `CanJoinAllSpaces|Transient|IgnoresCycle` so it floats above
+  every space.
 
-## Outcome
-1-2 sentences. The result — what shipped, what blocked.
-`status` field already encodes the bottom line; this just adds color.
+The voice here is "if you want this same outcome, do this" — NOT "we
+then did X and it was interesting".
+
+## Dead ends
+Approaches we tried that didn't work, and **why**, so the next agent
+doesn't reproduce them.
+
+- Tried `CopilotBubbleView` for the floating widget first. Failed
+  because the widget's lifecycle is owned by `AppController` (not
+  `Browser`), and `BubbleView` assumes a `Browser*` is alive for
+  positioning. → Switched to Glic widget framework.
+- Tried CSS `scaling()` to fit the NTP into the 376×600 widget.
+  Failed because the bubble's WebContents is not transformable
+  inside a frameless NSWindow without a host view shim. → Wrote
+  responsive CSS in the NTP frontend itself.
+
+If a section is empty, write `(none)` — don't omit. Empty section
+signals "I considered, none came up" vs missing section signals "I
+forgot to think about this".
+
+## Open questions
+What's still unresolved. Not a TODO list (those go in `next_steps`
+frontmatter); these are *uncertainties* a future agent should be
+aware of before extending the work.
+
+- Do we need to handle `NSStatusItem` re-creation when the user logs
+  out and back in? Not tested in this session.
+- The Glic widget framework is upstream Chromium; if upstream removes
+  it, we'd need a fallback. No mitigation path identified.
 ```
 
-Rules:
+## Rules
 
-- **Frontmatter is non-negotiable**. files_touched / commits / decisions /
-  blockers / next_steps / status are how AI agents triage. Missing fields
-  mean the chronicle is invisible to recall queries that filter on those.
-- **Body keeps short**. If you find yourself writing a 4th paragraph in
-  a section, the content probably belongs in a topic page (subsystem
-  level) or in a memex card (atomic insight) — NOT in the chronicle.
-- **NO blogger narrative**. No "let me walk you through", no
-  "interestingly enough", no recap of what's already in the frontmatter.
-- **No hallucination**. If something didn't land, write
-  `status: blocked` and put the reason in `blockers`. Don't write Outcome
-  sentences that overstate.
-- **Verbatim preservation policy applies to file paths and commit
-  hashes** — paste them as the source session has them. Code snippets
-  inside `## How` should match the source byte-for-byte where they
-  appear; do not "tidy up" syntax.
-- Use the same language as the source session for the body content
-  (Chinese sessions → Chinese chronicle; English sessions → English).
-  The frontmatter field NAMES stay in English for consistency.
+- **Frontmatter is non-negotiable.** files_touched / commits /
+  decisions / blockers / next_steps / status are how AI agents triage.
+  Missing fields = invisible to recall queries.
+- **Body is for the things frontmatter can't carry.** Frontmatter says
+  "we made decision X"; body says "we tried Y first and Y didn't work
+  because Z". If everything you'd write in the body is already in
+  frontmatter, the body can be just a 1-line Context section.
+- **Each body bullet is "agent-reusable."** "We did X" is bad voice.
+  "Use X to achieve Y; commit Z" is the right voice. Imagine the
+  reader is another AI agent on a similar task next month.
+- **Dead ends matter as much as What worked.** The failed-approach
+  bullets often save more agent-time than the success bullets,
+  because they prevent rediscovery. Don't skip them.
+- **Open questions ≠ next_steps.** next_steps are concrete TODO items
+  the work was queued behind ("land PR #15397229"). Open questions
+  are uncertainties any future agent should know about.
+- **Preserve commit hashes / file paths / DCHECK strings / regexes
+  verbatim.** Paste at most ONE small code block per section when the
+  literal form genuinely matters. Otherwise reference by file path.
+- **Use the same language as the source session for body content**
+  (Chinese sessions → Chinese body; English → English). Section
+  HEADINGS stay in English for cross-session consistency.
+- **Never write "let me walk you through" / "interestingly enough" /
+  "we then" — that's blogger voice.** Agent-reuse voice is direct,
+  imperative, no narrator.
+- **Don't hallucinate.** `status: blocked` + a `blockers` entry beats
+  an overstated "Outcome" line. If something didn't land, the
+  `status` field already says so.
 - Wikilinks: `[[chronicle/<threadId>]]` (vibebook) or
-  `[[memex:<cardSlug>]]` (memex card, left as text — readers know).
+  `[[memex:<cardSlug>]]` (memex card, left as text — readers know to
+  `memex read <slug>`).

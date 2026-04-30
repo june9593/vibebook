@@ -185,7 +185,7 @@ Below 5 threads, do it inline.
 threads — eats your context window and produces lower-quality writing
 because you start cargo-culting your own previous chronicles.
 
-### Step P4 — Write chronicles (AI-first format)
+### Step P4 — Write chronicles (AI-first format, agent-reuse body)
 
 For each non-skip thread, write a chronicle markdown using the AI-first
 format spec'd in `references/chronicle-format.md` (same directory).
@@ -195,21 +195,30 @@ Critical rules:
   blockers / next_steps / status from the source session. AI agents
   triage chronicles by reading frontmatter ONLY — missing fields mean
   invisible to recall queries.
-- **Body keeps short.** 4 sections (What/Why/How/Outcome), each 1-3
-  SENTENCES not 1-3 paragraphs. The bullet list of work belongs in
-  files_touched + commits, not in the prose.
+- **Body is structured agent-reuse experience, not a weekly report.**
+  Four sections — `## Context`, `## What worked`, `## Dead ends`,
+  `## Open questions`. NOT What/Why/How/Outcome (that was the human-
+  reading template; we deprecated it because agents have to re-parse
+  it back into structured form every time).
+- **Voice = imperative agent-reuse.** "Use X to achieve Y; commit Z" —
+  NOT "we then did X and it was interesting". Imagine the reader is
+  another AI agent on a similar task next month.
+- **Dead ends matter as much as What worked.** Failed approaches save
+  more agent-time than successes by preventing rediscovery. Don't
+  skip the Dead ends section. If genuinely none, write `(none)` —
+  empty section signals "considered, none came up", missing section
+  signals "I forgot to think about it".
 - **Atomic insights → memex.** If the chronicle inspires a "next time
-  remember X" insight, that's a memex card not a chronicle paragraph.
+  remember X" insight, that's a memex card not a chronicle bullet.
   Skip atomic-insight prose here; the memex hand-off (Step P6) catches it.
-- Weekly-report voice, factual log — NOT blog narrative.
 - Preserve commit hashes / file paths / code blocks / command lines
-  verbatim. Paste at most ONE small code block per `## How` section.
+  verbatim. Paste at most ONE small code block per section when the
+  literal form genuinely matters (DCHECK message, magic constant).
 - Do NOT hallucinate. Use `status: blocked` + a `blockers` entry instead
-  of overstating the Outcome. If something didn't land, the
-  `status` field says so directly.
-- When writing Why and Outcome, scan the last few messages of the
-  source session — users often signal "ok merged" / "didn't work" /
-  "continuing tomorrow" right at the end.
+  of overstating. If something didn't land, the `status` field says so.
+- When writing What worked / Dead ends / Open questions, scan the last
+  few messages of the source session — users often drop "ok merged" /
+  "didn't work" / "still don't know if this races" right at the end.
 
 **Build the JSON incrementally** — `Write` to `/tmp/vibebook-chronicles.json`
 one chronicle at a time, OR write each chronicle to
@@ -447,9 +456,9 @@ verbatim from skills/vibebook/SKILL.md sections P1–P7:
      pure-error sessions get skipped; everything else gets a chronicle).
   3. Segment one-thread-per-session by default; merge only when it's the
      same continuous effort.
-  4. Write a 4-section chronicle for each non-skip thread (weekly-report
-     voice, no blogger narrative, preserve commit hashes / file paths /
-     code blocks verbatim).
+  4. Write an agent-reuse 4-section chronicle for each non-skip thread
+     (Context / What worked / Dead ends / Open questions; imperative
+     voice; preserve commit hashes / file paths / code blocks verbatim).
   5. Update or insert topic pages (mid-grain subsystem level). Read existing
      topic pages and preserve historical facts when rewriting.
   6. Run: vibebook publish --chronicles ... --topics ... --no-catalog
@@ -512,7 +521,9 @@ and decide which atomic insights deserve cards. vibebook stops here.
   stays in sync.
 - ❌ Write a chronicle for a SKIP'd session.
 - ❌ Force-merge unrelated sessions to make a "bigger thread".
-- ❌ Write blogger-style "let me walk you through" prose.
+- ❌ Write blogger-style "let me walk you through" / "interestingly
+  enough" / "we then" prose. Body voice is imperative agent-reuse:
+  "Use X to achieve Y" — not "we did X and discovered Y".
 - ❌ Hallucinate outcomes. If user didn't say it worked, don't say it worked.
 - ❌ Cross project boundaries (edge-src content ending up in chromium-src/).
 - ❌ Try to write atomic cards yourself — that's memex's job. If memex

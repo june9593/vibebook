@@ -1,0 +1,212 @@
+---
+import Base from "../layouts/Base.astro";
+---
+<Base
+  title="vibebook — a memory book for AI coding agents"
+  description="Sync Claude Code + Copilot sessions across machines. Digest them into per-project chronicles + topics that AI agents can recall before tackling new work."
+>
+  <section class="hero container">
+    <h1>A memory book for your AI coding agents.</h1>
+    <p class="lede">
+      vibebook captures every Claude Code and VS Code Copilot Chat session
+      across every machine you use, then digests them into per-project
+      <strong>chronicles</strong> and <strong>topics</strong>. Next time
+      an AI agent lands in the same repo, it reads its own past notes
+      first — and stops re-discovering bugs you already solved.
+    </p>
+    <div class="badges">
+      <span class="badge">npm install -g <code>vibebook</code></span>
+      <span class="badge">MIT</span>
+      <span class="badge">Claude Code · Codex · OpenCode</span>
+    </div>
+    <div class="cta-row">
+      <a class="btn-primary" href="#quick-start">Get started</a>
+      <a class="btn-secondary" href="https://github.com/june9593/vibebook">View on GitHub</a>
+    </div>
+  </section>
+
+  <section class="container">
+    <h2>The problem</h2>
+    <p class="lede">
+      Every coding session your AI agent runs is a one-shot. The next session,
+      the next agent, the next machine — none of them remember what you just
+      did. They re-derive every architecture decision, re-discover every Mac
+      quirk, re-read code you've already explained twice.
+    </p>
+    <p class="lede" style="margin-top: var(--space-5);">
+      You end up paying to re-think solved problems, every single session.
+    </p>
+  </section>
+
+  <section class="container">
+    <h2>How vibebook fixes it</h2>
+    <div class="three-col">
+      <div class="feature-card">
+        <h3>Sync raw sessions</h3>
+        <p>
+          A single CLI command (<code>vibebook sync</code>) collects every
+          Claude Code + Copilot transcript on your machine, encrypts them
+          (optional, transparent git filter), and pushes to your private
+          memory repo. Multi-device aware: each laptop pushes to its own
+          branch and CI deterministically merges them on <code>main</code>.
+        </p>
+      </div>
+      <div class="feature-card">
+        <h3>Digest into a book</h3>
+        <p>
+          A Claude Code skill (<code>/vibebook</code>) reads your synced
+          sessions and writes them up as <strong>chronicles</strong> (one
+          per work thread, with AI-first frontmatter — files_touched,
+          commits, decisions, blockers, status) and <strong>topics</strong>
+          (mid-grain subsystem indexes). All work happens in your in-session
+          Claude — the CLI never spawns an LLM.
+        </p>
+      </div>
+      <div class="feature-card">
+        <h3>Recall before exploring</h3>
+        <p>
+          Another skill (<code>/vibebook-recall</code>) gives any AI agent
+          three-stage progressive recall: project's topic list first
+          (~5 KB), drill into one topic for chronicle frontmatter, then
+          read the bodies that actually match. Agents stand on past
+          learnings instead of rediscovering them.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="dark-section">
+    <div class="container">
+      <h2>The two skills, in plain terms</h2>
+      <p>
+        vibebook ships two Claude Code slash commands. Both work in any
+        project repo where you've run <code>vibebook sync</code>.
+      </p>
+      <div class="diagram">{`
+                       ┌─────────────────────────┐
+   working in a repo   │  Claude Code session    │
+   ──────────────────▶ │                         │
+                       │  /vibebook-recall       │  ◀── stage 1: topic list (~5 KB)
+                       │     ↓                   │       stage 2: chronicles for one topic
+                       │  Read chosen chronicles │       stage 3: Read tool on full body
+                       │     ↓                   │
+                       │  Do the work            │
+                       │     ↓                   │
+                       │  /vibebook              │  ◀── reads new sessions
+                       │     ↓                   │       writes chronicles + topics
+                       │  publish to git         │       (cards delegated to memex)
+                       └─────────────────────────┘
+                                 │
+                                 ▼
+                  ~/.vibebook/session-repo/  ◀── git repo, encrypted on push
+`}</div>
+    </div>
+  </section>
+
+  <section class="container" id="quick-start">
+    <h2>Quick start</h2>
+    <div class="steps">
+      <div class="step">
+        <span class="step-num">1</span>
+        <div class="step-body">
+          <h3>Install the CLI</h3>
+          <p>Requires Node 20+.</p>
+          <pre><code>npm install -g vibebook</code></pre>
+        </div>
+      </div>
+      <div class="step">
+        <span class="step-num">2</span>
+        <div class="step-body">
+          <h3>Run the wizard</h3>
+          <p>
+            Walks you through repo URL, encryption, and Claude Code plugin
+            install. The plugin install happens automatically — no manual
+            <code>/plugin marketplace add</code> needed.
+          </p>
+          <pre><code>vibebook init</code></pre>
+        </div>
+      </div>
+      <div class="step">
+        <span class="step-num">3</span>
+        <div class="step-body">
+          <h3>Sync, then digest</h3>
+          <p>
+            Run sync once to push raw sessions; then open Claude Code in
+            any project and call <code>/vibebook</code>. The in-session
+            Claude reads new sessions and writes the book.
+          </p>
+          <pre><code>vibebook sync
+cd ~/your-project &amp;&amp; claude
+&gt; /vibebook</code></pre>
+        </div>
+      </div>
+      <div class="step">
+        <span class="step-num">4</span>
+        <div class="step-body">
+          <h3>Recall before next task</h3>
+          <p>
+            In any project, before exploring code, ask Claude to use the
+            recall skill. It triages topics, reads relevant chronicles,
+            and references past findings explicitly when it replies.
+          </p>
+          <pre><code>cd ~/your-project &amp;&amp; claude
+&gt; /vibebook-recall
+&gt; (or just describe your task — the skill auto-triggers)</code></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="container">
+    <h2>CLI cheatsheet</h2>
+    <table>
+      <thead>
+        <tr><th>Command</th><th>What it does</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>vibebook init</code></td><td>Interactive wizard. Clones your repo to <code>~/.vibebook/session-repo</code> and auto-installs the Claude Code plugin.</td></tr>
+        <tr><td><code>vibebook sync</code></td><td>Extract Claude Code + Copilot sessions on this machine, commit, push to your device branch. No LLM call.</td></tr>
+        <tr><td><code>vibebook recall [--topic &lt;slug&gt;]</code></td><td>Three-stage catalog used by <code>/vibebook-recall</code>. Default returns project topics; <code>--topic</code> returns chronicles with frontmatter.</td></tr>
+        <tr><td><code>vibebook prepare</code> · <code>vibebook publish</code></td><td>Internal: emit JSON / write artifacts. The <code>/vibebook</code> skill drives these for you.</td></tr>
+        <tr><td><code>vibebook serve</code> · <code>vibebook build-site</code></td><td>Local dev server / static build of a reading site for your book (separate Astro template).</td></tr>
+        <tr><td><code>vibebook workflow init</code></td><td>Install the cross-device merge GitHub Action.</td></tr>
+        <tr><td><code>vibebook workflow pages-init</code></td><td>Install the GitHub Pages publish workflow for your book site.</td></tr>
+        <tr><td><code>vibebook plugin-install</code></td><td>Re-install or upgrade the Claude Code plugin (the wizard already runs this; here for repair).</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="container">
+    <h2>Memex hand-off</h2>
+    <p>
+      For atomic Zettelkasten cards (one insight per card with
+      backlinks, organize, orphan detection), vibebook delegates to
+      <a href="https://github.com/iamtouchskyer/memex">memex</a>.
+      Install it and vibebook will:
+    </p>
+    <ul style="color: var(--olive-gray); padding-left: var(--space-6);">
+      <li>Ask once at the start of <code>/vibebook</code>: "after I finish, also kick off <code>/memex-retro</code>?"</li>
+      <li>Fold memex's catalog into <code>vibebook recall</code> stage 1 so agents see both layers in one triage pass.</li>
+    </ul>
+    <p>
+      memex is optional. vibebook works fine without it; you just won't
+      have an atomic-card layer.
+    </p>
+  </section>
+
+  <section class="container">
+    <h2>Inspirations</h2>
+    <div class="inspiration">
+      <h3>logex</h3>
+      <p>prepare/publish CLI split, idempotent upserts, skill-driven workflow, Stop hook for nudge-style reminders.</p>
+    </div>
+    <div class="inspiration">
+      <h3>edge-dev</h3>
+      <p>YAML frontmatter conventions, "index is a curated catalog, not a TOC", Related Pages backlink culture, no-dead-ends rule.</p>
+    </div>
+    <div class="inspiration">
+      <h3>memex</h3>
+      <p>Atomic card prompt rules, proactive Stop-hook reminders for retro-after-task. Now an active integration partner — see Memex hand-off above.</p>
+    </div>
+  </section>
+</Base>
