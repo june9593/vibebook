@@ -7,90 +7,102 @@ import { resolveProjectFromCwd } from "../project-resolve.js";
 import { projectSlugFromPath } from "../slug.js";
 
 /**
- * `vibebook recall` — emit a *lightweight catalog* of the current project's
- * book artifacts so an in-session Claude (in any project repo) can decide
- * "do I have notes that bear on this work?" without slurping every
- * chronicle/topic/card body into context.
+ * `vibebook recall` — three-stage progressive catalog.
  *
- * Two modes:
- *   - cwd-mode (default): catalog the project matching the user's cwd.
- *     Includes `_global` cards because they apply everywhere.
- *   - --all: emit every project's catalog (rare; for "I want to grep my
- *     entire history" workflows).
+ * Stage 1 (default, ~2-5 KB): a project's TOPIC LIST plus 1-line
+ * descriptions. The agent looks at this first to find which subsystem(s)
+ * its task touches. Chronicles are NOT listed here — there are too many
+ * (typical project: 50+ chronicles), and they aren't the right grain
+ * for "is this relevant?" triage.
  *
- * The payload is intentionally compact: title + 1-line summary + path
- * + tags + type + updatedAt. ~100-300 bytes per artifact. The caller
- * (a recall skill, or `/vibebook-recall` slash command) reads this, picks
- * relevant entries, then `Read`s the full md for the ones it needs.
+ * Stage 2 (--topic <slug>, ~5-15 KB): for one chosen topic, list its
+ * contributing CHRONICLES with frontmatter (title, files_touched,
+ * commits, decisions, blockers, status). The agent reads the
+ * frontmatter to decide which chronicles to fully Read.
  *
- * Why not just dump every body? A typical project has 50-150 artifacts;
- * full bodies = 200K-1M tokens, which would dominate the in-session
- * Claude's context. Catalog + selective Read is the right shape.
+ * Stage 3: the agent uses the `Read` tool directly on a chronicle's
+ * absolute path. No extra recall command needed.
+ *
+ * Memex integration (optional): when `memex` is on PATH, the stage-1
+ * output additionally folds in memex categories from `memex read index`
+ * so the agent sees the full atomic-card landscape too. Memex cards
+ * are surfaced as `kind: "memex-card"` entries with `path: "memex:<slug>"`
+ * so the agent knows to read them via `memex read <slug>`.
  */
 
 export interface RecallEntry {
-  /** chronicle | topic | card | memex-card.
-   *  memex-card entries come from the optional memex CLI when it's
-   *  installed; everything else from vibebook's BookIndex. */
-  kind: "chronicle" | "topic" | "card" | "memex-card";
-  /** Project slug ("_global" for cross-project cards; "_memex" for entries
-   *  sourced from memex's flat or category-prefixed slug tree). */
+  /** topic | chronicle | memex-card.
+   *  In stage 1 (default), only `topic` and `memex-card` entries appear.
+   *  In stage 2 (--topic), `chronicle` entries appear with frontmatter. */
+  kind: "topic" | "chronicle" | "memex-card";
+  /** Project slug ("_memex" for memex-card entries). */
   project: string;
   /** Display title (frontmatter title → first `# heading` → slug). */
   title: string;
-  /** First non-heading paragraph, ~200 chars max. The "is this relevant?"
-   *  preview the LLM looks at before deciding to Read. */
+  /** Short summary — for topics: 1 sentence from the topic body.
+   *  For chronicles: a synthesized line from frontmatter facts.
+   *  For memex-card: the line memex's own index gave us. */
   summary: string;
-  /** Repo-relative path so the LLM knows what to pass to `Read`.
-   *  For memex-card entries this is the absolute memex card path
-   *  (e.g. ~/.memex/cards/foo-bar.md) — the LLM should `Read` it directly. */
+  /** Absolute path the agent should pass to `Read`.
+   *  For memex-card entries this is `memex:<slug>` — agent runs
+   *  `memex read <slug>` instead of using the Read tool. */
   path: string;
-  /** Stable id within its kind: threadId / topicSlug / cardSlug. */
+  /** Stable id within its kind: topicSlug / threadId / cardSlug. */
   slug: string;
-  /** card type when kind === "card", else undefined. */
-  cardType?: "gotcha" | "pattern" | "decision" | "howto" | "tool" | "other";
+  /** Frontmatter facts that the agent triages on (chronicles only).
+   *  Only populated in stage 2. */
+  frontmatter?: ChronicleFrontmatter;
   /** ISO date — last write. */
   updatedAt: string;
-  /** Free-form tags from BookIndex. */
+  /** Tags from BookIndex / topic frontmatter. */
   tags: string[];
 }
 
+/** Subset of chronicle frontmatter the recall payload surfaces.
+ *  Mirrors the AI-first fields documented in
+ *  `skills/vibebook/references/chronicle-format.md`. */
+export interface ChronicleFrontmatter {
+  files_touched?: string[];
+  commits?: string[];
+  decisions?: string[];
+  blockers?: string[];
+  next_steps?: string[];
+  status?: string;
+}
+
 export interface RecallPayload {
+  /** "stage-1-topics" or "stage-2-articles". Tells the consumer how to
+   *  interpret the entries. */
+  stage: "stage-1-topics" | "stage-2-articles";
   /** Project the catalog scopes to (null when --all). */
   project: string | null;
-  /** Absolute path the LLM should pass to `Read`. */
+  /** Topic slug being expanded in stage 2 (null otherwise). */
+  topic: string | null;
+  /** Absolute path the LLM should pass to `Read` for chronicle bodies. */
   repoPath: string;
-  /** All matching artifacts. Sorted: cards (most useful for quick recall)
-   *  first, then topics, then chronicles, each by updatedAt desc within. */
   entries: RecallEntry[];
   meta: {
-    chronicles: number;
     topics: number;
-    cards: number;
-    /** Memex-card count, only populated when memex was detected. */
+    chronicles: number;
     memexCards?: number;
-    /** True when we couldn't resolve cwd → project. */
     cwdUnresolved?: boolean;
-    /** True when the optional memex source was queried (regardless of
-     *  whether it returned any entries). Lets the skill say
-     *  "checked memex too — nothing matched" vs "memex unavailable". */
     memexQueried?: boolean;
+    /** Hint shown by the recall skill when the agent should drill
+     *  into a topic next. */
+    nextStep?: string;
   };
 }
 
 export interface RecallOptions {
-  /** Catalog the project matching this cwd. Mutually exclusive with --all. */
   cwd?: string;
-  /** Override project slug directly (bypass cwd resolution). */
   project?: string;
-  /** Catalog every project (no filter). Use sparingly. */
+  /** Stage 2: list chronicles for this topic (project must also be set
+   *  or resolvable from cwd). */
+  topic?: string;
+  /** Catalog every project (no filter). Use sparingly — at scale this
+   *  blows past the 30 KB stage-1 budget. */
   all?: boolean;
-  /** Include the user's `_global` cards in the project-scoped catalog
-   *  (default true — _global cards by definition apply across projects). */
-  includeGlobalCards?: boolean;
-  /** Skip the memex source even if memex is available. Useful when the
-   *  caller wants only vibebook artifacts (e.g. to count what vibebook
-   *  itself has produced without the memex layer in the way). */
+  /** Skip the memex source even if memex is available. */
   noMemex?: boolean;
 }
 
@@ -104,33 +116,29 @@ export function buildRecallPayload(opts: RecallOptions = {}): RecallPayload {
     projectFilter = resolveProjectFromCwd(opts.cwd, cfg.repoPath);
     if (!projectFilter) {
       cwdUnresolved = true;
-      // Don't throw — return an empty catalog with a hint flag. The skill
-      // can show the user "no notes for this cwd" gracefully.
     }
   }
 
-  const includeGlobal = opts.includeGlobalCards !== false;
-  const entries: RecallEntry[] = [];
-
-  // --- chronicles ---
-  for (const c of Object.values(bookIndex.chronicles)) {
-    if (c.skip) continue;
-    const project = c.project || projectFromPath(c.path);
-    if (!project) continue;
-    if (projectFilter && project !== projectFilter) continue;
-    entries.push({
-      kind: "chronicle",
-      project,
-      title: titleForArtifact(cfg.repoPath, c.path, c.title || c.threadId),
-      summary: summaryFor(cfg.repoPath, c.path),
-      path: c.path,
-      slug: c.threadId,
-      updatedAt: c.updatedAt,
-      tags: c.tags ?? [],
-    });
+  // Stage 2 — chronicle list for one topic.
+  if (opts.topic) {
+    return buildStage2(cfg.repoPath, bookIndex, projectFilter, opts.topic, opts.noMemex !== true && !cwdUnresolved);
   }
 
-  // --- topics ---
+  // Stage 1 — topic list (+ optional memex).
+  return buildStage1(cfg.repoPath, bookIndex, projectFilter, cwdUnresolved, opts.noMemex !== true);
+}
+
+// ---------- stage 1: topic list ----------
+
+function buildStage1(
+  repoPath: string,
+  bookIndex: ReturnType<typeof loadBookIndexV2>,
+  projectFilter: string | null,
+  cwdUnresolved: boolean,
+  queryMemex: boolean,
+): RecallPayload {
+  const entries: RecallEntry[] = [];
+
   for (const t of Object.values(bookIndex.topics)) {
     const project = t.project || projectFromPath(t.path);
     if (!project) continue;
@@ -138,8 +146,8 @@ export function buildRecallPayload(opts: RecallOptions = {}): RecallPayload {
     entries.push({
       kind: "topic",
       project,
-      title: titleForArtifact(cfg.repoPath, t.path, t.topicSlug),
-      summary: summaryFor(cfg.repoPath, t.path),
+      title: titleForArtifact(repoPath, t.path, t.topicSlug),
+      summary: summaryFor(repoPath, t.path),
       path: t.path,
       slug: t.topicSlug,
       updatedAt: t.updatedAt,
@@ -147,34 +155,8 @@ export function buildRecallPayload(opts: RecallOptions = {}): RecallPayload {
     });
   }
 
-  // --- cards (per-project + optionally _global) ---
-  for (const c of Object.values(bookIndex.cards)) {
-    const project = c.project || projectFromPath(c.path);
-    if (!project) continue;
-    const isGlobal = project === "_global";
-    if (projectFilter) {
-      if (!(project === projectFilter || (isGlobal && includeGlobal))) continue;
-    }
-    entries.push({
-      kind: "card",
-      project,
-      title: titleForArtifact(cfg.repoPath, c.path, prettifySlug(c.cardSlug)),
-      summary: summaryFor(cfg.repoPath, c.path),
-      path: c.path,
-      slug: c.cardSlug,
-      cardType: c.type || (typeFromSlug(c.cardSlug) as RecallEntry["cardType"]),
-      updatedAt: c.updatedAt,
-      tags: c.tags ?? [],
-    });
-  }
-
-  // --- memex cards (optional, only when memex is on PATH) ---
-  // Pulled into the same RecallPayload so the in-session Claude sees ONE
-  // catalog, not two. Memex is the second-source-of-truth for atomic
-  // insights — it has its own better-fitted slug conventions, archive,
-  // organize loop, etc. We just borrow its catalog as a read.
   let memexQueried = false;
-  if (!opts.noMemex) {
+  if (queryMemex) {
     const memexEntries = loadMemexCatalog();
     if (memexEntries !== null) {
       memexQueried = true;
@@ -182,34 +164,111 @@ export function buildRecallPayload(opts: RecallOptions = {}): RecallPayload {
     }
   }
 
-  // Sort: cards first (most useful for "did I solve this before?"), then
-  // memex-cards (also card-grain, but lower-priority because they may not
-  // be project-scoped), then topics (subsystem context), then chronicles
-  // (full diary). Within each kind, newest first.
+  // Sort: memex-cards first (zero-cost recall when an agent already knows
+  // the gotcha exists), then topics (newest first).
   const kindOrder: Record<RecallEntry["kind"], number> = {
-    card: 0, "memex-card": 1, topic: 2, chronicle: 3,
+    "memex-card": 0, topic: 1, chronicle: 2,
   };
   entries.sort((a, b) => {
     if (a.kind !== b.kind) return kindOrder[a.kind] - kindOrder[b.kind];
     return a.updatedAt < b.updatedAt ? 1 : -1;
   });
 
-  const meta = {
-    chronicles: entries.filter((e) => e.kind === "chronicle").length,
-    topics: entries.filter((e) => e.kind === "topic").length,
-    cards: entries.filter((e) => e.kind === "card").length,
-    ...(memexQueried ? {
-      memexQueried: true,
-      memexCards: entries.filter((e) => e.kind === "memex-card").length,
-    } : {}),
-    ...(cwdUnresolved ? { cwdUnresolved: true } : {}),
+  const topicCount = entries.filter((e) => e.kind === "topic").length;
+  const memexCount = entries.filter((e) => e.kind === "memex-card").length;
+  return {
+    stage: "stage-1-topics",
+    project: projectFilter,
+    topic: null,
+    repoPath,
+    entries,
+    meta: {
+      topics: topicCount,
+      chronicles: 0,
+      ...(memexQueried ? { memexQueried, memexCards: memexCount } : {}),
+      ...(cwdUnresolved ? { cwdUnresolved: true } : {}),
+      nextStep: topicCount > 0
+        ? `Pick a relevant topic, then run: vibebook recall --project <slug> --topic <topicSlug>`
+        : "No topics yet for this project.",
+    },
   };
+}
+
+// ---------- stage 2: chronicle list for one topic ----------
+
+function buildStage2(
+  repoPath: string,
+  bookIndex: ReturnType<typeof loadBookIndexV2>,
+  projectFilter: string | null,
+  topicSlug: string,
+  queryMemex: boolean,
+): RecallPayload {
+  const entries: RecallEntry[] = [];
+
+  // Find the topic so we know which contributing chronicles to surface.
+  const topic = Object.values(bookIndex.topics).find((t) => {
+    const proj = t.project || projectFromPath(t.path);
+    return t.topicSlug === topicSlug && (!projectFilter || proj === projectFilter);
+  });
+
+  if (topic) {
+    const contributing = new Set(topic.contributingThreads ?? []);
+    for (const c of Object.values(bookIndex.chronicles)) {
+      if (c.skip) continue;
+      if (!contributing.has(c.threadId)) continue;
+      const project = c.project || projectFromPath(c.path) || "_unknown";
+      const fm = readChronicleFrontmatter(repoPath, c.path);
+      entries.push({
+        kind: "chronicle",
+        project,
+        title: titleForArtifact(repoPath, c.path, c.title || c.threadId),
+        summary: summarizeFrontmatter(fm),
+        path: join(repoPath, c.path),
+        slug: c.threadId,
+        frontmatter: fm,
+        updatedAt: c.updatedAt,
+        tags: c.tags ?? [],
+      });
+    }
+  }
+
+  let memexQueried = false;
+  if (queryMemex) {
+    const memexEntries = loadMemexCatalog();
+    if (memexEntries !== null) {
+      memexQueried = true;
+      // In stage 2 we still surface memex cards because they may be the
+      // most relevant atomic insight for the topic at hand. Filter to
+      // those whose category matches the topic loosely; if no match,
+      // surface all (don't drop info just to keep payload small).
+      const filtered = memexEntries.filter((m) =>
+        m.tags.some((tag) => tag.toLowerCase().includes(topicSlug.toLowerCase())),
+      );
+      entries.push(...(filtered.length > 0 ? filtered : memexEntries));
+    }
+  }
+
+  // Sort chronicles newest first; keep memex cards separate at top.
+  const kindOrder: Record<RecallEntry["kind"], number> = {
+    "memex-card": 0, chronicle: 1, topic: 2,
+  };
+  entries.sort((a, b) => {
+    if (a.kind !== b.kind) return kindOrder[a.kind] - kindOrder[b.kind];
+    return a.updatedAt < b.updatedAt ? 1 : -1;
+  });
 
   return {
+    stage: "stage-2-articles",
     project: projectFilter,
-    repoPath: cfg.repoPath,
+    topic: topicSlug,
+    repoPath,
     entries,
-    meta,
+    meta: {
+      topics: 0,
+      chronicles: entries.filter((e) => e.kind === "chronicle").length,
+      ...(memexQueried ? { memexQueried, memexCards: entries.filter((e) => e.kind === "memex-card").length } : {}),
+      nextStep: "Read full bodies via the Read tool on entry.path. For memex cards: `memex read <slug>`.",
+    },
   };
 }
 
@@ -222,41 +281,29 @@ function projectFromPath(path: string | undefined): string | null {
   return parts[1] || null;
 }
 
-/** Read the artifact md and extract its display title. Prefers the first
- *  `# heading` (most chronicles + topics) then YAML frontmatter `title`,
- *  falls back to the caller's default. */
 function titleForArtifact(repoPath: string, repoRel: string, fallback: string): string {
   const abs = join(repoPath, repoRel);
   if (!existsSync(abs)) return fallback;
   const head = readFileSync(abs, "utf8").slice(0, 1024);
-  // # heading
   const hMatch = head.match(/^#\s+(.+?)\s*$/m);
   if (hMatch) return hMatch[1].trim();
-  // YAML frontmatter title:
   const fmMatch = head.match(/^---[\s\S]*?\ntitle:\s*(.+?)\s*\n[\s\S]*?---/);
   if (fmMatch) return fmMatch[1].replace(/^["']|["']$/g, "").trim();
   return fallback;
 }
 
-/** Pull a 1-paragraph summary from the artifact body — the first non-empty
- *  line that isn't a heading, frontmatter, or list bullet, capped at ~200
- *  chars. Falls back to a slug-derived label. */
 function summaryFor(repoPath: string, repoRel: string): string {
   const abs = join(repoPath, repoRel);
   if (!existsSync(abs)) return "";
   const body = readFileSync(abs, "utf8");
-  // Strip YAML frontmatter if present.
   const stripped = body.replace(/^---[\s\S]*?---\s*\n/, "");
   const lines = stripped.split("\n");
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
-    if (line.startsWith("#")) continue;       // heading
-    if (line.startsWith("---")) continue;     // hr
-    if (line.startsWith("- ") || line.startsWith("* ")) continue;  // bullet
-    if (line.startsWith(">")) continue;       // blockquote
-    if (line.startsWith("```")) continue;     // code fence
-    // Strip wikilinks + markdown links → plain text for preview.
+    if (line.startsWith("#") || line.startsWith("---")) continue;
+    if (line.startsWith("- ") || line.startsWith("* ")) continue;
+    if (line.startsWith(">") || line.startsWith("```")) continue;
     const plain = line
       .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, a, b) => b || a)
       .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
@@ -266,9 +313,75 @@ function summaryFor(repoPath: string, repoRel: string): string {
   return "";
 }
 
-function typeFromSlug(slug: string): RecallEntry["cardType"] {
+/** Parse the AI-first frontmatter fields out of a chronicle md.
+ *  Tiny line-based YAML subset parser: supports `key: scalar` and
+ *  `key:\n  - item\n  - item` shapes. Avoids pulling in a full YAML
+ *  dep just for the recall payload's narrow needs. */
+function readChronicleFrontmatter(repoPath: string, repoRel: string): ChronicleFrontmatter {
+  const abs = join(repoPath, repoRel);
+  if (!existsSync(abs)) return {};
+  const body = readFileSync(abs, "utf8");
+  const m = body.match(/^---\n([\s\S]*?)\n---/);
+  if (!m) return {};
+
+  const lines = m[1].split("\n");
+  const result: ChronicleFrontmatter = {};
+  const lists: Record<string, string[]> = {};
+  let currentList: string | null = null;
+
+  // Walk line-by-line so list items only attach to the key whose block
+  // they're under (regex-only approach over-matched into sibling keys).
+  for (const raw of lines) {
+    const line = raw;
+    if (line.match(/^\s+-\s+/)) {
+      // List item: belongs to currentList if we're under one.
+      if (currentList) {
+        const item = line.replace(/^\s+-\s+/, "").trim().replace(/^["']|["']$/g, "");
+        if (item) lists[currentList]!.push(item);
+      }
+      continue;
+    }
+    // Top-level key.
+    const m2 = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(.*)$/);
+    if (!m2) {
+      currentList = null;
+      continue;
+    }
+    const key = m2[1];
+    const after = m2[2].trim();
+    if (after === "") {
+      // List or block scalar.
+      currentList = key;
+      lists[key] = [];
+    } else {
+      currentList = null;
+      // Scalar value.
+      const cleaned = after.replace(/^["']|["']$/g, "");
+      if (key === "status") result.status = cleaned;
+    }
+  }
+
+  if (lists.files_touched) result.files_touched = lists.files_touched;
+  if (lists.commits) result.commits = lists.commits;
+  if (lists.decisions) result.decisions = lists.decisions;
+  if (lists.blockers) result.blockers = lists.blockers;
+  if (lists.next_steps) result.next_steps = lists.next_steps;
+  return result;
+}
+
+function summarizeFrontmatter(fm: ChronicleFrontmatter): string {
+  const bits: string[] = [];
+  if (fm.status) bits.push(`status=${fm.status}`);
+  if (fm.files_touched?.length) bits.push(`${fm.files_touched.length} files`);
+  if (fm.commits?.length) bits.push(`${fm.commits.length} commits`);
+  if (fm.decisions?.length) bits.push(`${fm.decisions.length} decisions`);
+  if (fm.blockers?.length) bits.push(`${fm.blockers.length} blockers`);
+  return bits.join(" · ") || "(no AI-first frontmatter — legacy chronicle)";
+}
+
+function typeFromSlug(slug: string): "gotcha" | "pattern" | "decision" | "howto" | "tool" | "other" {
   const m = slug.match(/^(gotcha|pattern|decision|howto|tool)-/);
-  if (m) return m[1] as RecallEntry["cardType"];
+  if (m) return m[1] as "gotcha" | "pattern" | "decision" | "howto" | "tool";
   return "other";
 }
 
@@ -284,28 +397,12 @@ export async function recallCmd(opts: RecallOptions): Promise<void> {
   process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
 }
 
-void projectSlugFromPath; // re-exposed for downstream callers if needed
+void projectSlugFromPath;
+void typeFromSlug;  // exported through parseMemexIndex via memex-card type
 
 // ---------- memex source ----------
 
-/**
- * Optional second-source catalog from the memex CLI.
- * (memex = https://github.com/iamtouchskyer/memex — purpose-built atomic
- * Zettelkasten cards with proactive Stop-hook reminders.)
- *
- * We deliberately don't depend on memex as an npm package: it has its own
- * release cadence and ships a separate Claude Code plugin. We just shell
- * out to its `read index` command if it happens to be on PATH. Returns:
- *   - `null` when memex isn't available (timeout / not in PATH / errored)
- *   - `[]` when memex is there but has zero cards
- *   - the catalog otherwise
- *
- * This is intentionally fail-open — vibebook recall must keep working
- * even when memex is broken.
- */
 function loadMemexCatalog(): RecallEntry[] | null {
-  // Hard 2s timeout. If memex is slow we'd rather degrade than hang
-  // the recall skill while the user waits to start work.
   const r = spawnSync("memex", ["read", "index"], {
     encoding: "utf8",
     timeout: 2000,
@@ -315,18 +412,6 @@ function loadMemexCatalog(): RecallEntry[] | null {
   return parseMemexIndex(r.stdout);
 }
 
-/**
- * `memex read index` outputs a markdown index page that memex itself
- * generates from `memex organize`. Format (lines we care about):
- *
- *   ## <category>
- *   - [[<slug>]] — <one-line summary>
- *   - [[<slug>|<title>]] — <one-line summary>
- *
- * We turn each `- [[...]]` line into a RecallEntry. memex doesn't give
- * us per-card updatedAt cheaply, so all entries get today's date — fine
- * for sort stability, not as informative as vibebook's own dates.
- */
 export function parseMemexIndex(md: string): RecallEntry[] {
   const out: RecallEntry[] = [];
   const today = new Date().toISOString().slice(0, 10);
@@ -348,12 +433,8 @@ export function parseMemexIndex(md: string): RecallEntry[] {
       project: "_memex",
       title: altText || prettifySlug(slug),
       summary,
-      // The LLM should run `memex read <slug>` (the skill description
-      // explains this) — we surface the slug as the path so the LLM has
-      // exactly what it needs to fetch the body.
       path: `memex:${slug}`,
       slug,
-      cardType: typeFromSlug(slug),
       updatedAt: today,
       tags: category && category !== "_memex" ? [category] : [],
     });

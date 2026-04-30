@@ -1,6 +1,6 @@
 ---
 name: vibebook
-description: Digest already-synced raw_sessions into per-project book artifacts (chronicle / topics / cards). Triggers on `/vibebook`. Two modes auto-selected by cwd — project-mode (cwd ≠ session-repo, digests just the matching project) or global-mode (cwd = session-repo, fan-out one subagent per pending project then regen catalog). Per-project isolated; never crosses project boundaries except for `_global/cards/`.
+description: Digest already-synced raw_sessions into per-project book artifacts (chronicle / topics). Triggers on `/vibebook`. Two modes auto-selected by cwd — project-mode (cwd ≠ session-repo, digests just the matching project) or global-mode (cwd = session-repo, fan-out one subagent per pending project then regen catalog). Per-project isolated. When memex is installed, atomic cards are delegated to /memex-retro instead of being written by vibebook.
 ---
 
 # /vibebook — write your book
@@ -42,6 +42,24 @@ matching section below. Do not try to guess; trust `list-projects`.
 ---
 
 # Project mode
+
+### Step P0 — Memex hand-off prompt (if memex is installed)
+
+Before doing any chronicle/topic work, check if `memex` is on PATH:
+
+```bash
+command -v memex >/dev/null && memex --version
+```
+
+If memex IS available, ask the user **once** at the very start:
+
+> Memex (atomic-card system) is installed. After I finish chronicles +
+> topics, do you want me to also kick off `/memex-retro` to capture any
+> reusable atomic insights from these sessions? (y/n)
+
+Remember the answer for Step P8. If memex is NOT available, skip this
+question entirely — don't suggest installing it here. (Wizard already
+covered that path in `vibebook init`.)
 
 ### Step P1 — Prepare for cwd's project
 
@@ -167,19 +185,31 @@ Below 5 threads, do it inline.
 threads — eats your context window and produces lower-quality writing
 because you start cargo-culting your own previous chronicles.
 
-### Step P4 — Write chronicles (4-section)
+### Step P4 — Write chronicles (AI-first format)
 
-For each non-skip thread, write a chronicle markdown using the strict
-4-section format. Refer to `references/chronicle-format.md` (same directory)
-for the schema; keep the rules:
+For each non-skip thread, write a chronicle markdown using the AI-first
+format spec'd in `references/chronicle-format.md` (same directory).
+Critical rules:
 
-- Weekly-report voice, factual log style — NOT blog narrative
-- Preserve commit hashes / file paths / code blocks / command lines verbatim
-- Do NOT hallucinate. If something didn't land, write
-  "**unfinished**" / "**unverified**" / "**blocked: <reason>**"
+- **Frontmatter is the index.** Fill files_touched / commits / decisions /
+  blockers / next_steps / status from the source session. AI agents
+  triage chronicles by reading frontmatter ONLY — missing fields mean
+  invisible to recall queries.
+- **Body keeps short.** 4 sections (What/Why/How/Outcome), each 1-3
+  SENTENCES not 1-3 paragraphs. The bullet list of work belongs in
+  files_touched + commits, not in the prose.
+- **Atomic insights → memex.** If the chronicle inspires a "next time
+  remember X" insight, that's a memex card not a chronicle paragraph.
+  Skip atomic-insight prose here; the memex hand-off (Step P6) catches it.
+- Weekly-report voice, factual log — NOT blog narrative.
+- Preserve commit hashes / file paths / code blocks / command lines
+  verbatim. Paste at most ONE small code block per `## How` section.
+- Do NOT hallucinate. Use `status: blocked` + a `blockers` entry instead
+  of overstating the Outcome. If something didn't land, the
+  `status` field says so directly.
 - When writing Why and Outcome, scan the last few messages of the
   source session — users often signal "ok merged" / "didn't work" /
-  "continuing tomorrow" right at the end
+  "continuing tomorrow" right at the end.
 
 **Build the JSON incrementally** — `Write` to `/tmp/vibebook-chronicles.json`
 one chronicle at a time, OR write each chronicle to
@@ -192,7 +222,7 @@ on big batches.
 entry, not only inside the markdown frontmatter.** publish reads the JSON
 top level to compute paths; if `project` is missing publish refuses with
 `chronicle.project is required`. The same rule applies to topics
-(`project` + `topicSlug`) and cards (`project` + `cardSlug`). Schema:
+(`project` + `topicSlug`). Schema:
 
 ```json
 [
@@ -227,12 +257,12 @@ For each affected topic:
 - **If a thread is too ad-hoc to fit any topic**: skip topic creation. Not
   every chronicle needs a topic.
 
-**Wikilinks** — write `[[chronicle/<threadId>]]` and `[[<cardSlug>]]` (or
-`[[cards/<cardSlug>]]`) directly in topic + card + chronicle bodies as
-human-friendly placeholders. `vibebook publish` mechanically rewrites them
-to real relative-path markdown links. Use bare `threadId`, NOT a date-prefixed
-filename. Cards prefer same-project then `_global/`; you write the slug, the
-publisher resolves.
+**Wikilinks** — write `[[chronicle/<threadId>]]` directly in topic +
+chronicle bodies as human-friendly placeholders. `vibebook publish`
+mechanically rewrites them to real relative-path markdown links. Use
+bare `threadId`, NOT a date-prefixed filename. (If memex is installed
+and you want to link to a memex card, write `[[memex:<cardSlug>]]` —
+those are left as text but flagged to readers.)
 
 Write topics to `/tmp/vibebook-topics.json`:
 
@@ -246,68 +276,21 @@ Write topics to `/tmp/vibebook-topics.json`:
 ]
 ```
 
-### Step P6 — Extract atomic cards
+### Step P6 — Atomic cards (delegated to memex)
 
-For each chronicle, extract **0 to N atomic insight cards**. Most chronicles
-yield 0–2 cards. A few yield 5+. **Don't pad** — a card is for future-you,
-not for completeness.
+vibebook itself **does not write atomic cards** anymore — that work
+belongs to [memex](https://github.com/iamtouchskyer/memex), which has
+the right primitives (Zettelkasten links, organize/orphan detection,
+archive, dedicated retro hook). vibebook keeps its scope tight:
+chronicles + topics, that's it.
 
-> **Memex integration.** If `memex` is on the user's PATH (check with
-> `command -v memex`), **prefer `/memex-retro` for atomic cards** instead
-> of vibebook's built-in card path. Memex (https://github.com/iamtouchskyer/memex)
-> is purpose-built for Zettelkasten-style cards with backlinks, organize,
-> and orphan detection — vibebook's card model was inspired by it. The
-> rules below still apply (atomic / Fact Hygiene / dedup / wikilink in
-> context); just delegate the *write* to memex via `memex write <slug>`.
-> vibebook's recall skill picks up memex cards automatically.
+If `memex` is on the user's PATH, see "Memex hand-off" below — the
+orchestrator may chain into `/memex-retro` after publish to capture
+atomic insights. Don't try to write cards inline here.
 
-**Hard rules:**
-
-1. **Atomic** — one card, one fact. If it can be split, split it.
-2. **Non-obvious** — "Next time I do similar work, would I lose this
-   insight?" If no, don't write the card. Don't card things already in
-   the API docs.
-3. **Own words / Feynman** — paraphrase in your own voice. **Do NOT
-   paste raw API docs or raw error messages**. If pasting is the only
-   way you can express it, you didn't actually understand it.
-4. **Fact Hygiene** — after writing, ask three questions; if any fail,
-   rewrite:
-   - **WHO** — projects/libraries/tools mentioned: user's own or
-     external? Can a stranger tell them apart?
-   - **WHAT-WHEN** — numbers (time / tokens / commit hashes): pinned to
-     a concrete scenario and time?
-   - **RELATIONSHIP** — words like "based on / refer to" should expand
-     into a concrete verb (fork from / benchmark against / inspired by /
-     extends / contradicts).
-5. **Dedup before writing** — `Glob book/<project>/cards/*.md` +
-   `Glob book/_global/cards/*.md`, check for similar entries:
-   - New material on top of an existing card → `action: "update"`,
-     append.
-   - Duplicate → skip.
-6. **Wikilink in context** — `[[link]]` must be embedded in a sentence
-   that explains the relationship.
-   ❌ `Related: [[x]]`
-   ✅ `This contrasts with [[gotcha-foo]] — that one listens via the
-   widget; here we use the NSWindow API directly.`
-
-**Slug naming**:
-
-- `gotcha-<name>` — a trap (UAF / order dependency / configuration gotcha)
-- `pattern-<name>` — a reusable approach
-- `decision-<name>` — an architectural decision (with reasoning)
-- `howto-<name>` — a concrete how-to
-- `tool-<name>` — tool usage / config
-
-**Per-project vs `_global/`**:
-
-| Card is about... | Goes in |
-|---|---|
-| A specific codebase / product / company project | `book/<project>/cards/` |
-| A tool / language / OS / generic best practice | `book/_global/cards/` |
-| Both | per-project (primary); leave a wikilink in `_global/` |
-
-Card schema in `references/card-format.md`. Write cards to
-`/tmp/vibebook-cards.json`.
+If `memex` is NOT installed, that's fine too. Atomic cards are a
+"future-self insurance policy"; chronicles + topics already cover the
+"future-AI search" use case via vibebook-recall.
 
 ### Step P7 — Confirm + publish
 
@@ -317,7 +300,6 @@ Show the user:
 About to publish to book/<project>/:
   Chronicles: N (S SKIP'd)
   Topics:     M (X update / Y new)
-  Cards:      K (X update / Y new / Z _global)
 
 Confirm? (y/n)
 ```
@@ -329,7 +311,6 @@ just re-emit the JSON). Then publish:
 vibebook publish \
   --chronicles /tmp/vibebook-chronicles.json \
   --topics /tmp/vibebook-topics.json \
-  --cards /tmp/vibebook-cards.json \
   --no-catalog
 ```
 
@@ -342,24 +323,37 @@ publish does:
 1. Inserts each chronicle to `<repoPath>/book/<project>/chronicle/...md`
    (refuses on threadId collision).
 2. Topics: backs old `.md` up to `<slug>.md.bak` if existed, writes new.
-3. Cards: insert / update on slug match.
-4. Resolves `[[wikilinks]]` against the live BookIndex.
-5. Stages ONLY the files it wrote + `.vibebook/index.book.json`.
-6. Commits + pushes the device branch.
+3. Resolves `[[wikilinks]]` against the live BookIndex.
+4. Stages ONLY the files it wrote + `.vibebook/index.book.json`.
+5. Commits + pushes the device branch.
 
 If unresolved wikilinks remain, publish prints them at the end. Read the
 warning, fix in a follow-up batch (`vibebook publish` is idempotent — already-
 inserted chronicles refuse via threadId collision, so you can re-run with
 just the new artifacts).
 
-### Step P8 — Done
+### Step P8 — Done (and optional memex hand-off)
 
 Print a one-line summary:
 
 ```
-✓ Published to book/<project>/: N chronicles, M topics, K cards.
+✓ Published to book/<project>/: N chronicles, M topics.
 ✓ Pushed to <device-branch>.
 ```
+
+If the user said yes at Step P0 (memex is installed AND user opted in),
+hand off now by invoking the `memex-retro` skill via the Skill tool:
+
+```
+Skill(skill: "memex-retro")
+```
+
+That skill will look back at the work this conversation captured and
+write atomic cards as appropriate. vibebook's job is done at that
+point — memex owns the card layer.
+
+If the user said no, or memex isn't installed, just print the summary
+and stop.
 
 That's it for project-mode. The user can now `cd ~/.vibebook/session-repo && claude → /vibebook`
 later to do a global sweep across all projects.
@@ -371,6 +365,16 @@ later to do a global sweep across all projects.
 Triggered when cwd = `~/.vibebook/session-repo`. The user wants a full
 sweep across every project. You orchestrate; subagents do the per-project
 work using the same project-mode flow.
+
+### Step G0 — Memex hand-off prompt (if memex is installed)
+
+Same as project-mode Step P0: check `command -v memex`. If installed,
+ask once at the start:
+
+> Memex is installed. After the global sweep finishes, want me to also
+> run /memex-retro on the most insight-dense chronicles? (y/n)
+
+Remember the answer for Step G4. If memex isn't installed, skip.
 
 ### Step G1 — Triage
 
@@ -448,9 +452,7 @@ verbatim from skills/vibebook/SKILL.md sections P1–P7:
      code blocks verbatim).
   5. Update or insert topic pages (mid-grain subsystem level). Read existing
      topic pages and preserve historical facts when rewriting.
-  6. Extract 0..N atomic cards per chronicle (Fact Hygiene check; dedup vs
-     existing cards).
-  7. Run: vibebook publish --chronicles ... --topics ... --cards ... --no-catalog
+  6. Run: vibebook publish --chronicles ... --topics ... --no-catalog
 
 Write your three input JSON files under /tmp/vibebook/<slug>/ so we don't
 collide with sibling subagents.
@@ -482,21 +484,30 @@ vibebook catalog-regen
 This regenerates `book/index.md`, `book/_meta/timeline.md`, and
 `book/<project>/index.md` for every project, then commits + pushes.
 
-### Step G4 — Summary
+### Step G4 — Summary (and optional memex hand-off)
 
 ```
 ✓ Global sweep complete.
-  edge-src:        +6 chronicle, +2 topic, +12 cards
-  chromium-src:    +5 chronicle, +1 topic, +7 cards
+  edge-src:        +6 chronicle, +2 topic
+  chromium-src:    +5 chronicle, +1 topic
   ...
   catalog regenerated and pushed.
 ```
+
+If the user said yes at Step G0, hand off now:
+
+```
+Skill(skill: "memex-retro")
+```
+
+memex-retro will see the chronicles + topics this sweep just produced
+and decide which atomic insights deserve cards. vibebook stops here.
 
 ---
 
 ## Things you should NEVER do
 
-- ❌ `Write` directly into `book/<project>/{chronicle,topics,cards}/*.md` —
+- ❌ `Write` directly into `book/<project>/{chronicle,topics}/*.md` —
   always go through `vibebook publish` so wikilinks resolve and the index
   stays in sync.
 - ❌ Write a chronicle for a SKIP'd session.
@@ -504,9 +515,9 @@ This regenerates `book/index.md`, `book/_meta/timeline.md`, and
 - ❌ Write blogger-style "let me walk you through" prose.
 - ❌ Hallucinate outcomes. If user didn't say it worked, don't say it worked.
 - ❌ Cross project boundaries (edge-src content ending up in chromium-src/).
-- ❌ Skip the dedup `Glob` before writing cards.
+- ❌ Try to write atomic cards yourself — that's memex's job. If memex
+  isn't installed, just skip the atomic-card layer entirely.
 - ❌ Skip the `Read` of an existing topic page before rewriting it.
-- ❌ Write a card for something that's API documentation or obvious knowledge.
 - ❌ Touch any file in `raw_sessions/` — those are immutable source data.
 - ❌ Run global-mode `/vibebook` with cwd ≠ `~/.vibebook/session-repo`. The
   cwd check is the mode trigger; do not override.
@@ -517,7 +528,7 @@ This regenerates `book/index.md`, `book/_meta/timeline.md`, and
 - ✅ In project-mode, derive project from cwd (`vibebook prepare --cwd`).
 - ✅ Default to one-thread-per-session; merge only when continuous.
 - ✅ Be conservative with SKIP — write the chronicle if in any doubt.
-- ✅ Use Read / Glob / Grep to inspect existing book/ before writing cards.
+- ✅ Use Read / Glob / Grep to inspect existing book/ before writing topics.
 - ✅ Preserve exact code blocks, command lines, file paths, commit hashes.
 - ✅ Mark uncertainty: "unfinished", "unverified", "blocked".
 - ✅ Stop and ask if user said something contradicting your plan.

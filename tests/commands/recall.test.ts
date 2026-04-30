@@ -52,17 +52,15 @@ function writeArtifact(rel: string, body: string) {
   writeFileSync(abs, body);
 }
 
-describe("recall — basic catalog", () => {
-  it("returns chronicle / topic / card entries with title + summary + path", async () => {
+describe("recall stage 1 — topic list", () => {
+  it("default mode returns topics (not chronicles) for the project", async () => {
     writeConfig();
-    writeIndex({
-      "claude:s1": entry("s1", "edge-src", "/Users/me/edge/src"),
-    });
+    writeIndex({});
     writeBook({
       version: 2,
       chronicles: {
         "fix-foo": {
-          threadId: "fix-foo", project: "edge-src", title: "Fix foo bug",
+          threadId: "fix-foo", project: "edge-src", title: "Fix foo",
           sessionIds: ["s1"], path: "book/edge-src/chronicle/2026-01-01__fix-foo__fix-foo.md",
           createdAt: "2026-01-01", updatedAt: "2026-01-01", tags: ["bug"],
         },
@@ -71,44 +69,111 @@ describe("recall — basic catalog", () => {
         "edge-src/menu-bar": {
           topicSlug: "menu-bar", project: "edge-src",
           path: "book/edge-src/topics/menu-bar.md",
-          createdAt: "2026-01-02", updatedAt: "2026-01-02", contributingThreads: ["fix-foo"],
+          createdAt: "2026-01-02", updatedAt: "2026-01-02",
+          contributingThreads: ["fix-foo"],
         },
       },
-      cards: {
-        "edge-src/gotcha-rounded-corners": {
-          cardSlug: "gotcha-rounded-corners", project: "edge-src", type: "gotcha",
-          path: "book/edge-src/cards/gotcha-rounded-corners.md",
-          createdAt: "2026-01-03", updatedAt: "2026-01-03", tags: ["macos"],
-        },
-      },
+      cards: {},
     });
-    writeArtifact("book/edge-src/chronicle/2026-01-01__fix-foo__fix-foo.md",
-      "# Fix foo bug\n\n## What\n\n这是修复 foo bug 的工作记录,涉及 NSWindow 圆角问题。\n");
     writeArtifact("book/edge-src/topics/menu-bar.md",
-      "# Edge macOS Menu Bar Copilot\n\n## 这个 topic 是什么\n\nEdge 把菜单栏 Copilot 入口移植到 Mac。\n");
-    writeArtifact("book/edge-src/cards/gotcha-rounded-corners.md",
-      "Chromium views frameless NSWindow 圆角必须等于内容圆角,否则 DCHECK 挂。\n");
+      "# Menu bar\n\nEdge macOS Menu Bar Copilot subsystem covering NSStatusItem and the floating widget.\n");
 
     const { buildRecallPayload } = await import("../../src/commands/recall.js");
     const out = buildRecallPayload({ project: "edge-src" });
 
+    expect(out.stage).toBe("stage-1-topics");
     expect(out.project).toBe("edge-src");
-    expect(out.meta).toEqual({ chronicles: 1, topics: 1, cards: 1 });
+    expect(out.topic).toBeNull();
+    // Only the topic should appear; chronicles are stage 2.
+    const kinds = out.entries.map((e) => e.kind).sort();
+    expect(kinds).toEqual(["topic"]);
+    expect(out.entries[0]!.title).toBe("Menu bar");
+    expect(out.entries[0]!.summary).toContain("Edge macOS Menu Bar");
+    expect(out.meta.topics).toBe(1);
+    expect(out.meta.chronicles).toBe(0);
+    expect(out.meta.nextStep).toContain("vibebook recall");
+  });
+});
 
-    // Sort: cards → topics → chronicles
-    expect(out.entries[0]!.kind).toBe("card");
-    expect(out.entries[1]!.kind).toBe("topic");
-    expect(out.entries[2]!.kind).toBe("chronicle");
+describe("recall stage 2 — chronicles for one topic", () => {
+  it("--topic returns chronicles in contributingThreads with frontmatter", async () => {
+    writeConfig();
+    writeIndex({});
+    writeBook({
+      version: 2,
+      chronicles: {
+        "fix-foo": {
+          threadId: "fix-foo", project: "edge-src", title: "Fix foo bug",
+          sessionIds: ["s1"], path: "book/edge-src/chronicle/2026-01-01__fix-foo__fix-foo.md",
+          createdAt: "2026-01-01", updatedAt: "2026-01-01", tags: ["bug"],
+        },
+        "irrelevant": {
+          threadId: "irrelevant", project: "edge-src", title: "Other",
+          sessionIds: ["s2"], path: "book/edge-src/chronicle/2026-01-02__irrelevant__irrelevant.md",
+          createdAt: "2026-01-02", updatedAt: "2026-01-02", tags: [],
+        },
+      },
+      topics: {
+        "edge-src/menu-bar": {
+          topicSlug: "menu-bar", project: "edge-src",
+          path: "book/edge-src/topics/menu-bar.md",
+          createdAt: "2026-01-02", updatedAt: "2026-01-02",
+          contributingThreads: ["fix-foo"],
+        },
+      },
+      cards: {},
+    });
+    writeArtifact("book/edge-src/chronicle/2026-01-01__fix-foo__fix-foo.md",
+      `---
+title: Fix foo bug
+project: edge-src
+threadId: fix-foo
+files_touched:
+  - chrome/browser/foo.cc
+  - chrome/browser/foo.h
+commits:
+  - abc1234
+decisions:
+  - Use approach A
+status: shipped
+---
 
-    const card = out.entries[0]!;
-    expect(card.title).toBe("Rounded corners");
-    expect(card.summary).toContain("Chromium views frameless");
-    expect(card.cardType).toBe("gotcha");
-    expect(card.path).toBe("book/edge-src/cards/gotcha-rounded-corners.md");
+# Fix foo bug
 
-    const chronicle = out.entries[2]!;
-    expect(chronicle.title).toBe("Fix foo bug");
-    expect(chronicle.summary).toContain("修复 foo bug");
+## What
+Body.
+`);
+    writeArtifact("book/edge-src/chronicle/2026-01-02__irrelevant__irrelevant.md",
+      "# Other\n\nbody\n");
+
+    const { buildRecallPayload } = await import("../../src/commands/recall.js");
+    const out = buildRecallPayload({ project: "edge-src", topic: "menu-bar" });
+
+    expect(out.stage).toBe("stage-2-articles");
+    expect(out.topic).toBe("menu-bar");
+    expect(out.entries.length).toBe(1);
+    const c = out.entries[0]!;
+    expect(c.kind).toBe("chronicle");
+    expect(c.slug).toBe("fix-foo");
+    expect(c.frontmatter?.files_touched).toEqual(["chrome/browser/foo.cc", "chrome/browser/foo.h"]);
+    expect(c.frontmatter?.commits).toEqual(["abc1234"]);
+    expect(c.frontmatter?.decisions).toEqual(["Use approach A"]);
+    expect(c.frontmatter?.status).toBe("shipped");
+    expect(c.summary).toContain("status=shipped");
+    expect(c.summary).toContain("2 files");
+    // path is absolute (so the agent can pass to Read directly)
+    expect(c.path.startsWith("/")).toBe(true);
+    expect(c.path.endsWith("2026-01-01__fix-foo__fix-foo.md")).toBe(true);
+  });
+
+  it("returns empty when topic doesn't exist", async () => {
+    writeConfig();
+    writeIndex({});
+    writeBook({ version: 2, chronicles: {}, topics: {}, cards: {} });
+    const { buildRecallPayload } = await import("../../src/commands/recall.js");
+    const out = buildRecallPayload({ project: "edge-src", topic: "nonexistent" });
+    expect(out.stage).toBe("stage-2-articles");
+    expect(out.entries).toEqual([]);
   });
 });
 
@@ -141,134 +206,8 @@ describe("recall — cwd resolution", () => {
   });
 });
 
-describe("recall — _global cards", () => {
-  it("includes _global cards alongside project cards by default", async () => {
-    writeConfig();
-    writeIndex({});
-    writeBook({
-      version: 2, chronicles: {}, topics: {},
-      cards: {
-        "edge-src/g1": {
-          cardSlug: "gotcha-x", project: "edge-src", type: "gotcha",
-          path: "book/edge-src/cards/gotcha-x.md",
-          createdAt: "2026-01-01", updatedAt: "2026-01-01", tags: [],
-        },
-        "_global/g2": {
-          cardSlug: "howto-git-rebase", project: "_global", type: "howto",
-          path: "book/_global/cards/howto-git-rebase.md",
-          createdAt: "2026-01-01", updatedAt: "2026-01-01", tags: [],
-        },
-      },
-    });
-    writeArtifact("book/edge-src/cards/gotcha-x.md", "x\n");
-    writeArtifact("book/_global/cards/howto-git-rebase.md", "rebase tip\n");
-
-    const { buildRecallPayload } = await import("../../src/commands/recall.js");
-    const out = buildRecallPayload({ project: "edge-src" });
-    expect(out.meta.cards).toBe(2);
-    const projects = out.entries.map((e) => e.project).sort();
-    expect(projects).toEqual(["_global", "edge-src"]);
-  });
-
-  it("excludes _global cards when --no-global", async () => {
-    writeConfig();
-    writeIndex({});
-    writeBook({
-      version: 2, chronicles: {}, topics: {},
-      cards: {
-        "_global/g": {
-          cardSlug: "howto-x", project: "_global", type: "howto",
-          path: "book/_global/cards/howto-x.md",
-          createdAt: "2026-01-01", updatedAt: "2026-01-01", tags: [],
-        },
-      },
-    });
-    writeArtifact("book/_global/cards/howto-x.md", "x\n");
-
-    const { buildRecallPayload } = await import("../../src/commands/recall.js");
-    const out = buildRecallPayload({ project: "edge-src", includeGlobalCards: false });
-    expect(out.entries.length).toBe(0);
-  });
-});
-
-describe("recall — title + summary extraction fallbacks", () => {
-  it("falls back to prettified slug when no # heading + no frontmatter", async () => {
-    writeConfig();
-    writeIndex({});
-    writeBook({
-      version: 2, chronicles: {}, topics: {},
-      cards: {
-        "edge-src/gotcha-some-tricky-bug": {
-          cardSlug: "gotcha-some-tricky-bug", project: "edge-src", type: "gotcha",
-          path: "book/edge-src/cards/gotcha-some-tricky-bug.md",
-          createdAt: "2026-01-01", updatedAt: "2026-01-01", tags: [],
-        },
-      },
-    });
-    writeArtifact("book/edge-src/cards/gotcha-some-tricky-bug.md",
-      "Body without any heading. Just one paragraph describing the issue.\n");
-
-    const { buildRecallPayload } = await import("../../src/commands/recall.js");
-    const out = buildRecallPayload({ project: "edge-src" });
-    expect(out.entries[0]!.title).toBe("Some tricky bug");
-    expect(out.entries[0]!.summary).toBe("Body without any heading. Just one paragraph describing the issue.");
-  });
-
-  it("strips wikilinks + markdown links from summary preview", async () => {
-    writeConfig();
-    writeIndex({});
-    writeBook({
-      version: 2, chronicles: {}, topics: {},
-      cards: {
-        "edge-src/c1": {
-          cardSlug: "gotcha-c1", project: "edge-src", type: "gotcha",
-          path: "book/edge-src/cards/gotcha-c1.md",
-          createdAt: "2026-01-01", updatedAt: "2026-01-01", tags: [],
-        },
-      },
-    });
-    writeArtifact("book/edge-src/cards/gotcha-c1.md",
-      "See [[gotcha-foo]] and [link](path/to.md) for context. Real insight here.\n");
-
-    const { buildRecallPayload } = await import("../../src/commands/recall.js");
-    const out = buildRecallPayload({ project: "edge-src" });
-    expect(out.entries[0]!.summary).toBe("See gotcha-foo and link for context. Real insight here.");
-  });
-
-  it("infers cardType from slug prefix when BookIndex omits it", async () => {
-    writeConfig();
-    writeIndex({});
-    writeBook({
-      version: 2, chronicles: {}, topics: {},
-      cards: {
-        "edge-src/pattern-foo": {
-          cardSlug: "pattern-foo", project: "edge-src",
-          // type intentionally missing — legacy publish bug
-          path: "book/edge-src/cards/pattern-foo.md",
-          createdAt: "2026-01-01", updatedAt: "2026-01-01", tags: [],
-        },
-      },
-    });
-    writeArtifact("book/edge-src/cards/pattern-foo.md", "foo pattern\n");
-    const { buildRecallPayload } = await import("../../src/commands/recall.js");
-    const out = buildRecallPayload({ project: "edge-src" });
-    expect(out.entries[0]!.cardType).toBe("pattern");
-  });
-});
-
-function entry(id: string, project: string, projectRaw: string) {
-  return {
-    sessionId: id, shortId: id.slice(0, 8), tool: "claude", project,
-    projectRaw,
-    startedAt: "2026-01-01T10:00:00Z", endedAt: "2026-01-01T11:00:00Z",
-    nameSlug: "x", displayName: "x",
-    relativePath: `raw_sessions/claude/${project}/2026-01-01/x__${id}.raw.json`,
-    sourcePath: "/x.jsonl", sourceMtimeMs: 1, sourceSha256: "abc",
-  };
-}
-
-describe("recall — memex index parser", () => {
-  it("extracts slug + summary + category from a memex `read index` page", async () => {
+describe("recall — memex source", () => {
+  it("parseMemexIndex extracts slug + summary + category", async () => {
     const { parseMemexIndex } = await import("../../src/commands/recall.js");
     const md = `# Memex Knowledge Map
 
@@ -286,27 +225,20 @@ describe("recall — memex index parser", () => {
     expect(out[0]!.slug).toBe("gotcha-jwt-revocation");
     expect(out[0]!.title).toBe("Jwt revocation");
     expect(out[0]!.summary).toContain("stateless JWTs");
-    expect(out[0]!.cardType).toBe("gotcha");
     expect(out[0]!.tags).toEqual(["Debugging"]);
     expect(out[0]!.path).toBe("memex:gotcha-jwt-revocation");
-    expect(out[1]!.title).toBe("Stack trace bisect");      // alt text wins
-    expect(out[2]!.cardType).toBe("pattern");
+    expect(out[1]!.title).toBe("Stack trace bisect");
     expect(out[2]!.tags).toEqual(["Patterns"]);
   });
 
-  it("handles an empty / heading-only memex index gracefully", async () => {
+  it("parseMemexIndex handles empty / heading-only input", async () => {
     const { parseMemexIndex } = await import("../../src/commands/recall.js");
     expect(parseMemexIndex("")).toEqual([]);
     expect(parseMemexIndex("# Just a heading\n")).toEqual([]);
   });
-});
 
-describe("recall — memex absent (graceful fallback)", () => {
-  // memex is intentionally NOT installed in CI / dev machines; we want to
-  // assert the no-memex code path returns vibebook-only results without
-  // crashing or polluting meta.
-  it("does not query memex when --no-memex passed; meta.memexQueried absent", async () => {
-    writeConfig({ repoPath });
+  it("--no-memex skips memex query; meta.memexQueried absent", async () => {
+    writeConfig();
     writeIndex({});
     writeBook({ version: 2, chronicles: {}, topics: {}, cards: {} });
 
@@ -316,3 +248,14 @@ describe("recall — memex absent (graceful fallback)", () => {
     expect(out.entries.filter((e) => e.kind === "memex-card")).toEqual([]);
   });
 });
+
+function entry(id: string, project: string, projectRaw: string) {
+  return {
+    sessionId: id, shortId: id.slice(0, 8), tool: "claude", project,
+    projectRaw,
+    startedAt: "2026-01-01T10:00:00Z", endedAt: "2026-01-01T11:00:00Z",
+    nameSlug: "x", displayName: "x",
+    relativePath: `raw_sessions/claude/${project}/2026-01-01/x__${id}.raw.json`,
+    sourcePath: "/x.jsonl", sourceMtimeMs: 1, sourceSha256: "abc",
+  };
+}

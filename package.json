@@ -1,6 +1,6 @@
 {
   "name": "vibebook",
-  "version": "0.3.4",
+  "version": "0.4.0",
   "description": "Sync AI coding sessions across machines + digest into a per-project chronicle/topics/cards book via in-session Claude. Ships as both an npm CLI and a Claude Code plugin.",
   "type": "module",
   "license": "MIT",

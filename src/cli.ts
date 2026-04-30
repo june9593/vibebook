@@ -72,19 +72,19 @@ export async function run(argv: string[]) {
     });
   program
     .command("recall")
-    .description("Emit a lightweight catalog of book artifacts (chronicle/topic/card titles + 1-line summaries + paths) so an in-session Claude in any project repo can decide which past notes to Read. Defaults to the project matching cwd; pass --all for every project. When memex (https://github.com/iamtouchskyer/memex) is on PATH, its cards are folded into the catalog as `kind: \"memex-card\"` entries.")
+    .description("Three-stage progressive recall for an in-session Claude. Stage 1 (default): a project's TOPIC list + 1-line summaries (~5 KB). Stage 2 (--topic <slug>): chronicles for that topic with frontmatter (files_touched, commits, decisions, blockers, status). Stage 3: agent uses the Read tool on entry.path. When memex is on PATH, atomic-card entries are folded in.")
     .option("--cwd <path>", "auto-detect project from this absolute cwd (default process.cwd)")
     .option("--project <slug>", "override cwd resolution; catalog this project explicitly")
+    .option("--topic <slug>", "stage 2: list chronicles for this topic with frontmatter")
     .option("--all", "catalog every project (no project filter)")
-    .option("--no-global", "exclude _global cards from a project-scoped catalog")
     .option("--no-memex", "skip the optional memex source even if memex is installed")
-    .action(async (opts: { cwd?: string; project?: string; all?: boolean; global?: boolean; memex?: boolean }) => {
+    .action(async (opts: { cwd?: string; project?: string; topic?: string; all?: boolean; memex?: boolean }) => {
       const { recallCmd } = await import("./commands/recall.js");
       await recallCmd({
         cwd: opts.cwd ?? process.cwd(),
         project: opts.project,
+        topic: opts.topic,
         all: opts.all,
-        includeGlobalCards: opts.global !== false,
         noMemex: opts.memex === false,
       });
     });
@@ -93,7 +93,7 @@ export async function run(argv: string[]) {
     .description("Read JSON inputs from /vibebook skill, write chronicles + topics + cards into book/, regen catalog, commit + push.")
     .option("--chronicles <path>", "JSON file with ChronicleInput[]")
     .option("--topics <path>", "JSON file with TopicInput[]")
-    .option("--cards <path>", "JSON file with CardInput[]")
+    .option("--cards <path>", "[deprecated since 0.4] JSON file with CardInput[]; atomic cards now belong to memex (/memex-retro)")
     .option("--no-commit", "write files locally but don't commit/push")
     .option("--no-catalog", "skip book/index.md + book/_meta/timeline.md + book/<proj>/index.md regen (project-mode publish uses this; global mode does the regen once at the end of fan-out)")
     .action(async (opts: { chronicles?: string; topics?: string; cards?: string; commit?: boolean; catalog?: boolean }) => {

@@ -3,19 +3,18 @@ import Base from "../layouts/Base.astro";
 import { listProjects, listChronicles, chronicleRouteSlug } from "../lib/content";
 
 const base = import.meta.env.BASE_URL;
-const projects = listProjects().filter((p) => p.slug !== "_global");
+const projects = listProjects();
 const recent = listChronicles().slice(0, 8);
 const totalChronicles = projects.reduce((s, p) => s + p.chronicleCount, 0);
 const totalTopics = projects.reduce((s, p) => s + p.topicCount, 0);
-const totalCards = projects.reduce((s, p) => s + p.cardCount, 0);
 ---
 <Base title="vibebook" description="A reading view of your synced AI coding sessions.">
   <section class="hero container">
     <h1>Notes from the work bench.</h1>
     <p class="lede">
-      Your AI coding sessions, organized into three grains of notes —
-      chronicles, topics, and cards. No marketing copy, no blog voice —
-      just an honest record of the work.
+      Your AI coding sessions, organized into two grains of notes —
+      chronicles (one per work thread) and topics (one per subsystem). No
+      marketing copy, no blog voice — just an honest record of the work.
     </p>
     <p class="meta" style="margin-top: var(--space-6);">
       <span>{projects.length} projects</span>
@@ -23,8 +22,6 @@ const totalCards = projects.reduce((s, p) => s + p.cardCount, 0);
       <span>{totalChronicles} chronicles</span>
       <span> · </span>
       <span>{totalTopics} topics</span>
-      <span> · </span>
-      <span>{totalCards} cards</span>
     </p>
   </section>
 
@@ -53,7 +50,7 @@ const totalCards = projects.reduce((s, p) => s + p.cardCount, 0);
         <a class="project-card" href={`${base}projects/${p.slug}/`}>
           <h3>{p.slug}</h3>
           <p class="meta">
-            {p.chronicleCount} chronicle · {p.topicCount} topic · {p.cardCount} card
+            {p.chronicleCount} chronicle{p.chronicleCount === 1 ? "" : "s"} · {p.topicCount} topic{p.topicCount === 1 ? "" : "s"}
           </p>
           {p.lastTouched && (
             <p class="subtle">last touched {p.lastTouched.slice(0, 10)}</p>

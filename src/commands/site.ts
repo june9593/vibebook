@@ -90,6 +90,11 @@ function syncTemplateInto(templateDir: string, cacheDir: string): void {
   // workflow); preserving the cache's node_modules is the only optimization.
   if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
   const skip = new Set(["node_modules", "dist", ".astro"]);
+  // First, wipe the cache's `src/` so files we removed from the template
+  // (e.g. dropping a page) don't linger and break astro's static path
+  // generation. node_modules + dist + .astro are preserved.
+  const cacheSrc = join(cacheDir, "src");
+  if (existsSync(cacheSrc)) rmSync(cacheSrc, { recursive: true, force: true });
   for (const name of readdirSync(templateDir)) {
     if (skip.has(name)) continue;
     const src = join(templateDir, name);
