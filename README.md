@@ -1,7 +1,5 @@
 # vibebook — Vibe Coding Memory Book
 
-**[Project page](https://june9593.github.io/vibebook/) · [npm](https://www.npmjs.com/package/vibebook) · [GitHub](https://github.com/june9593/vibebook)**
-
 > Sync your AI coding sessions across machines. Digest them into a
 > per-project book of **chronicles** and **topics**. Read the book back
 > through a Claude Code skill so future-you (and future AI agents)
