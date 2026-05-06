@@ -144,6 +144,22 @@ export async function run(argv: string[]) {
       process.exit(r.ok ? 0 : 1);
     });
   program
+    .command("upgrade")
+    .description("Refresh both the npm CLI (`npm install -g vibebook@latest`) and the Claude Code plugin in a single command. Skips the npm step if vibebook is npm-link'd from a dev checkout.")
+    .option("--no-cli", "skip the `npm install -g` step")
+    .option("--no-plugin", "skip the plugin re-install step")
+    .action(async (opts: { cli?: boolean; plugin?: boolean }) => {
+      const { upgradeCmd } = await import("./commands/upgrade.js");
+      await upgradeCmd({ noCli: opts.cli === false, noPlugin: opts.plugin === false });
+    });
+  program
+    .command("doctor")
+    .description("Health check: CLI version on PATH, npm latest, Claude plugin manifest + install entry, ~/.vibebook/config presence, git crypt filter (when encrypt=true), memex availability. Read-only and offline-tolerant.")
+    .action(async () => {
+      const { doctorCmd } = await import("./commands/doctor.js");
+      await doctorCmd();
+    });
+  program
     .command("workflow")
     .description("Manage the GitHub Action that aggregates device branches into main")
     .addCommand(
