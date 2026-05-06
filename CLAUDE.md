@@ -31,6 +31,8 @@ src/
     catalog-regen.ts         # rebuild book/index.md after global sweep
     site.ts                  # vibebook serve / build-site (Astro wrapper)
     plugin-install.ts        # auto-install plugin into ~/.claude
+    upgrade.ts               # `vibebook upgrade` = npm install + plugin-install
+    doctor.ts                # `vibebook doctor` health check
     workflow.ts              # CI workflow installers
     crypt.ts                 # git clean/smudge filter setup
     cat.ts, list.ts, show.ts # read-side CLI
@@ -55,6 +57,11 @@ commands/
   vibebook-recall.md
 
 site-template/               # Astro source for `vibebook serve`/`build-site`
+marketing-site/              # Astro source for the project landing page
+                             #   (held local until the repo opens publicly)
+scripts/
+  sync-plugin-version.mjs    # mirrors npm version → .claude-plugin/*.json
+                             #   (npm `version` lifecycle hook)
 assets/
   workflows/                 # vibebook-aggregate.yml, vibebook-pages.yml
   scripts/merge-books.mjs    # CI cross-device merge logic
@@ -101,6 +108,12 @@ git add -A && git commit -m "..."
 git tag -a vX.Y.Z -m "..."
 git push origin main && git push origin vX.Y.Z
 ```
+
+`npm version` automatically runs `scripts/sync-plugin-version.mjs` (see
+the `version` script in `package.json`) which mirrors the new version
+into both `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`
+and stages them. Don't bump those manifest versions by hand — let the
+hook do it.
 
 **Then stop.** `npm publish` is a manual step Yue runs himself (OTP
 gate). Don't suggest "now do `npm publish`" — just say the tag is

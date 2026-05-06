@@ -220,7 +220,10 @@ we just don't ship the LLM glue ourselves.
 
 | Command | Purpose |
 |---|---|
-| `vibebook init [repoUrl]` | Interactive wizard or flag-mode setup |
+| `vibebook init [repoUrl]` | Interactive wizard or flag-mode setup. Auto-installs the Claude Code plugin into `~/.claude/plugins/`. |
+| `vibebook upgrade` | One-step refresh: `npm install -g vibebook@latest` + `vibebook plugin-install`. Skips the npm step on `npm link`-managed dev installs. |
+| `vibebook doctor` | Health check across CLI / npm latest / Claude plugin / session repo / git filter / memex. Read-only, offline-tolerant. Prints a fix command for anything red. |
+| `vibebook plugin-install` | Re-install or upgrade the Claude Code plugin specifically (the wizard already runs this; here for repair / multi-device). |
 | `vibebook sync` | Extract Claude/Copilot sessions; commit + push to device branch |
 | `vibebook prepare [--cwd \| --project]` | Emit JSON: which sessions need digesting (used by `/vibebook`) |
 | `vibebook publish --chronicles … --topics … [--no-catalog]` | Write artifacts + resolve `[[wikilinks]]` + commit + push. (`--cards` accepted for back-compat with vibebook ≤ 0.3 skill versions; deprecated.) |
@@ -297,6 +300,30 @@ Override the auto-derived name:
 ```sh
 vibebook init <repoUrl> --device mbp2
 ```
+
+## Keeping multiple machines in sync
+
+vibebook ships in two pieces — the npm CLI and the Claude Code plugin —
+and they need to stay at the same version on every machine. To upgrade:
+
+```sh
+vibebook upgrade     # npm install -g vibebook@latest + plugin re-install
+vibebook doctor      # confirm everything matches
+```
+
+Then **reopen Claude Code** so it loads the new plugin. If you only
+want to refresh the plugin (you already have the right CLI), you can
+also do it from the Claude Code REPL directly:
+
+```
+/plugin marketplace update vibebook
+/plugin update vibebook@vibebook
+```
+
+Note that path only refreshes the plugin; if a new vibebook version
+also changed the CLI surface (new flags, new subcommands), the skill
+will hit "unknown option" until you also update the npm CLI. `vibebook
+doctor` flags the mismatch.
 
 ## Inspirations
 
