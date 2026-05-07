@@ -185,6 +185,46 @@ Below 5 threads, do it inline.
 threads — eats your context window and produces lower-quality writing
 because you start cargo-culting your own previous chronicles.
 
+#### Permission warm-up — DO THIS BEFORE FAN-OUT, ONCE PER SESSION
+
+Subagents in Claude Code **cannot interactively prompt the user for
+Bash / Write permission** — that ability is exclusive to the main
+session. If your fan-out fires before the user has approved the
+patterns subagents need (writing JSON to `/tmp/vb-<project>/`,
+running `vibebook publish`, etc.), each subagent will silently
+stall, fall back to a different MCP tool, or return "permission
+denied" without doing the work.
+
+Before the first `Agent(...)` call in P3 (and before P5 / P6 sub-
+fan-outs that write to `/tmp/`), run these warm-ups **inline in the
+main session**. Each will trigger one `[Always allow ?]` prompt the
+user can accept once:
+
+```bash
+mkdir -p /tmp/vb-<project>/_warmup && rmdir /tmp/vb-<project>/_warmup
+# triggers Bash(mkdir -p /tmp/vb-<project>/*) approval
+
+vibebook prepare --help >/dev/null
+vibebook publish --help >/dev/null
+# triggers Bash(vibebook prepare *) and Bash(vibebook publish *) approval
+
+echo warmup > /tmp/vb-<project>/_warmup.json && rm /tmp/vb-<project>/_warmup.json
+# triggers Write to /tmp/vb-<project>/* approval
+```
+
+Replace `<project>` with the actual project slug (e.g. `vb-edge-src`).
+Tell the user to accept the BROAD pattern (the one with `*`) rather
+than the literal call — one acceptance covers every subagent for the
+rest of the session.
+
+**Skip this only if** you've already warmed up earlier in the same
+session, or the user has the patterns pre-approved in
+`~/.claude/settings.json`.
+
+If a subagent comes back with "permission denied", do NOT have the
+subagent retry — it can't escalate. Run the warm-up from the main
+session, then re-dispatch (or SendMessage to the same agent).
+
 ### Step P4 — Write chronicles (AI-first format, agent-reuse body)
 
 For each non-skip thread, write a chronicle markdown using the AI-first
@@ -406,39 +446,21 @@ with `pendingSessions > 0`. Let user exclude any.
 
 ### Step G2 — Fan out subagents (one per project)
 
-#### Permission warm-up — DO THIS BEFORE THE FIRST FAN-OUT, ONCE PER MACHINE
+#### Permission warm-up — DO THIS FIRST
 
-Subagents **cannot interactively prompt the user for Bash / Write
-permission** — that ability is exclusive to the main session. If your
-fan-out fires before the user has approved the broad permission patterns
-that subagents need, every subagent will silently get denied and stall.
-
-To avoid that, run these warm-up commands **inline from the main session
-first** (each will trigger a `[Always allow ?]` prompt that the user can
-accept once). After the user accepts, every subagent inherits those
-permissions for the rest of the session:
+Same rationale as project-mode P3 (subagents can't prompt the user
+for permission). Before the first `Agent(...)` call, run inline:
 
 ```bash
-# Trigger Bash(mkdir -p /tmp/vibebook/*) approval
 mkdir -p /tmp/vibebook/_warmup && rmdir /tmp/vibebook/_warmup
-
-# Trigger Bash(vibebook prepare *) and Bash(vibebook publish *) approval
-# by running a no-op variant of each (just --help is enough)
 vibebook prepare --help >/dev/null
 vibebook publish --help >/dev/null
-
-# If the user's settings.local.json doesn't already allow shell redirects
-# inside /tmp/vibebook/, also trigger that:
-echo "warmup" > /tmp/vibebook/_warmup.json && rm /tmp/vibebook/_warmup.json
+echo warmup > /tmp/vibebook/_warmup.json && rm /tmp/vibebook/_warmup.json
 ```
 
-When the user sees the `[Always allow]` prompt for any of these, ask
-them to approve the BROAD pattern (e.g. `Bash(vibebook prepare *)`,
-not the literal `vibebook prepare --help`). One acceptance covers
-every project subagent.
-
-**Skip the warm-up only if** you've already done it earlier in the
-same session, or the user has pre-approved these patterns in
+Tell the user to approve the BROAD pattern (e.g. `Bash(vibebook
+prepare *)`, not the literal `--help` invocation). Skip if already
+warmed up earlier in the session or pre-approved in
 `~/.claude/settings.json`.
 
 #### The actual fan-out

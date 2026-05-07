@@ -294,6 +294,9 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
 async function offerMemexInstall(): Promise<void> {
   console.log(chalk.cyan("\n=== memex setup ==="));
   const { spawnSync } = await import("node:child_process");
+  const { mkdirSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { homedir } = await import("node:os");
 
   // Step 1: CLI install.
   const have = spawnSync("memex", ["--version"], { encoding: "utf8" });
@@ -308,6 +311,17 @@ async function offerMemexInstall(): Promise<void> {
       console.log(chalk.yellow("  ! npm install failed (you may need to retry with sudo, or fix npm permissions)"));
       console.log(chalk.gray("    Run manually:  npm install -g @touchskyer/memex"));
     }
+  }
+
+  // Step 1b: ensure ~/.memex/cards/ exists. memex doesn't auto-create
+  // this on first install — first-run `memex search` / `memex write`
+  // both warn "cards directory not found" otherwise. Idempotent;
+  // recursive: true means existing dir is a no-op.
+  try {
+    mkdirSync(join(homedir(), ".memex", "cards"), { recursive: true });
+    console.log(chalk.gray("  ✓ ensured ~/.memex/cards/ exists"));
+  } catch (e) {
+    console.log(chalk.yellow(`  ! could not create ~/.memex/cards/ (${(e as Error).message}); memex first-run may warn`));
   }
 
   // Step 2: Claude Code plugin — user runs these in the REPL, not in a shell.
