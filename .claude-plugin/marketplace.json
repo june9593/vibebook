@@ -9,7 +9,7 @@
     {
       "name": "vibebook",
       "description": "Run /vibebook in Claude Code to digest your synced sessions into chronicle + topic. Run /vibebook-recall before starting work to surface past notes that bear on the current task. Atomic cards delegated to memex when installed.",
-      "version": "0.4.5",
+      "version": "0.4.6",
       "source": "./",
       "category": "productivity"
     }
