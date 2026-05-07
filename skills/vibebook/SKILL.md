@@ -401,6 +401,17 @@ That skill will look back at the work this conversation captured and
 write atomic cards as appropriate. vibebook's job is done at that
 point — memex owns the card layer.
 
+> **Two memex-write gotchas worth remembering** (observed in past runs):
+> 1. memex card frontmatter **MUST** include `source: retro` (along with
+>    `title` + `created`). Forget it and `memex write` exits non-zero
+>    with `Missing required fields: source`. memex-retro's own SKILL.md
+>    spells this out, but the example block above the rules is easy to
+>    skim past.
+> 2. **Do not run multiple `memex write` calls in parallel.** memex's
+>    cards directory isn't write-concurrent; parallel calls fail with
+>    "Cancelled: parallel tool call ... errored". Write each card with
+>    its own sequential Bash invocation.
+
 If the user said no, or memex isn't installed, just print the summary
 and stop.
 
@@ -533,6 +544,10 @@ Skill(skill: "memex-retro")
 
 memex-retro will see the chronicles + topics this sweep just produced
 and decide which atomic insights deserve cards. vibebook stops here.
+
+(Same memex-write gotchas as project-mode P8 apply: every card needs
+`source: retro` in its frontmatter, and `memex write` calls must be
+sequential — never parallel.)
 
 ---
 
