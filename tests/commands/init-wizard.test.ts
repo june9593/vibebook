@@ -51,7 +51,6 @@ describe("applyWizardAnswers", () => {
       localPath,
       encrypt: true,
       passphraseEntered: "secret",
-      digestEnabled: true,
       enableAggregateCI: true,
       includeReasoning: true,
     });
@@ -61,7 +60,6 @@ describe("applyWizardAnswers", () => {
     expect(cfg.repoUrl).toBe(originUrl);
     expect(cfg.repoPath).toBe(localPath);
     expect(cfg.encrypt).toBe(true);
-    expect(cfg.digestEnabled).toBe(true);
     expect(cfg.runner).toBe("claude-cli");
     expect(cfg.enableAggregateCI).toBe(true);
     const pp = readFileSync(join(tmpHome, ".vibebook", "passphrase"), "utf8").trim();
@@ -76,64 +74,11 @@ describe("applyWizardAnswers", () => {
       repoUrl: originUrl,
       localPath,
       encrypt: false,
-      digestEnabled: false,
       enableAggregateCI: false,
       includeReasoning: false,
     });
     const { existsSync } = await import("node:fs");
     expect(existsSync(join(tmpHome, ".vibebook", "passphrase"))).toBe(false);
-  });
-});
-
-describe("verifyRunner", () => {
-  beforeEach(() => {
-    vi.resetModules();
-  });
-  afterEach(() => {
-    vi.doUnmock("../../src/runner-check.js");
-    vi.doUnmock("../../src/prompts.js");
-    vi.resetModules();
-  });
-
-  it("returns true for a usable binary", async () => {
-    vi.doMock("../../src/runner-check.js", async () => {
-      const real = await vi.importActual<typeof import("../../src/runner-check.js")>("../../src/runner-check.js");
-      return {
-        ...real,
-        runnerBinary: () => "fake-but-mocked",
-        runnerInstallUrl: () => "https://example.com",
-        checkBinary: async () => ({ ok: true, output: "v99.0.0\n" }),
-      };
-    });
-    vi.doMock("../../src/prompts.js", () => ({
-      prompt: vi.fn(),
-      promptYesNo: vi.fn(async () => false),
-      promptChoice: vi.fn(),
-      promptHidden: vi.fn(),
-      closePrompts: vi.fn(),
-    }));
-    const m2 = await import("../../src/commands/init-wizard.js");
-    expect(await m2.verifyRunner("claude-cli")).toBe(true);
-  });
-
-  it("returns false for missing binary", async () => {
-    vi.doMock("../../src/runner-check.js", async () => {
-      const real = await vi.importActual<typeof import("../../src/runner-check.js")>("../../src/runner-check.js");
-      return {
-        ...real,
-        runnerBinary: () => "definitely-not-real-xyz",
-        runnerInstallUrl: () => "https://example.com",
-      };
-    });
-    vi.doMock("../../src/prompts.js", () => ({
-      prompt: vi.fn(),
-      promptYesNo: vi.fn(async () => false),
-      promptChoice: vi.fn(),
-      promptHidden: vi.fn(),
-      closePrompts: vi.fn(),
-    }));
-    const m = await import("../../src/commands/init-wizard.js");
-    expect(await m.verifyRunner("claude-cli")).toBe(false);
   });
 });
 
@@ -151,10 +96,8 @@ describe("runWizard end-to-end transcript", () => {
       "y",                             // Q3 encrypt
       "secret123",                     // Q4 passphrase
       "secret123",                     // Q4 confirm
-      "y",                             // Q5 digest
       "y",                             // Q6 enable aggregate CI
       "y",                             // Q7 includeReasoning
-      "n",                             // Q8 recommend memex
     ];
     const stdin = new Readable({ read() {} }) as Readable & { isTTY?: boolean };
     stdin.isTTY = true;
@@ -181,7 +124,6 @@ describe("runWizard end-to-end transcript", () => {
     expect(a.repoUrl).toBe("git@github.com:you/repo.git");
     expect(a.encrypt).toBe(true);
     expect(a.passphraseEntered).toBe("secret123");
-    expect(a.digestEnabled).toBe(true);
     expect(a.enableAggregateCI).toBe(true);
     expect(a.includeReasoning).toBe(true);
   });
@@ -189,9 +131,7 @@ describe("runWizard end-to-end transcript", () => {
   it("local-only mode (Q0=n) skips remote-only questions (including aggregate CI)", async () => {
     const lines = [
       "n",                              // Q0 sync to remote → no
-      "y",                              // Q5 digest
       "y",                              // Q7 includeReasoning (Q6 skipped — local-only)
-      "n",                              // Q8 recommend memex
     ];
     const stdin = new Readable({ read() {} }) as Readable & { isTTY?: boolean };
     stdin.isTTY = true;
@@ -217,7 +157,6 @@ describe("runWizard end-to-end transcript", () => {
     expect(a.repoUrl).toBe("");
     expect(a.encrypt).toBe(false);
     expect(a.passphraseEntered).toBeUndefined();
-    expect(a.digestEnabled).toBe(true);
     expect(a.enableAggregateCI).toBe(false); // local-only mode → no CI question asked
     expect(a.includeReasoning).toBe(true);
   });
