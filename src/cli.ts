@@ -123,5 +123,52 @@ export async function run(argv: string[]) {
       const { cryptCmd } = await import("./commands/crypt.js");
       await cryptCmd(action);
     });
+  program
+    .command("list-sessions")
+    .description("List sessions in the local spool, filterable for cross-device resume.")
+    .option("--project <slug>", "filter by project slug")
+    .option("--since <window>", "only sessions ended within this window (e.g. 7d, 24h, 4w)")
+    .option("--device <name>", "filter by device branch (placeholder for v0.6)")
+    .action(async (opts: { project?: string; since?: string; device?: string }) => {
+      const { listSessionsCmd } = await import("./commands/resume/list-sessions.js");
+      const sessions = await listSessionsCmd(opts);
+      if (sessions.length === 0) {
+        console.log("(no sessions match)");
+        return;
+      }
+      const rows = sessions.map((e) => ({
+        SESSION: e.shortId,
+        TOOL: e.tool,
+        PROJECT: e.project,
+        ENDED: e.endedAt.slice(0, 10),
+        TITLE: e.displayName.slice(0, 40),
+      }));
+      console.table(rows);
+    });
+  program
+    .command("resume <sessionId>")
+    .description("Copy a spool session into ~/.claude/projects/ and emit the `claude --resume` command to run.")
+    .action(async (sessionId: string) => {
+      const { resumeCmd } = await import("./commands/resume/resume.js");
+      const result = await resumeCmd({ sessionId });
+      console.log(`Session ready at: ${result.dest}`);
+      console.log(`Continue with:`);
+      console.log(`  ${result.hint}`);
+    });
+  program
+    .command("config")
+    .description("Inspect or modify ~/.vibebook/config.json.")
+    .option("--map-path <FROM=TO>", "add a cross-device path mapping (e.g. /Users/yueA=/Users/yueB) for `vibebook resume`")
+    .action(async (opts: { mapPath?: string }) => {
+      if (opts.mapPath) {
+        const { setMapPath } = await import("./commands/resume/config-pathmap.js");
+        setMapPath(opts.mapPath);
+        console.log(`Added pathMap entry. Current ~/.vibebook/config.json updated.`);
+        return;
+      }
+      // No flags: print current config
+      const { readConfig } = await import("./config.js");
+      console.log(JSON.stringify(readConfig(), null, 2));
+    });
   await program.parseAsync(argv);
 }
