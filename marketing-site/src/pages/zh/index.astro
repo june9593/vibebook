@@ -1,0 +1,209 @@
+---
+import Base from "../../layouts/Base.astro";
+---
+<Base
+  lang="zh"
+  title="vibebook — 跨机器同步并 resume 你的 AI 编程会话"
+  description="vibebook 的 npm CLI 部分：把 Claude Code 与 VS Code Copilot Chat 会话同步到私有 GitHub repo,然后在任意机器上 resume。配合可选的 vibebook Claude Code 插件可加上 digest + recall。"
+>
+  <section class="hero container">
+    <h1>把 AI 会话变成跨机器可携带的工具。</h1>
+    <p class="lede">
+      <strong>vibebook</strong> 是一个 npm CLI,把你的 Claude Code 与 VS
+      Code Copilot Chat 会话同步到一个私有 GitHub repo,然后让你能在任何
+      机器上 <strong>resume</strong> 任意一段会话。配合可选的
+      <a href="https://june9593.github.io/vibebook-plugin/">vibebook Claude
+      Code 插件</a>,还能在会话内做 digest + recall。
+    </p>
+    <div class="badges">
+      <span class="badge">npm install -g <code>vibebook</code></span>
+      <span class="badge">Claude Code · Copilot Chat</span>
+      <span class="badge">MIT</span>
+    </div>
+    <div class="cta-row">
+      <a class="btn-primary" href="#install">安装</a>
+      <a class="btn-secondary" href="https://github.com/june9593/vibebook">在 GitHub 上查看</a>
+    </div>
+  </section>
+
+  <section class="container">
+    <h2>它解决的痛点</h2>
+    <p class="lede">
+      你在笔记本上开始调一个 Kubernetes pod,午饭时间到了,走到楼上参加
+      一个会,会后想在台式机上接着干 — 但 Claude 会话还卡在笔记本上。
+      于是你重头来过:粘贴日志、重新解释集群拓扑、希望新会话在烧掉一
+      小时上下文之前能赶上。
+    </p>
+    <p class="lede" style="margin-top: var(--space-5);">
+      或者:周五下午一段会话调出了一个 flaky 测试的根因,你 ship 了修复。
+      周一早上,另一台机器的新会话从零开始重新推导同一个根因。
+    </p>
+    <p class="lede" style="margin-top: var(--space-5);">
+      vibebook 把每段会话保留在 <code>~/.vibebook/session-repo/</code>
+      下,推到你私有的 GitHub repo。任意一台机器拉了之后都能跑
+      <code>vibebook resume &lt;sessionId&gt;</code> — 同样的上下文、
+      同样的已读文件、同样的决策、同样的死胡同。
+    </p>
+  </section>
+
+  <section class="container">
+    <h2>两个超能力</h2>
+    <div class="three-col" style="grid-template-columns: 1fr 1fr;">
+      <div class="feature-card">
+        <h3><code>vibebook sync</code></h3>
+        <p>
+          扫描 <code>~/.claude/projects/</code> 与 VS Code Copilot Chat
+          存储,把新会话复制到 spool(原始 <code>.jsonl</code> 与渲染
+          <code>.md</code> + <code>.raw.json</code> 一起保留),提交,
+          推到你私有 GitHub repo 的设备分支。
+        </p>
+        <p>
+          多设备感知:每台笔记本推自己的分支,GitHub Action 在
+          <code>main</code> 上做确定性合并。可选的加密 — 通过透明的
+          git clean/smudge filter,你的 repo 可以是 private 而不必把
+          原文交给 GitHub。
+        </p>
+      </div>
+      <div class="feature-card">
+        <h3><code>vibebook resume &lt;id&gt;</code></h3>
+        <p>
+          把会话的 <code>.jsonl</code> 从 spool 复制到
+          <code>~/.claude/projects/&lt;encoded-cwd&gt;/&lt;newId&gt;.jsonl</code>,
+          打印出 <code>cd &lt;project&gt; &amp;&amp; claude --resume &lt;newId&gt;</code>
+          命令让你跑。
+        </p>
+        <p>
+          每次 resume 都是一次 <strong>fork</strong> — 这台机器上的副本
+          会拿到一个新的 sessionId,这样两台设备 resume 同一个源会话时
+          可以独立继续,spool 同步时不会撞 id。fork 的 origin 会被记录,
+          digest 工具之后可以把同源 thread 关联起来。
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="dark-section">
+    <div class="container">
+      <h2>跨设备 resume — 一个说明性场景</h2>
+      <p>
+        周五下午 4 点,在你的笔记本上。已经调了三个小时的 Kubernetes
+        集成测试,Claude 读了 14 个文件,跑了十几条 <code>kubectl</code>
+        命令,排除了三个怀疑的根因,最后把范围缩小到两个 pod 之间的
+        时钟偏差假设。你累了,你退出。
+      </p>
+      <p>
+        周六早上,在你的台式机上。你坐下来端着咖啡,跑:
+      </p>
+      <pre style="background: var(--deep-dark); color: var(--ivory); padding: var(--space-5); border-radius: var(--r-md);">vibebook sync                            # 拉其他机器上的新会话
+vibebook list-sessions --since 2d        # 找昨天那段
+vibebook resume 1f2c3d                   # 复制 + 打印 `claude --resume`</pre>
+      <p>
+        vibebook 拉笔记本的分支,在 spool 里找到昨天那段会话,把
+        <code>.jsonl</code> 复制到台式机的 <code>~/.claude/projects/</code>,
+        把 <code>/Users/laptop-me</code> 路径改写成
+        <code>/Users/desktop-me</code>(通过 <code>vibebook config --map-path</code>
+        一次配置过),然后打印:
+      </p>
+      <pre style="background: var(--deep-dark); color: var(--ivory); padding: var(--space-5); border-radius: var(--r-md);">Session forked: 1f2c3d-... → 8a7b6c5d-...
+Continue with:
+  cd /Users/desktop-me/work/k8s-cluster &amp;&amp; claude --resume 8a7b6c5d-...</pre>
+      <p>
+        你跑那条。Claude 启动起来,14 个文件还在上下文里,三个被排除的
+        假设还在对话里,时钟偏差的线索等着你下一句 prompt。你不重新解释。
+        你不重新推导。你就接着周五的你 — 在另一台机器上,另一把椅子里,
+        端着第二杯咖啡。
+      </p>
+    </div>
+  </section>
+
+  <section class="container" id="install">
+    <h2>安装</h2>
+    <p>需要 Node 20+。</p>
+    <pre style="background: var(--deep-dark); color: var(--ivory); padding: var(--space-5); border-radius: var(--r-md);">npm install -g vibebook
+vibebook init</pre>
+    <p>
+      wizard 会引导你过一遍私有 GitHub repo URL、可选加密、设备分支命名。
+      之后每台机器上的 <code>vibebook sync</code> 推自己的新会话、拉别人
+      的,<code>vibebook resume &lt;id&gt;</code> 让你本地接着任意一段。
+    </p>
+    <p>
+      想要 digest + recall?装可选的 Claude Code 插件:
+    </p>
+    <pre style="background: var(--deep-dark); color: var(--ivory); padding: var(--space-5); border-radius: var(--r-md);">/plugin marketplace add june9593/vibebook-plugin
+/plugin install vibebook</pre>
+    <p>
+      插件和 CLI 共用 <code>~/.vibebook/session-repo/</code> — 装其中一个、
+      两个都装、或者都不装,顺序也无所谓。
+    </p>
+  </section>
+
+  <section class="container">
+    <h2>CLI 命令</h2>
+    <table>
+      <thead>
+        <tr><th>命令</th><th>做什么</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>vibebook init</code></td><td>交互式 wizard。clone 你的私有 repo 到 <code>~/.vibebook/session-repo/</code>,设置设备分支。</td></tr>
+        <tr><td><code>vibebook sync</code></td><td>抽取这台机器上新的 Claude Code + Copilot 会话,提交,推送。</td></tr>
+        <tr><td><code>vibebook list-sessions [--project] [--since] [--device]</code></td><td>列出 spool 里的会话,可按条件过滤,用于挑选 resume 目标。</td></tr>
+        <tr><td><code>vibebook resume &lt;sessionId&gt;</code></td><td>把 spool 里的会话 fork 到 <code>~/.claude/projects/</code>,打印 <code>claude --resume</code> 命令。</td></tr>
+        <tr><td><code>vibebook config [--map-path FROM=TO]</code></td><td>读 / 改 <code>~/.vibebook/config.json</code>(比如跨设备 path 映射)。</td></tr>
+        <tr><td><code>vibebook list</code> · <code>show</code> · <code>cat</code></td><td>从 shell 浏览 spool。</td></tr>
+        <tr><td><code>vibebook crypt &lt;action&gt;</code></td><td>管理 git clean/smudge 加密 filter。</td></tr>
+        <tr><td><code>vibebook workflow</code></td><td>装跨设备合并的 GitHub Action。</td></tr>
+        <tr><td><code>vibebook doctor</code></td><td>健康检查(CLI / npm / git-crypt / 插件 / spool 格式)。</td></tr>
+        <tr><td><code>vibebook upgrade</code></td><td><code>npm install -g vibebook@latest</code> 的封装。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="container">
+    <h2>写到哪里</h2>
+    <p>所有东西都在 <code>~/.vibebook/</code> 下:</p>
+    <ul style="color: var(--olive-gray); padding-left: var(--space-6); font-family: var(--font-mono); font-size: 0.95rem;">
+      <li><code>session-repo/</code> — git 跟踪,推到你的私有 GitHub repo</li>
+      <li><code>session-repo/raw_sessions/&lt;tool&gt;/&lt;project&gt;/&lt;date&gt;/*.&#123;md,raw.json,jsonl&#125;</code> — 同步过来的会话副本加上原始 <code>.jsonl</code>(给 resume 用)</li>
+      <li><code>session-repo/.vibebook/index.json</code> — 单会话条目索引</li>
+      <li><code>config.json</code>、<code>passphrase</code>、<code>repo-salt.json</code> — CLI 本地配置</li>
+      <li><code>resume-forks.json</code> — 记录 fork 出来的 sessionId 与其 origin 的对应关系</li>
+    </ul>
+    <p style="margin-top: var(--space-4);">
+      <code>book/</code>(chronicles + topics + 目录)是可选的 Claude Code
+      插件写的,不是 npm CLI。CLI 不会启动 LLM — 它只是 transport + I/O。
+    </p>
+  </section>
+
+  <section class="container">
+    <h2>兄弟项目:vibebook 插件</h2>
+    <p>
+      配套的 <a href="https://june9593.github.io/vibebook-plugin/">Claude
+      Code 插件</a> 才是把同步过来的会话变成可检索笔记本的那一半。
+      插件提供两条 slash 命令:
+    </p>
+    <ul style="color: var(--olive-gray); padding-left: var(--space-6);">
+      <li><strong><code>/vibebook</code></strong> — 把会话整理成 <strong>chronicles</strong>(一个工作线一份,AI 优先 frontmatter)和 <strong>topics</strong>(中粒度子系统索引)。</li>
+      <li><strong><code>/vibebook-recall</code></strong> — 开始新工作前的三阶段渐进式 recall:项目 topic 列表 → 单 topic 的 chronicle → 全文。让 agent 站在过去的学习之上,而不是重新摸索。</li>
+    </ul>
+    <p>
+      插件可以脱离 npm CLI 工作(只整理本机会话),npm CLI 也可以脱离
+      插件工作(只 sync + resume)。两者一起,你既有<em>跨设备</em>的
+      可携带性,也有<em>跨时间</em>的可携带性。
+    </p>
+  </section>
+
+  <section class="container" style="padding-bottom: var(--space-24);">
+    <h2>项目链接</h2>
+    <ul style="color: var(--olive-gray); padding-left: var(--space-6);">
+      <li><a href="https://github.com/june9593/vibebook">GitHub 源代码(npm CLI)</a></li>
+      <li><a href="https://www.npmjs.com/package/vibebook">npm 包</a></li>
+      <li><a href="https://github.com/june9593/vibebook/blob/main/CHANGELOG.md">更新日志</a></li>
+      <li><a href="https://github.com/june9593/vibebook/issues">Issues / 反馈</a></li>
+      <li><a href="https://june9593.github.io/vibebook-plugin/">兄弟项目:vibebook Claude Code 插件(digest + recall)</a></li>
+    </ul>
+    <p class="muted small" style="margin-top: var(--space-6);">
+      MIT 许可证 · 由 <a href="https://github.com/june9593">@june9593</a>
+      构建 · 168 个 vitest 测试 · 可选 git clean/smudge 加密 filter。
+    </p>
+  </section>
+</Base>
