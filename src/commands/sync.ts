@@ -99,7 +99,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
 
       // Working tree is always plaintext now; the clean filter handles
       // encryption on `git add` if enabled.
-      pathsWritten.push(rel.raw, rel.md);
+      pathsWritten.push(rel.raw, rel.md, rel.jsonl);
 
       const entry: IndexEntry = {
         sessionId: s.sessionId,
