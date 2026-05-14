@@ -38,6 +38,10 @@ const Schema = z.object({
   threadingConcurrency: z.number().int().positive().default(DEFAULT_THREADING_CONCURRENCY),
   threadingMaxAttempts: z.number().int().positive().default(DEFAULT_THREADING_MAX_ATTEMPTS),
   digestEnabled: z.boolean().default(true),
+  /** Cross-device path translation: source-prefix → this-machine-prefix.
+   *  Used by `vibebook resume` to rewrite jsonl paths from another machine
+   *  into local paths. Set via `vibebook config --map-path A=B`. */
+  pathMap: z.record(z.string()).optional(),
 });
 export type Config = z.infer<typeof Schema>;
 

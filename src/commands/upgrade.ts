@@ -2,37 +2,30 @@ import { spawnSync } from "node:child_process";
 import chalk from "chalk";
 
 /**
- * `vibebook upgrade` — single-command path to "this machine's vibebook
- * is current, both CLI and Claude Code plugin".
+ * `vibebook upgrade` — refresh the npm CLI on PATH.
  *
- * Two steps:
- *   1. `npm install -g vibebook@latest` — refresh the CLI on PATH.
- *      Skipped automatically if you're running a development install
- *      (i.e. `npm link`'d from a checkout) — that's how the package
- *      author keeps a working dev loop, and we should never undo it.
- *   2. `vibebook plugin-install` — git-pull the marketplace clone +
- *      re-cache the plugin source + rewrite installed_plugins.json so
- *      Claude Code shows the new version next session.
+ * As of 0.5, the digest + recall plugin is a separate product. This
+ * command only refreshes the CLI; users update the plugin themselves
+ * via `/plugin update vibebook` inside any Claude Code session.
  *
- * Fail-open at every step. If npm needs sudo / nvm permissions / the
- * network is gone, we surface the exact command and continue (or stop
- * cleanly). The user always ends with a clear "do X next" message.
+ * Skipped automatically if you're running a development install (i.e.
+ * `npm link`'d from a checkout) — that's how the package author keeps
+ * a working dev loop, and we should never undo it.
+ *
+ * Fail-open: if npm needs sudo / nvm permissions / the network is
+ * gone, we surface the exact command and stop cleanly.
  */
 
 export interface UpgradeOptions {
   /** Skip the npm step. Useful for users who manage vibebook via a
    *  package manager other than npm-global, or via npm-link. */
   noCli?: boolean;
-  /** Skip the plugin step. Rare — usually the user wants both. */
-  noPlugin?: boolean;
 }
 
 export async function upgradeCmd(opts: UpgradeOptions = {}): Promise<void> {
-  console.log(chalk.cyan("vibebook upgrade — keep CLI + Claude Code plugin in sync\n"));
+  console.log(chalk.cyan("vibebook upgrade — refresh the npm CLI\n"));
 
-  let cliRefreshed = false;
-
-  // Step 1 — refresh the npm-global CLI.
+  // Refresh the npm-global CLI.
   if (!opts.noCli) {
     if (isLinkedDevInstall()) {
       console.log(chalk.gray("  ✓ skipping npm install (vibebook is npm-link'd from a dev checkout)"));
@@ -41,49 +34,20 @@ export async function upgradeCmd(opts: UpgradeOptions = {}): Promise<void> {
       const r = spawnSync("npm", ["install", "-g", "vibebook@latest"], { stdio: "inherit" });
       if (r.status === 0) {
         console.log(chalk.green("  ✓ CLI refreshed"));
-        cliRefreshed = true;
       } else {
         console.log(chalk.yellow(
           "  ! npm install failed. Common causes:\n" +
           "    - You're on a system Node — try `sudo npm install -g vibebook@latest`\n" +
-          "    - Or a stale nvm cache — try `nvm use --lts && npm install -g vibebook@latest`\n" +
-          "  Continuing with the plugin step using whatever CLI is on PATH right now.",
+          "    - Or a stale nvm cache — try `nvm use --lts && npm install -g vibebook@latest`",
         ));
       }
     }
   }
 
-  // Step 2 — refresh the Claude Code plugin.
-  if (!opts.noPlugin) {
-    console.log(chalk.cyan("\n→ vibebook plugin-install"));
-    try {
-      const { installPluginFromGitHub } = await import("./plugin-install.js");
-      const r = await installPluginFromGitHub();
-      if (r.ok) {
-        console.log(chalk.green(`  ✓ ${r.message}`));
-        if (r.changed) {
-          console.log(chalk.gray("  Restart Claude Code (close and reopen) to pick up the new plugin."));
-        }
-      } else {
-        console.log(chalk.yellow(`  ! ${r.message}`));
-        console.log(chalk.gray(
-          "  Fall back: in the Claude Code REPL, run\n" +
-          "    /plugin marketplace update vibebook\n" +
-          "    /plugin update vibebook@vibebook",
-        ));
-      }
-    } catch (e) {
-      console.log(chalk.red(`  ✗ plugin install errored: ${(e as Error).message}`));
-    }
-  }
-
-  // Final summary — what's the user's expected next step?
+  // Final summary — point users at the separate plugin update flow.
   console.log("");
-  if (cliRefreshed) {
-    console.log(chalk.cyan("Done. Reopen any running Claude Code session so it loads the new plugin."));
-  } else {
-    console.log(chalk.cyan("Done. If the plugin updated, reopen Claude Code; otherwise no action needed."));
-  }
+  console.log(chalk.cyan("For the digest + recall plugin, run:"));
+  console.log("  /plugin update vibebook    (in any Claude Code session)");
 }
 
 /** Detect a development install — `npm link` puts the global vibebook

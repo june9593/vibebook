@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
 import type { NormalizedSession } from "./types.js";
 
@@ -9,7 +9,7 @@ export interface WriteSessionOptions {
   includeReasoning?: boolean;
 }
 
-export interface WrittenPaths { raw: string; md: string; }
+export interface WrittenPaths { raw: string; md: string; jsonl: string; }
 
 export function writeSession(repoRoot: string, s: NormalizedSession, opts: WriteSessionOptions = {}): WrittenPaths {
   const date = s.startedAt.slice(0, 10); // YYYY-MM-DD
@@ -24,7 +24,10 @@ export function writeSession(repoRoot: string, s: NormalizedSession, opts: Write
   writeFileSync(join(repoRoot, rawRel), JSON.stringify(s, null, 2) + "\n");
   writeFileSync(join(repoRoot, mdRel), renderMarkdown(s, opts.includeReasoning ?? true));
 
-  return { raw: rawRel, md: mdRel };
+  const jsonlRel = join(dirRel, `${base}.jsonl`);
+  copyFileSync(s.sourcePath, join(repoRoot, jsonlRel));
+
+  return { raw: rawRel, md: mdRel, jsonl: jsonlRel };
 }
 
 function renderMarkdown(s: NormalizedSession, includeReasoning: boolean): string {

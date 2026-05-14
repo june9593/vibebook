@@ -1,7 +1,7 @@
 {
   "name": "vibebook",
-  "version": "0.4.6",
-  "description": "Sync AI coding sessions across machines + digest into a per-project chronicle + topic book via in-session Claude. Ships as both an npm CLI and a Claude Code plugin. Atomic cards delegated to memex when installed.",
+  "version": "0.5.0",
+  "description": "Cross-device sync + resume for AI coding sessions (Claude Code + Copilot Chat). Companion to the vibebook Claude Code plugin which provides digest + recall.",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -39,7 +39,6 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "tsx bin/vibebook.ts",
-    "version": "node scripts/sync-plugin-version.mjs && git add .claude-plugin/plugin.json .claude-plugin/marketplace.json",
     "prepack": "npm run build && chmod +x dist/bin/vibebook.js",
     "prepublishOnly": "npm test"
   },
