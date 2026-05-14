@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.1 — 2026-05-14
+
+### NEW — Resume forks the session
+
+`vibebook resume <sessionId>` now treats each resume as a **fork**:
+the new copy on this device gets a fresh sessionId so two devices
+resuming the same source session can continue in parallel without
+clobbering each other when their spools sync up.
+
+- A new `~/.vibebook/resume-forks.json` registry maps every freshly
+  forked sessionId to its origin.
+- The next `vibebook sync` stamps the origin onto the spool's index
+  entry as `originSessionId`, so plugin-side digest tooling can later
+  group same-source threads.
+- `vibebook resume` output now shows the fork: `Session forked: abc123 → <new-uuid>`.
+
+This closes the open design question from the v0.5.0 roadmap: "B 推回时怎么标记是 resumed-from-A".
+
 ## 0.5.0 — 2026-05-14
 
 ### BREAKING — Major slim, paired with the new vibebook plugin
@@ -66,7 +84,7 @@ Three new commands:
 - `vibebook resume <sessionId>` — copy a spool session's jsonl into `~/.claude/projects/<encoded-cwd>/<id>.jsonl` and print the `cd <project> && claude --resume <id>` command to run.
 - `vibebook config --map-path FROM=TO` — register a cross-device path translation (e.g. `/Users/yueA=/Users/yueB`) used by `resume` to rewrite jsonl paths.
 
-Resume does NOT yet do fork bookkeeping (if both A and B resume the same session and continue, the diverging jsonls each ship at next sync). That's deferred to v0.6.0.
+Resume does NOT yet do fork bookkeeping (if both A and B resume the same session and continue, the diverging jsonls each ship at next sync). That's deferred to v0.5.1.
 
 ### Other changes
 
