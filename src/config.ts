@@ -38,9 +38,11 @@ const Schema = z.object({
   threadingConcurrency: z.number().int().positive().default(DEFAULT_THREADING_CONCURRENCY),
   threadingMaxAttempts: z.number().int().positive().default(DEFAULT_THREADING_MAX_ATTEMPTS),
   digestEnabled: z.boolean().default(true),
-}).passthrough();
-// .passthrough() preserves unknown fields (e.g. pathMap added in T16) so
-// commands written before their schema field lands can still read them.
+  /** Cross-device path translation: source-prefix → this-machine-prefix.
+   *  Used by `vibebook resume` to rewrite jsonl paths from another machine
+   *  into local paths. Set via `vibebook config --map-path A=B`. */
+  pathMap: z.record(z.string()).optional(),
+});
 export type Config = z.infer<typeof Schema>;
 
 export function configExists(): boolean { return existsSync(CONFIG_PATH); }

@@ -32,7 +32,7 @@ export async function resumeCmd(opts: ResumeOptions): Promise<ResumeResult> {
     );
   }
 
-  const pathMap: PathMap = ((cfg as unknown as { pathMap?: PathMap }).pathMap) ?? {};
+  const pathMap: PathMap = cfg.pathMap ?? {};
 
   // Translate the source's cwd to this machine's
   const localCwd = applyPathMap(entry.projectRaw, pathMap);
