@@ -38,7 +38,9 @@ const Schema = z.object({
   threadingConcurrency: z.number().int().positive().default(DEFAULT_THREADING_CONCURRENCY),
   threadingMaxAttempts: z.number().int().positive().default(DEFAULT_THREADING_MAX_ATTEMPTS),
   digestEnabled: z.boolean().default(true),
-});
+}).passthrough();
+// .passthrough() preserves unknown fields (e.g. pathMap added in T16) so
+// commands written before their schema field lands can still read them.
 export type Config = z.infer<typeof Schema>;
 
 export function configExists(): boolean { return existsSync(CONFIG_PATH); }
