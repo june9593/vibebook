@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, type Dirent } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -12,10 +12,14 @@ import chalk from "chalk";
  * What we check:
  *   1. CLI version on PATH (`vibebook --version`)
  *   2. Latest published version on npm (`npm view vibebook version`)
- *   3. Claude plugin manifest version (the marketplace.json that was
- *      cloned into ~/.claude/plugins/marketplaces/vibebook/)
- *   4. Plugin install entry version (~/.claude/plugins/installed_plugins.json)
- *   5. `~/.vibebook/config.json` exists, repoPath exists + is a git repo
+ *   3. Claude plugin marketplace clone present at
+ *      ~/.claude/plugins/marketplaces/vibebook-plugin/ (outside-in install).
+ *      Informational — npm vibebook handles cross-device sync on its own;
+ *      the plugin only adds chronicle digest + recall.
+ *   4. `~/.vibebook/config.json` exists, repoPath exists + is a git repo
+ *   5. Spool scan for orphan *.raw.json files with no sibling *.jsonl
+ *      (sessions captured before v0.5.0 — `vibebook resume` can't replay
+ *      those)
  *   6. git crypt filter wired (when config.encrypt = true)
  *   7. memex on PATH (informational; not an error if missing)
  *
@@ -66,49 +70,27 @@ export async function doctorCmd(): Promise<void> {
     });
   }
 
-  // 3 + 4. Claude plugin
-  const pluginManifestVersion = readPluginManifestVersion();
-  const pluginInstallEntry = readInstalledPluginEntry();
-  if (pluginManifestVersion === null && pluginInstallEntry === null) {
+  // 3. Claude plugin (outside-in detection — the plugin lives in its own repo,
+  //    cloned by Claude Code into ~/.claude/plugins/marketplaces/vibebook-plugin/
+  //    when the user runs `/plugin marketplace add june9593/vibebook-plugin`.
+  //    npm vibebook itself does not install the plugin.)
+  const pluginMarketplacePath = join(
+    homedir(), ".claude", "plugins", "marketplaces", "vibebook-plugin",
+  );
+  if (existsSync(pluginMarketplacePath)) {
     checks.push({
-      name: "Claude plugin", status: "fail",
-      detail: "no marketplace + no installed_plugins entry",
-      fix: "vibebook plugin-install",
+      name: "Claude plugin", status: "ok",
+      detail: "vibebook-plugin marketplace registered",
     });
   } else {
-    if (pluginManifestVersion) {
-      const matchesCli = !cliVersion || cliVersion === pluginManifestVersion;
-      checks.push({
-        name: "Claude plugin manifest", status: matchesCli ? "ok" : "warn",
-        detail: matchesCli
-          ? `vibebook plugin v${pluginManifestVersion}`
-          : `manifest v${pluginManifestVersion} · CLI v${cliVersion} (mismatch)`,
-        fix: matchesCli ? undefined : "vibebook upgrade",
-      });
-    } else {
-      checks.push({
-        name: "Claude plugin manifest", status: "warn",
-        detail: "marketplace clone present but no plugin.json — partial install?",
-        fix: "vibebook plugin-install",
-      });
-    }
-
-    if (pluginInstallEntry) {
-      const installedAt = pluginInstallEntry.installedAt?.slice(0, 10) ?? "?";
-      checks.push({
-        name: "Plugin installed entry", status: "ok",
-        detail: `cache sha=${pluginInstallEntry.version} · installed ${installedAt}`,
-      });
-    } else {
-      checks.push({
-        name: "Plugin installed entry", status: "warn",
-        detail: "marketplace cloned but installed_plugins.json missing this plugin",
-        fix: "vibebook plugin-install",
-      });
-    }
+    checks.push({
+      name: "Claude plugin", status: "warn",
+      detail: "vibebook-plugin (chronicle digest + recall) not installed",
+      fix: "/plugin marketplace add june9593/vibebook-plugin && /plugin install vibebook   # optional — npm vibebook handles cross-device sync; the plugin handles digest + recall",
+    });
   }
 
-  // 5. Config + repoPath
+  // 4. Config + repoPath
   const config = readConfigSafe();
   if (!config) {
     checks.push({
@@ -135,6 +117,25 @@ export async function doctorCmd(): Promise<void> {
         name: "Session repo", status: "ok",
         detail: `${config.repoPath} (${config.repoUrl || "local-only"})`,
       });
+    }
+
+    // 5. Orphan *.raw.json scan (sessions captured before v0.5.0 don't
+    //    have the original .jsonl preserved, so `vibebook resume` can't
+    //    replay them. Only meaningful when the repo exists.)
+    if (repoExists) {
+      const orphans = findOrphanedRawJsons(config.repoPath);
+      if (orphans.length > 0) {
+        checks.push({
+          name: "Resume-ready spool", status: "warn",
+          detail: `${orphans.length} session(s) predate v0.5.0 (no sibling .jsonl) — \`vibebook resume\` won't work for them`,
+          fix: `rm -rf "${join(config.repoPath, "raw_sessions")}" && vibebook sync   # re-extracts with .jsonl preserved; book/ is unaffected`,
+        });
+      } else {
+        checks.push({
+          name: "Resume-ready spool", status: "ok",
+          detail: "all spooled sessions have sibling .jsonl",
+        });
+      }
     }
 
     // 6. Git filter (only when encrypt = true)
@@ -217,37 +218,6 @@ function readNpmLatestVersion(): string | null {
   return v || null;
 }
 
-function readPluginManifestVersion(): string | null {
-  const path = join(homedir(), ".claude", "plugins", "marketplaces", "vibebook", ".claude-plugin", "marketplace.json");
-  if (!existsSync(path)) return null;
-  try {
-    const json = JSON.parse(readFileSync(path, "utf8"));
-    const plugin = json.plugins?.find((p: { name: string }) => p.name === "vibebook");
-    return plugin?.version ?? null;
-  } catch {
-    return null;
-  }
-}
-
-interface InstalledEntry {
-  version: string;
-  installPath: string;
-  installedAt: string;
-  gitCommitSha?: string;
-}
-
-function readInstalledPluginEntry(): InstalledEntry | null {
-  const path = join(homedir(), ".claude", "plugins", "installed_plugins.json");
-  if (!existsSync(path)) return null;
-  try {
-    const json = JSON.parse(readFileSync(path, "utf8"));
-    const entries = json.plugins?.["vibebook@vibebook"] ?? [];
-    return entries[0] ?? null;
-  } catch {
-    return null;
-  }
-}
-
 interface MinimalConfig {
   repoPath: string;
   repoUrl?: string;
@@ -262,6 +232,39 @@ function readConfigSafe(): MinimalConfig | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Walk `<repoPath>/raw_sessions/` and return paths of `*.raw.json` files
+ * that don't have a matching `*.jsonl` sibling. Pre-v0.5.0 sync runs
+ * only emitted the .raw.json envelope; without the .jsonl we can't
+ * `vibebook resume` those threads.
+ */
+function findOrphanedRawJsons(repoPath: string): string[] {
+  const root = join(repoPath, "raw_sessions");
+  if (!existsSync(root)) return [];
+  const orphans: string[] = [];
+  const walk = (dir: string): void => {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) {
+        walk(p);
+        continue;
+      }
+      if (!e.isFile() || !e.name.endsWith(".raw.json")) continue;
+      const base = e.name.slice(0, -".raw.json".length);
+      const sibling = join(dir, `${base}.jsonl`);
+      if (!existsSync(sibling)) orphans.push(p);
+    }
+  };
+  walk(root);
+  return orphans;
 }
 
 function isCryptFilterWired(repoPath: string): boolean {
