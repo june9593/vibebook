@@ -56,12 +56,11 @@ export async function run(argv: string[]) {
     });
   program
     .command("upgrade")
-    .description("Refresh both the npm CLI (`npm install -g vibebook@latest`) and the Claude Code plugin in a single command. Skips the npm step if vibebook is npm-link'd from a dev checkout.")
+    .description("Refresh the npm CLI (`npm install -g vibebook@latest`). Skips the npm step if vibebook is npm-link'd from a dev checkout. To update the Claude Code plugin, run `/plugin update vibebook` in any session.")
     .option("--no-cli", "skip the `npm install -g` step")
-    .option("--no-plugin", "skip the plugin re-install step")
-    .action(async (opts: { cli?: boolean; plugin?: boolean }) => {
+    .action(async (opts: { cli?: boolean }) => {
       const { upgradeCmd } = await import("./commands/upgrade.js");
-      await upgradeCmd({ noCli: opts.cli === false, noPlugin: opts.plugin === false });
+      await upgradeCmd({ noCli: opts.cli === false });
     });
   program
     .command("doctor")
