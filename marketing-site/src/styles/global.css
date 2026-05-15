@@ -128,9 +128,27 @@ pre code {
   color: var(--near-black);
   border: none;
 }
-.site-nav .links { display: flex; gap: var(--space-5); font-size: 0.94rem; }
+.site-nav .links { display: flex; align-items: center; gap: var(--space-5); font-size: 0.94rem; }
 .site-nav .links a { color: var(--olive-gray); border: none; }
 .site-nav .links a:hover { color: var(--near-black); }
+.site-nav .links .lang-switch {
+  /* Visually distinct from regular nav links — small chip with a border */
+  border: 1px solid var(--border-warm);
+  border-radius: var(--r-soft);
+  padding: 2px 10px;
+  font-size: 0.85rem;
+  color: var(--charcoal-warm);
+}
+.site-nav .links .lang-switch:hover {
+  background: var(--warm-sand);
+  color: var(--near-black);
+}
+
+/* Chinese typography: when the page is in zh, use Noto Serif SC for
+   serif headings (Source Serif 4 doesn't include CJK glyphs). */
+:lang(zh-Hans), html[lang="zh-Hans"] {
+  --font-serif: "Noto Serif SC", "Source Serif 4", "Songti SC", "PingFang SC", serif;
+}
 
 .site-footer {
   border-top: 1px solid var(--border-cream);
