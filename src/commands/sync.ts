@@ -6,6 +6,7 @@ import { VSCodeCopilotAdapter } from "../sources/vscode-copilot.js";
 import type { SourceAdapter } from "../sources/base.js";
 import { loadIndex, saveIndex, hasUnchanged, upsertEntry } from "../index-store.js";
 import type { IndexEntry } from "../types.js";
+import { lookupOrigin } from "./resume/fork.js";
 import { writeSession } from "../writer.js";
 import { readConfig, writeConfig, writeRepoSaltFile, type Config } from "../config.js";
 import { deviceBranchFromHostname } from "../device.js";
@@ -116,6 +117,11 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
         sourceMtimeMs: d.sourceMtimeMs,
         sourceSha256: d.sourceSha256,
       };
+      // If this device created the session via `vibebook resume <id>`, the
+      // fork registry maps the new sessionId back to its origin. Stamp it
+      // onto the entry so plugin-side digest can group same-source threads.
+      const fork = lookupOrigin(s.sessionId);
+      if (fork) entry.originSessionId = fork.originSessionId;
       upsertEntry(idx, entry);
       newCount++;
       console.log(chalk.green(`+ ${s.tool}/${s.project}/${s.nameSlug} (${s.shortId})`));

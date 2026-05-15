@@ -1,9 +1,11 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
+import { randomUUID } from "node:crypto";
 import { readConfig } from "../../config.js";
 import { loadIndex } from "../../index-store.js";
 import { rewriteJsonlPaths, type PathMap } from "./path-rewrite.js";
+import { recordFork, rewriteSessionId } from "./fork.js";
 
 export interface ResumeOptions {
   sessionId: string;
@@ -14,8 +16,12 @@ export interface ResumeResult {
   dest: string;
   /** This machine's local cwd for the project (after pathMap translation). */
   localCwd: string;
-  /** A one-line hint for the user, e.g. `cd /path && claude --resume <id>`. */
+  /** A one-line hint for the user, e.g. `cd /path && claude --resume <newId>`. */
   hint: string;
+  /** The new sessionId assigned to the fork on this device. */
+  newSessionId: string;
+  /** The original sessionId on the source device (recorded in the fork registry). */
+  originSessionId: string;
 }
 
 export async function resumeCmd(opts: ResumeOptions): Promise<ResumeResult> {
@@ -47,16 +53,26 @@ export async function resumeCmd(opts: ResumeOptions): Promise<ResumeResult> {
     );
   }
   const sourceJsonl = readFileSync(srcAbs, "utf8");
-  const rewrittenJsonl = rewriteJsonlPaths(sourceJsonl, pathMap);
 
-  // Write to ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl
+  // Fork: assign a new sessionId so this device's continuation doesn't
+  // collide with the source device's continuation when both spools sync up.
+  // Provenance is recorded in ~/.vibebook/resume-forks.json so the next
+  // `vibebook sync` can stamp originSessionId onto the new spool entry.
+  const originSessionId = entry.sessionId;
+  const newSessionId = randomUUID();
+  const idRewritten = rewriteSessionId(sourceJsonl, originSessionId, newSessionId);
+  const fullyRewritten = rewriteJsonlPaths(idRewritten, pathMap);
+
+  // Write to ~/.claude/projects/<encoded-cwd>/<newSessionId>.jsonl
   const encodedCwd = encodeCwdForClaude(localCwd);
-  const dest = join(homedir(), ".claude", "projects", encodedCwd, `${entry.sessionId}.jsonl`);
+  const dest = join(homedir(), ".claude", "projects", encodedCwd, `${newSessionId}.jsonl`);
   mkdirSync(dirname(dest), { recursive: true });
-  writeFileSync(dest, rewrittenJsonl);
+  writeFileSync(dest, fullyRewritten);
 
-  const hint = `cd ${localCwd} && claude --resume ${entry.sessionId}`;
-  return { dest, localCwd, hint };
+  recordFork(newSessionId, originSessionId);
+
+  const hint = `cd ${localCwd} && claude --resume ${newSessionId}`;
+  return { dest, localCwd, hint, newSessionId, originSessionId };
 }
 
 /** Apply the longest-prefix-wins path translation to a single path string. */

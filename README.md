@@ -61,6 +61,13 @@ vibebook config --map-path /Users/yueA=/Users/yueB
 After that, `vibebook resume` rewrites all absolute paths in the jsonl
 during copy, so `claude --resume` lands in the right local cwd.
 
+Each resume is a **fork** — B gets a fresh sessionId so you can
+continue on B without colliding with A if A also keeps chatting on
+the same source session. The fork's origin is recorded in
+`~/.vibebook/resume-forks.json` and stamped onto the spool index entry
+on the next `vibebook sync` (as `originSessionId`), so plugin-side
+digest tooling can later reason about same-source threads.
+
 ## Commands
 
 | Command | What it does |

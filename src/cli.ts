@@ -151,7 +151,8 @@ export async function run(argv: string[]) {
     .action(async (sessionId: string) => {
       const { resumeCmd } = await import("./commands/resume/resume.js");
       const result = await resumeCmd({ sessionId });
-      console.log(`Session ready at: ${result.dest}`);
+      console.log(`Session forked: ${result.originSessionId} → ${result.newSessionId}`);
+      console.log(`Written to: ${result.dest}`);
       console.log(`Continue with:`);
       console.log(`  ${result.hint}`);
     });
