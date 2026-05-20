@@ -9,7 +9,7 @@ import {
   DEFAULT_THREADING_CONCURRENCY, DEFAULT_THREADING_MAX_ATTEMPTS,
   type Config,
 } from "../config.js";
-import { deviceBranchFromHostname } from "../device.js";
+import { deviceBranchFromHostname, isStableDeviceName } from "../device.js";
 
 export interface WizardAnswers {
   repoUrl: string;
@@ -21,6 +21,10 @@ export interface WizardAnswers {
   enableAggregateCI: boolean;
   /** Render assistant reasoning into raw_sessions/*.md (Q7). Default true. */
   includeReasoning: boolean;
+  /** Stable git-branch name for this machine. User picks at Q8 because
+   *  hostname() drifts on macOS across networks; we default to hostname()
+   *  but recommend overriding with a physical-label name. */
+  deviceBranch: string;
 }
 
 /**
@@ -116,7 +120,21 @@ export async function runWizard(): Promise<WizardAnswers> {
     true,
   );
 
-  return { repoUrl, localPath, encrypt, passphraseEntered, enableAggregateCI, includeReasoning };
+  // Q8: device branch name. hostname() drifts on macOS (mDNS in home wifi,
+  // DHCP-given names on corp VPN, hotspot etc.) — each network creates a new
+  // device branch, fragmenting the spool. We default to the current hostname
+  // but strongly recommend overriding with a physical-label-style name.
+  const hostnameDefault = deviceBranchFromHostname();
+  const stableLooking = isStableDeviceName(hostnameDefault);
+  const stableHint = stableLooking
+    ? "current hostname looks stable, can keep"
+    : "WARNING: current hostname looks like macOS drift (e.g. *.local / DHCP) — recommend overriding with a physical label like 'mini2' or 'work-laptop'";
+  const deviceBranch = (await prompt(
+    chalk.cyan("Q8") + ` Stable device name for this machine's git branch? (${stableHint})`,
+    hostnameDefault,
+  )).trim() || hostnameDefault;
+
+  return { repoUrl, localPath, encrypt, passphraseEntered, enableAggregateCI, includeReasoning, deviceBranch };
 }
 
 /**
@@ -125,16 +143,44 @@ export async function runWizard(): Promise<WizardAnswers> {
  */
 export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
   if (a.repoUrl) {
-    const mat = await materializeRepoAtPath(a.localPath, a.repoUrl);
+    let mat;
+    try {
+      mat = await materializeRepoAtPath(a.localPath, a.repoUrl);
+    } catch (err) {
+      // Plugin-first scenario: the user installed vibebook-plugin before
+      // the npm CLI, so ~/.vibebook/session-repo/ is non-empty (book/,
+      // raw_sessions/) but not a git repo. Offer to adopt it in place
+      // rather than asking the user to `rm -rf` their plugin data.
+      const msg = (err as Error).message;
+      if (msg.includes("is not empty and is not a git repo")) {
+        const adopt = await promptYesNo(
+          chalk.yellow(
+            `\n  ${a.localPath} has data in it but isn't a git repo (looks like\n` +
+            `  vibebook-plugin wrote it before the npm CLI was installed).\n` +
+            `  Adopt this directory: 'git init' + add origin '${a.repoUrl}' + create\n` +
+            `  branch '${a.deviceBranch}' with your existing files as its first commit?\n` +
+            `  (Nothing on disk is deleted or moved.)`,
+          ),
+          true,
+        );
+        if (!adopt) throw err;
+        const { adoptPluginDir } = await import("../git-ops.js");
+        mat = await adoptPluginDir(a.localPath, a.repoUrl, a.deviceBranch);
+        console.log(chalk.gray(`  adopted ${a.localPath} into new repo on branch '${a.deviceBranch}'`));
+      } else {
+        throw err;
+      }
+    }
     if (mat.kind === "existing" && mat.existingRemote && mat.existingRemote !== a.repoUrl) {
       console.log(chalk.yellow(
         `  warning: ${a.localPath} already has remote '${mat.existingRemote}', not '${a.repoUrl}'. Using existing.`,
       ));
     } else if (mat.kind === "cloned") {
       console.log(chalk.gray(`  cloned ${a.repoUrl} -> ${a.localPath}`));
-    } else {
+    } else if (mat.kind === "existing") {
       console.log(chalk.gray(`  using existing repo at ${a.localPath}`));
     }
+    // "adopted" already logged inline above.
   } else {
     // Local-only mode: ensure the path exists as a plain git repo (no remote).
     const { mkdirSync, existsSync } = await import("node:fs");
@@ -157,7 +203,7 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
     repoUrl: a.repoUrl,
     encrypt: a.encrypt,
     salt: freshSaltBase64(),
-    deviceBranch: deviceBranchFromHostname(),
+    deviceBranch: a.deviceBranch,
     runner: "claude-cli",
     enableAggregateCI: a.enableAggregateCI,
     includeReasoning: a.includeReasoning,

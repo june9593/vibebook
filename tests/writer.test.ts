@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mkdtempSync, readFileSync, existsSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writeSession } from "../src/writer.js";
+import { writeSession, JSONL_MAX_BYTES } from "../src/writer.js";
 import type { NormalizedSession } from "../src/types.js";
 
 let repo: string;
@@ -79,10 +79,61 @@ describe("writeSession", () => {
 
     const written = writeSession(repo, sess);
     expect(written.jsonl).toBeTruthy();
-    expect(existsSync(join(repo, written.jsonl))).toBe(true);
-    const copied = readFileSync(join(repo, written.jsonl), "utf8");
+    expect(existsSync(join(repo, written.jsonl!))).toBe(true);
+    const copied = readFileSync(join(repo, written.jsonl!), "utf8");
     expect(copied).toBe(sourceContent);
 
     rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("skips jsonl when source exceeds GitHub-push size cap (still writes .md + .raw.json)", () => {
+    // Build a source file just over the 95 MB cap. Using a single write of
+    // (cap + 1) bytes — slow-ish but only ~95 MB, runs in ~1s and is the
+    // only way to truly exercise the size check without mocking.
+    const tmp = mkdtempSync(join(tmpdir(), "writer-oversized-"));
+    const sourceJsonl = join(tmp, "huge.jsonl");
+    const bytes = Buffer.alloc(JSONL_MAX_BYTES + 1, "a");
+    writeFileSync(sourceJsonl, bytes);
+
+    const sess: NormalizedSession = {
+      sessionId: "huge-session",
+      shortId: "huge1234",
+      tool: "claude",
+      project: "test-project",
+      projectRaw: "/x",
+      nameSlug: "huge",
+      displayName: "huge",
+      startedAt: "2026-05-20T00:00:00Z",
+      endedAt: "2026-05-20T00:01:00Z",
+      sourcePath: sourceJsonl,
+      messages: [],
+    };
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const written = writeSession(repo, sess);
+      expect(written.jsonl).toBeUndefined();
+      expect(existsSync(join(repo, written.raw))).toBe(true);
+      expect(existsSync(join(repo, written.md))).toBe(true);
+      // Verify the would-be jsonl was NOT copied
+      expect(existsSync(join(repo, "raw_sessions/claude/test-project/2026-05-20/huge__huge1234.jsonl"))).toBe(false);
+      // Verify user got a warning explaining why
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/oversized jsonl skipped/));
+    } finally {
+      warnSpy.mockRestore();
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("returns undefined jsonl when source file is missing (silent skip)", () => {
+    const sess: NormalizedSession = {
+      ...session,
+      sourcePath: "/nonexistent/path/never/created.jsonl",
+    };
+    const written = writeSession(repo, sess);
+    expect(written.jsonl).toBeUndefined();
+    // .md and .raw.json still got written
+    expect(existsSync(join(repo, written.raw))).toBe(true);
+    expect(existsSync(join(repo, written.md))).toBe(true);
   });
 });

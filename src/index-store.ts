@@ -31,7 +31,14 @@ export function hasUnchanged(
   sessionId: string,
   mtimeMs: number,
   sha256: string,
+  repoRoot: string,
 ): boolean {
   const e = idx.entries[keyFor(tool, sessionId)];
-  return !!e && e.sourceMtimeMs === mtimeMs && e.sourceSha256 === sha256;
+  if (!e || e.sourceMtimeMs !== mtimeMs || e.sourceSha256 !== sha256) return false;
+  // The index can survive branch switches that leave raw_sessions/ incomplete
+  // — if the indexed file is missing from the working tree, treat it as stale
+  // so the entry gets re-extracted. Otherwise the new branch would never
+  // collect the file it's missing.
+  if (!existsSync(join(repoRoot, e.relativePath))) return false;
+  return true;
 }

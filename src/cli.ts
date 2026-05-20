@@ -160,11 +160,27 @@ export async function run(argv: string[]) {
     .command("config")
     .description("Inspect or modify ~/.vibebook/config.json.")
     .option("--map-path <FROM=TO>", "add a cross-device path mapping (e.g. /Users/yueA=/Users/yueB) for `vibebook resume`")
-    .action(async (opts: { mapPath?: string }) => {
+    .option("--device <name>", "set a stable device branch name (e.g. 'mini2') — overrides the volatile hostname() default")
+    .action(async (opts: { mapPath?: string; device?: string }) => {
       if (opts.mapPath) {
         const { setMapPath } = await import("./commands/resume/config-pathmap.js");
         setMapPath(opts.mapPath);
         console.log(`Added pathMap entry. Current ~/.vibebook/config.json updated.`);
+        return;
+      }
+      if (opts.device) {
+        const { setDeviceBranch } = await import("./commands/resume/config-pathmap.js");
+        const { previous, current } = setDeviceBranch(opts.device);
+        console.log(`Device branch: ${previous} → ${current}`);
+        if (previous && previous !== current) {
+          console.log(
+            `\nNote: your spool repo may still have a local + remote branch named '${previous}'.\n` +
+            `If you want to clean those up:\n` +
+            `  cd ~/.vibebook/session-repo\n` +
+            `  git branch -D '${previous}' 2>/dev/null\n` +
+            `  git push origin --delete '${previous}' 2>/dev/null`,
+          );
+        }
         return;
       }
       // No flags: print current config

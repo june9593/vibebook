@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, copyFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, copyFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { NormalizedSession } from "./types.js";
 
@@ -9,7 +9,25 @@ export interface WriteSessionOptions {
   includeReasoning?: boolean;
 }
 
-export interface WrittenPaths { raw: string; md: string; jsonl: string; }
+export interface WrittenPaths {
+  raw: string;
+  md: string;
+  /** Original jsonl copied alongside the .md/.raw.json. Undefined when the
+   *  source exceeds JSONL_MAX_BYTES (GitHub rejects pushes >100 MB and
+   *  warns >50 MB). Skipped jsonls cannot be `vibebook resume`d but the
+   *  .md/.raw.json digest still ships. */
+  jsonl?: string;
+}
+
+/** Hard cap on jsonl size we'll copy into the spool. GitHub's hard reject
+ *  is 100 MB; we leave a 5 MB margin so combined commits don't push us over.
+ *  Sessions above this still get .md + .raw.json. */
+export const JSONL_MAX_BYTES = 95 * 1024 * 1024;
+
+/** Soft warning threshold — GitHub starts complaining at 50 MB even though
+ *  it accepts the push. We log a one-liner so users notice before the spool
+ *  bloats. */
+export const JSONL_WARN_BYTES = 50 * 1024 * 1024;
 
 export function writeSession(repoRoot: string, s: NormalizedSession, opts: WriteSessionOptions = {}): WrittenPaths {
   const date = s.startedAt.slice(0, 10); // YYYY-MM-DD
@@ -24,10 +42,37 @@ export function writeSession(repoRoot: string, s: NormalizedSession, opts: Write
   writeFileSync(join(repoRoot, rawRel), JSON.stringify(s, null, 2) + "\n");
   writeFileSync(join(repoRoot, mdRel), renderMarkdown(s, opts.includeReasoning ?? true));
 
-  const jsonlRel = join(dirRel, `${base}.jsonl`);
-  copyFileSync(s.sourcePath, join(repoRoot, jsonlRel));
+  const jsonlRel = maybeCopyJsonl(repoRoot, dirRel, base, s.sourcePath);
 
-  return { raw: rawRel, md: mdRel, jsonl: jsonlRel };
+  return jsonlRel ? { raw: rawRel, md: mdRel, jsonl: jsonlRel } : { raw: rawRel, md: mdRel };
+}
+
+/** Copy the original jsonl into the spool unless it exceeds the GitHub-push
+ *  size cap. Returns the relative path on success, undefined on skip. */
+function maybeCopyJsonl(repoRoot: string, dirRel: string, base: string, sourcePath: string): string | undefined {
+  let size: number;
+  try {
+    size = statSync(sourcePath).size;
+  } catch {
+    // Source file gone — nothing we can do; skip silently. The .md/.raw.json
+    // we already wrote captures the session content.
+    return undefined;
+  }
+  if (size > JSONL_MAX_BYTES) {
+    const mb = (size / 1024 / 1024).toFixed(1);
+    console.warn(
+      `! oversized jsonl skipped (${mb} MB > 95 MB GitHub limit): ${sourcePath}\n` +
+      `  .md + .raw.json still written; this session can't be 'vibebook resume'd.`,
+    );
+    return undefined;
+  }
+  if (size > JSONL_WARN_BYTES) {
+    const mb = (size / 1024 / 1024).toFixed(1);
+    console.warn(`! large jsonl (${mb} MB > 50 MB): ${sourcePath} — git push may warn.`);
+  }
+  const jsonlRel = join(dirRel, `${base}.jsonl`);
+  copyFileSync(sourcePath, join(repoRoot, jsonlRel));
+  return jsonlRel;
 }
 
 function renderMarkdown(s: NormalizedSession, includeReasoning: boolean): string {

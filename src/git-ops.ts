@@ -39,8 +39,12 @@ function cloneWithProgress(repoUrl: string, dest: string): Promise<void> {
 
 export interface MaterializeResult {
   /** "cloned" = brand-new clone; "existing" = used existing checkout;
-   *  "init" = empty dir made into a git repo with origin set. */
-  kind: "cloned" | "existing" | "init";
+   *  "init" = empty dir made into a git repo with origin set;
+   *  "adopted" = non-empty non-git dir (typically written by vibebook-plugin
+   *  before the npm CLI was installed) was turned into a git repo, origin
+   *  added, fetched, and the user's local files preserved as the new branch's
+   *  initial commit. */
+  kind: "cloned" | "existing" | "init" | "adopted";
   /** When "existing", this is the URL of `origin` already in that repo —
    *  may differ from repoUrl, in which case caller should warn the user. */
   existingRemote?: string;
@@ -83,6 +87,53 @@ export async function materializeRepoAtPath(
   throw new Error(
     `${path} is not empty and is not a git repo. Pick another path or empty this one first.`,
   );
+}
+
+/**
+ * Adopt a non-git directory full of vibebook-plugin output into a fresh git
+ * repo bound to `repoUrl`. Use case: user installed vibebook-plugin first,
+ * which wrote `book/` and `raw_sessions/` under `~/.vibebook/session-repo/`
+ * but never `git init`'d. Then the user installs the npm CLI and runs
+ * `vibebook init` — the dir is non-empty but not git, so the strict
+ * materialize path refuses.
+ *
+ * Safety:
+ * - All existing files are preserved on disk; this never deletes or moves.
+ * - The fetch is "info-only" — we don't checkout any remote ref, so user
+ *   files can't be overwritten by `main`.
+ * - The user lands on a brand-new branch `<deviceBranch>` with their
+ *   existing files as the first commit. Next `vibebook sync` will append
+ *   normally; first push creates the branch upstream.
+ *
+ * The caller (init wizard) is responsible for prompting the user before
+ * calling this — adopting silently would surprise users.
+ */
+export async function adoptPluginDir(
+  localPath: string,
+  repoUrl: string,
+  deviceBranch: string,
+): Promise<MaterializeResult> {
+  const path = resolve(expandHome(localPath));
+  if (!existsSync(path)) {
+    throw new Error(`adoptPluginDir: ${path} does not exist`);
+  }
+  if (existsSync(join(path, ".git"))) {
+    throw new Error(`adoptPluginDir: ${path} already has a .git dir; use materializeRepoAtPath instead`);
+  }
+  const git = simpleGit(path);
+  await git.init();
+  await git.addRemote("origin", repoUrl);
+  try {
+    // Fetch refs so the user has a reference to `origin/main` for merge
+    // later, but don't checkout anything — the working tree is exactly
+    // what the user (well, the plugin) put there, and we want to preserve
+    // it as the first commit on a fresh device branch.
+    await git.fetch("origin");
+  } catch {
+    // Offline or bad URL — adopt continues; user can fetch later.
+  }
+  await git.checkoutLocalBranch(deviceBranch);
+  return { kind: "adopted" };
 }
 
 export async function ensureRepo(localPath: string, repoUrl: string): Promise<SimpleGit> {

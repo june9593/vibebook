@@ -53,6 +53,7 @@ describe("applyWizardAnswers", () => {
       passphraseEntered: "secret",
       enableAggregateCI: true,
       includeReasoning: true,
+      deviceBranch: "test-device",
     });
     const { existsSync, readFileSync, statSync } = await import("node:fs");
     expect(existsSync(join(localPath, ".git"))).toBe(true);
@@ -62,6 +63,7 @@ describe("applyWizardAnswers", () => {
     expect(cfg.encrypt).toBe(true);
     expect(cfg.runner).toBe("claude-cli");
     expect(cfg.enableAggregateCI).toBe(true);
+    expect(cfg.deviceBranch).toBe("test-device");
     const pp = readFileSync(join(tmpHome, ".vibebook", "passphrase"), "utf8").trim();
     expect(pp).toBe("secret");
     expect(statSync(join(tmpHome, ".vibebook", "passphrase")).mode & 0o777).toBe(0o600);
@@ -76,6 +78,7 @@ describe("applyWizardAnswers", () => {
       encrypt: false,
       enableAggregateCI: false,
       includeReasoning: false,
+      deviceBranch: "test-device",
     });
     const { existsSync } = await import("node:fs");
     expect(existsSync(join(tmpHome, ".vibebook", "passphrase"))).toBe(false);
@@ -98,6 +101,7 @@ describe("runWizard end-to-end transcript", () => {
       "secret123",                     // Q4 confirm
       "y",                             // Q6 enable aggregate CI
       "y",                             // Q7 includeReasoning
+      "mini2",                         // Q8 stable device name (override hostname default)
     ];
     const stdin = new Readable({ read() {} }) as Readable & { isTTY?: boolean };
     stdin.isTTY = true;
@@ -126,12 +130,14 @@ describe("runWizard end-to-end transcript", () => {
     expect(a.passphraseEntered).toBe("secret123");
     expect(a.enableAggregateCI).toBe(true);
     expect(a.includeReasoning).toBe(true);
+    expect(a.deviceBranch).toBe("mini2");
   });
 
   it("local-only mode (Q0=n) skips remote-only questions (including aggregate CI)", async () => {
     const lines = [
       "n",                              // Q0 sync to remote → no
       "y",                              // Q7 includeReasoning (Q6 skipped — local-only)
+      "",                               // Q8 → accept hostname default
     ];
     const stdin = new Readable({ read() {} }) as Readable & { isTTY?: boolean };
     stdin.isTTY = true;
@@ -159,5 +165,6 @@ describe("runWizard end-to-end transcript", () => {
     expect(a.passphraseEntered).toBeUndefined();
     expect(a.enableAggregateCI).toBe(false); // local-only mode → no CI question asked
     expect(a.includeReasoning).toBe(true);
+    expect(a.deviceBranch.length).toBeGreaterThan(0); // hostname() default accepted
   });
 });
