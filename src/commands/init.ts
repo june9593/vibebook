@@ -56,6 +56,7 @@ export async function initCmd(opts: InitOptions): Promise<void> {
     threadingConcurrency: DEFAULT_THREADING_CONCURRENCY,
     threadingMaxAttempts: DEFAULT_THREADING_MAX_ATTEMPTS,
     digestEnabled: opts.digestEnabled !== false,
+    bookLocale: "en",
   };
   writeConfig(cfg);
   if (cfg.encrypt) {

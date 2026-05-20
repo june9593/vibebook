@@ -56,6 +56,10 @@ jobs:
           git config user.email "vibebook-bot@users.noreply.github.com"
 
       - name: Aggregate device books into main
+        env:
+          # Locale for rendered book pages. Substituted by `vibebook workflow init`
+          # from the user's ~/.vibebook/config.json `bookLocale` field. Default "en".
+          VIBEBOOK_LOCALE: "__VIBEBOOK_LOCALE__"
         run: node scripts/merge-books.mjs
 
       - name: Push main

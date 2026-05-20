@@ -212,6 +212,9 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
     // digestEnabled retained at schema default (true) for downstream
     // consumers; the wizard no longer prompts for it (v0.5).
     digestEnabled: true,
+    // bookLocale defaults to "en" via schema; we set it inline to satisfy
+    // the strict TypeScript Config type, which doesn't see through z.default().
+    bookLocale: "en",
   };
   writeConfig(cfg);
   if (cfg.encrypt) {
@@ -245,8 +248,14 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
   console.log("    /plugin install vibebook");
   if (a.enableAggregateCI) {
     console.log("");
-    console.log(chalk.cyan("CI aggregation:"));
-    console.log("  vibebook workflow init           # install GitHub Actions cross-device merge");
+    console.log(chalk.cyan("Installing CI aggregation workflow on origin/main..."));
+    try {
+      const { workflowInitCmd } = await import("./workflow.js");
+      await workflowInitCmd({});
+    } catch (err) {
+      console.log(chalk.yellow(`! workflow auto-install failed: ${(err as Error).message}`));
+      console.log(chalk.gray(`  You can retry later with: vibebook workflow init`));
+    }
   }
 }
 

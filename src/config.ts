@@ -42,6 +42,10 @@ const Schema = z.object({
    *  Used by `vibebook resume` to rewrite jsonl paths from another machine
    *  into local paths. Set via `vibebook config --map-path A=B`. */
   pathMap: z.record(z.string()).optional(),
+  /** Locale for the rendered book pages (book/index.md, book/_meta/timeline.md,
+   *  per-project index pages). Drives string tables in merge-books.mjs via
+   *  the VIBEBOOK_LOCALE env var the workflow yml exports. Default "en". */
+  bookLocale: z.enum(["en", "zh"]).default("en"),
 });
 export type Config = z.infer<typeof Schema>;
 

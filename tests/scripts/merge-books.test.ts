@@ -174,13 +174,13 @@ afterEach(() => {
   if (workspace) rmSync(workspace, { recursive: true, force: true, maxRetries: 3 });
 });
 
-async function runMerge(): Promise<{ clone: string }> {
+async function runMerge(env: NodeJS.ProcessEnv = {}): Promise<{ clone: string }> {
   await simpleGit().clone(bareRemote, workspace);
   const g = simpleGit(workspace);
   await g.addConfig("user.email", "bot@example.com");
   await g.addConfig("user.name", "vibebook-bot");
   await g.checkout("main");
-  execSync(`node ${SCRIPT_PATH}`, { cwd: workspace, stdio: "pipe" });
+  execSync(`node ${SCRIPT_PATH}`, { cwd: workspace, stdio: "pipe", env: { ...process.env, ...env } });
   return { clone: workspace };
 }
 
@@ -336,19 +336,40 @@ describe("merge-books.mjs (v2 schema)", () => {
     await runMerge();
 
     const front = readFileSync(join(workspace, "book/index.md"), "utf8");
-    expect(front).toContain("聚合自 2 台设备");
+    // Default locale = English. Generated strings come from STRINGS_EN.
+    expect(front).toContain("Aggregated from 2 devices");
     expect(front).toContain("edge-src");
     expect(front).toContain("chromium-src");
     expect(front).toContain("_global");
-    expect(front).toContain("流水账");
+    expect(front).toContain("chronicle");
 
     const timeline = readFileSync(join(workspace, "book/_meta/timeline.md"), "utf8");
+    expect(timeline).toContain("Global timeline");
     expect(timeline).toContain("📝 [Fix foo]");
     expect(timeline).toContain("📝 [Trace memory leak]");
     expect(timeline).toContain("📚 fullscreen");
     expect(timeline).toContain("💡 [tool-rg]");
     // Newest first: chromium fix on 04-22 > edge-src on 04-20
     expect(timeline.indexOf("Trace memory leak")).toBeLessThan(timeline.indexOf("Fix foo"));
+  }, T);
+
+  it("renders Chinese strings when VIBEBOOK_LOCALE=zh", async () => {
+    await setupBranch({
+      device: "Mac.lan",
+      chronicles: { "edge-src": [{
+        threadId: "fix-foo", title: "Fix foo",
+        updatedAt: "2026-04-20T10:00:00.000Z", body: "# Fix foo\n",
+      }] },
+    });
+
+    await runMerge({ VIBEBOOK_LOCALE: "zh" });
+
+    const front = readFileSync(join(workspace, "book/index.md"), "utf8");
+    expect(front).toContain("聚合自 1 台设备");
+    expect(front).toContain("篇流水账");
+    expect(front).toContain("# 笔记本");
+    const timeline = readFileSync(join(workspace, "book/_meta/timeline.md"), "utf8");
+    expect(timeline).toContain("# 全局时间线");
   }, T);
 
   it("skips branches without a v2 BookIndex and exits cleanly when none have one", async () => {
