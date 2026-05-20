@@ -1,20 +1,26 @@
 name: vibebook · marketing site
 
 # Build the marketing-site Astro project and publish it to GitHub Pages
-# whenever a release tag (vX.Y.Z) lands. We deliberately avoid publishing
-# on every push to main — half-shipped commits would otherwise leak to the
-# public landing page between tag pushes.
+# whenever main itself gets a marketing-site change. We deliberately gate
+# on `branches: [main]` (not tags) so:
+#   - Random feature/PR branches don't deploy half-shipped landing pages.
+#   - GitHub Pages env's deployment-branch-policy (which only allows `main`)
+#     and our trigger agree on the same ref — no env-policy mismatch.
+# `paths:` further restricts deploys to actual marketing changes so a code
+# commit on main doesn't redundantly rebuild and republish the static site.
 #
 # Setup steps for this repo:
 #   1. Settings → Pages → Source: GitHub Actions
-#   2. Push a vX.Y.Z tag; the first run produces the site.
+#   2. Land a marketing-site/** change on main (PR merge or direct push).
 #
 # The published URL is https://june9593.github.io/vibebook/.
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+    paths:
+      - "marketing-site/**"
+      - ".github/workflows/marketing-pages.yml"
   workflow_dispatch:
 
 permissions:
