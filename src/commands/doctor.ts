@@ -174,6 +174,23 @@ export async function doctorCmd(): Promise<void> {
             : undefined,
         });
       }
+
+      // 5c. Workflow residue on device branch. Pre-0.5.3 `vibebook workflow
+      //     init` wrote files to the user's device branch; from 0.5.3 they
+      //     live on main only. Warn if the user still has stale copies on
+      //     the device branch (we can't easily distinguish "I'm a 0.5.2
+      //     user who already pushed these once" from "I'm a 0.5.3 user with
+      //     a leftover commit", so we just always warn when both branches
+      //     have them on disk).
+      const deviceYaml = join(config.repoPath, ".github/workflows/vibebook-aggregate.yml");
+      const deviceScript = join(config.repoPath, "scripts/merge-books.mjs");
+      if (existsSync(deviceYaml) || existsSync(deviceScript)) {
+        checks.push({
+          name: "Workflow residue", status: "warn",
+          detail: "Found .github/workflows/vibebook-aggregate.yml + scripts/merge-books.mjs on device-branch working tree — these belong on main only (since 0.5.3)",
+          fix: `cd "${config.repoPath}" && git rm -r .github/workflows scripts 2>/dev/null; git commit -m "remove workflow residue (lives on main since 0.5.3)" && git push`,
+        });
+      }
     }
 
     // 6. Git filter (only when encrypt = true)

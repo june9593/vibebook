@@ -237,6 +237,90 @@ export async function commitAndPush(
 }
 
 /**
+ * Run `writeFiles()` on a temporary side-checkout of `main` (or create main
+ * as an orphan if it doesn't exist remotely), commit + push, then restore
+ * the caller's current branch. Used by `vibebook workflow init` so CI
+ * workflow files land on main (where GitHub Actions actually reads them)
+ * without disturbing the user's device branch or working tree.
+ *
+ * Strategy: use `git worktree add` to materialize main into a temp dir.
+ * This avoids switching the user's primary working tree at all — their
+ * uncommitted changes, current HEAD, and checked-out branch are untouched.
+ *
+ * The provided `writeFiles(worktreePath)` callback receives the absolute
+ * path of the temp worktree and is responsible for writing the files there.
+ *
+ * On success returns `{ committed: true, pushed: true }`. On no-op (files
+ * already up to date) returns `{ committed: false, pushed: false }`. The
+ * temp worktree is always cleaned up.
+ */
+export async function commitToMainViaWorktree(
+  git: SimpleGit,
+  repoPath: string,
+  writeFiles: (worktreePath: string) => Promise<string[]>,
+  commitMessage: string,
+  onProgress?: (stage: string) => void,
+): Promise<{ committed: boolean; pushed: boolean }> {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  // Fetch so we know whether origin/main exists.
+  try { await git.fetch(); } catch { /* offline */ }
+  const remoteMainExists = (await git.branch(["-r"]))
+    .all.some((b) => b === "origin/main");
+
+  const worktreePath = mkdtempSync(join(tmpdir(), "vibebook-main-"));
+  // simple-git doesn't expose worktree directly; use raw.
+  try {
+    if (remoteMainExists) {
+      onProgress?.(`creating temp worktree on main...`);
+      await git.raw(["worktree", "add", worktreePath, "origin/main"]);
+      // Detach is OK; we'll push HEAD:main below.
+    } else {
+      // Brand-new repo with no main yet. Create an orphan main from scratch.
+      onProgress?.(`creating orphan main (no remote main yet)...`);
+      await git.raw(["worktree", "add", "--detach", worktreePath]);
+      // Inside the worktree, switch to orphan main.
+      const { simpleGit } = await import("simple-git");
+      const wgit = simpleGit(worktreePath);
+      await wgit.raw(["checkout", "--orphan", "main"]);
+      // Clear any inherited files from the parent ref.
+      await wgit.raw(["rm", "-rf", "."]).catch(() => undefined);
+    }
+
+    onProgress?.(`writing files into temp worktree...`);
+    const relPaths = await writeFiles(worktreePath);
+
+    const { simpleGit } = await import("simple-git");
+    const wgit = simpleGit(worktreePath);
+    // Ensure we're on a branch named main inside the worktree (not detached).
+    if (remoteMainExists) {
+      await wgit.raw(["checkout", "-B", "main"]);
+    }
+    await wgit.add(relPaths);
+    const status = await wgit.status();
+    if (status.staged.length === 0) {
+      onProgress?.(`nothing changed on main`);
+      return { committed: false, pushed: false };
+    }
+    onProgress?.(`git commit on main (${status.staged.length} staged)...`);
+    await wgit.commit(commitMessage);
+    onProgress?.(`git push origin main...`);
+    const pr = await pushWithProgress(worktreePath, "main");
+    if (!pr.ok) {
+      throw new Error(`push origin main failed: ${pr.stderrTail.split("\n").slice(-3).join(" ") || "unknown"}`);
+    }
+    return { committed: true, pushed: true };
+  } finally {
+    // Always clean up the worktree, even on failure. `git worktree remove`
+    // tolerates a missing dir; we follow it with a filesystem rm just in case.
+    try { await git.raw(["worktree", "remove", "--force", worktreePath]); } catch { /* ignore */ }
+    try { rmSync(worktreePath, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+}
+
+/**
  * Bring the local device branch in sync with origin before we try to push,
  * so the GitHub Action's auto-commits don't cause non-fast-forward push
  * failures on the next `vibebook sync` / `digest` run.
