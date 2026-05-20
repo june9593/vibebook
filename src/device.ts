@@ -21,3 +21,24 @@ export function sanitizeBranchName(raw: string): string {
 export function deviceBranchFromHostname(): string {
   return sanitizeBranchName(hostname());
 }
+
+/**
+ * Heuristic: does the given branch name look like it came from macOS's
+ * volatile hostname (mDNS in home wifi, corporate DHCP-given names on VPN,
+ * iPhone tethering, etc.)? Used by the init wizard and doctor to nudge users
+ * toward a stable physical-label name like "mini2" instead of letting their
+ * spool grow a new device branch each time they change networks.
+ *
+ * Conservative: returns true (stable-looking) by default; we only flag
+ * patterns we've actually seen drift in dogfood:
+ *   - ends in `.local`               (Bonjour / mDNS, changes when DHCP renames host)
+ *   - matches a fully-qualified DNS name (contains a `.` followed by 2+
+ *     letters as a TLD) — e.g. `MIS-EV2-BB1.surfacescenarios.org`,
+ *     `host42.corp.example.com`. These come from corp DHCP and rotate.
+ */
+export function isStableDeviceName(name: string): boolean {
+  if (name.endsWith(".local")) return false;
+  // FQDN-ish: contains `.`, ends in `.<letters>{2+}` (the TLD).
+  if (/\.[A-Za-z]{2,}$/.test(name)) return false;
+  return true;
+}

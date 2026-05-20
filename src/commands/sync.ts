@@ -92,7 +92,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
         console.log(chalk.yellow(`! skip ${d.sourcePath}: ${(err as Error).message}`));
         continue;
       }
-      if (hasUnchanged(idx, s.tool, s.sessionId, d.sourceMtimeMs, d.sourceSha256)) {
+      if (hasUnchanged(idx, s.tool, s.sessionId, d.sourceMtimeMs, d.sourceSha256, opts.repoPath)) {
         skippedCount++;
         continue;
       }
@@ -100,7 +100,8 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
 
       // Working tree is always plaintext now; the clean filter handles
       // encryption on `git add` if enabled.
-      pathsWritten.push(rel.raw, rel.md, rel.jsonl);
+      pathsWritten.push(rel.raw, rel.md);
+      if (rel.jsonl) pathsWritten.push(rel.jsonl);
 
       const entry: IndexEntry = {
         sessionId: s.sessionId,

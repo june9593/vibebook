@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.5.2 — 2026-05-20
+
+Dogfood pass on a second machine (mini2) exposed six small but real bugs
+in 0.5.0 / 0.5.1. All fixed here. No schema changes.
+
+### Bug fixes
+
+- **`hasUnchanged()` now checks the file actually exists in the working tree.**
+  Previously sync only compared source mtime + sha256, so after switching
+  to a new device branch (where `raw_sessions/` is incomplete), sync looked
+  at the still-committed `index.json` and skipped re-extracting — the new
+  branch would stay perpetually incomplete. Now any missing indexed file
+  is treated as stale.
+
+- **Oversized jsonl no longer breaks `git push`.** When a Claude / Copilot
+  session's `.jsonl` exceeds 95 MB, sync now skips the jsonl copy (still
+  writes `.md` + `.raw.json` so the digest is intact) and warns. Files
+  between 50 – 95 MB still copy but trigger a soft warning. Prevents the
+  `GH001: Large files detected` push reject that 0.5.0 / 0.5.1 hit on
+  long Copilot sessions in monorepo projects.
+
+- **`vibebook doctor` reports oversized jsonl.** Scans the spool for
+  `.jsonl > 50 MB` and shows the worst offenders, with a one-liner fix
+  command when any of them exceed GitHub's 100 MB hard cap.
+
+- **`init` wizard adopts plugin-first directories.** If the user installed
+  `vibebook-plugin` first and the plugin wrote `book/` + `raw_sessions/`
+  before the npm CLI was installed, init used to refuse with
+  `"is not empty and is not a git repo"`. It now offers to `git init` in
+  place + add the remote + create a fresh branch with the plugin data
+  preserved as the first commit. Nothing is deleted or moved.
+
+- **Stable device branch name.** `os.hostname()` on macOS drifts across
+  networks (mDNS in home wifi → `Mac-mini-2.local`, corp DHCP → something
+  like `MIS-EV2-BB1.surfacescenarios.org`, iPhone hotspot → another),
+  causing sync to push to a new branch each time. Two fixes:
+  - **Init wizard Q8**: explicitly ask for a stable device name and warn
+    when the hostname default looks volatile.
+  - **`vibebook config --device <name>`**: existing users can fix their
+    config after the fact. Output prints the `git branch -D / git push
+    --delete` commands to clean up any drift-created branches.
+  - **`vibebook doctor`** flags drift-prone deviceBranch values.
+
+### Migration note (0.4.x → 0.5.x)
+
+If you're upgrading from a 0.4.x install, the first `vibebook upgrade`
+will error with `Cannot find module '.../commands/plugin-install.js'`.
+This is the old 0.4.x `upgrade.ts` (already loaded in the process) trying
+to invoke a subcommand that 0.5.0 removed. The npm install half already
+succeeded; **just run `vibebook upgrade` a second time** and it works.
+No data loss either way.
+
 ## 0.5.1 — 2026-05-14
 
 ### NEW — Resume forks the session

@@ -48,8 +48,10 @@ export async function resumeCmd(opts: ResumeOptions): Promise<ResumeResult> {
   if (!existsSync(srcAbs)) {
     throw new Error(
       `Source jsonl missing on disk: ${srcAbs}. ` +
-      `This session predates v0.5.0 spool format. ` +
-      `Re-sync after upgrade: rm -rf ~/.vibebook/session-repo/raw_sessions && vibebook sync`,
+      `Either this session predates v0.5.0 spool format, or its jsonl exceeded ` +
+      `the 95 MB cap and was skipped at sync time (see writer.ts). ` +
+      `If pre-0.5: re-sync after upgrade with 'rm -rf ~/.vibebook/session-repo/raw_sessions && vibebook sync'. ` +
+      `If oversized: nothing to do — that particular session can't be resumed cross-device.`,
     );
   }
   const sourceJsonl = readFileSync(srcAbs, "utf8");

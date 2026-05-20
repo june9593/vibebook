@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, unlinkSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { loadIndex, saveIndex, upsertEntry, hasUnchanged } from "../src/index-store.js";
 import type { IndexEntry } from "../src/types.js";
 
@@ -15,6 +15,7 @@ const entry: IndexEntry = {
   shortId: "abc12345",
   tool: "claude",
   project: "edge-memvc",
+  projectRaw: "/Users/me/edge-memvc",
   startedAt: "2026-04-17T10:00:00Z",
   endedAt: "2026-04-17T10:30:00Z",
   nameSlug: "fix-login-bug",
@@ -24,6 +25,15 @@ const entry: IndexEntry = {
   sourceMtimeMs: 1234567890,
   sourceSha256: "deadbeef",
 };
+
+/** Plant the file that `entry.relativePath` points at, so hasUnchanged()'s
+ *  existence check passes. Most index-store tests don't care about the file
+ *  on disk — only the existence-check test does. */
+function plantIndexedFile(repoRoot: string, e: IndexEntry) {
+  const abs = join(repoRoot, e.relativePath);
+  mkdirSync(dirname(abs), { recursive: true });
+  writeFileSync(abs, "{}\n");
+}
 
 describe("index-store", () => {
   it("returns empty index when file missing", () => {
@@ -40,12 +50,25 @@ describe("index-store", () => {
     expect(reloaded.entries["claude:abc-123"]).toEqual(entry);
   });
 
-  it("hasUnchanged returns true when mtime and sha match", () => {
+  it("hasUnchanged returns true when mtime+sha match AND file exists in working tree", () => {
     const idx = loadIndex(dir);
     upsertEntry(idx, entry);
-    expect(hasUnchanged(idx, "claude", "abc-123", 1234567890, "deadbeef")).toBe(true);
-    expect(hasUnchanged(idx, "claude", "abc-123", 9999, "deadbeef")).toBe(false);
-    expect(hasUnchanged(idx, "claude", "abc-123", 1234567890, "newhash")).toBe(false);
+    plantIndexedFile(dir, entry);
+    expect(hasUnchanged(idx, "claude", "abc-123", 1234567890, "deadbeef", dir)).toBe(true);
+    expect(hasUnchanged(idx, "claude", "abc-123", 9999, "deadbeef", dir)).toBe(false);
+    expect(hasUnchanged(idx, "claude", "abc-123", 1234567890, "newhash", dir)).toBe(false);
+  });
+
+  it("hasUnchanged returns false when index entry exists but the working-tree file is missing", () => {
+    // This is the branch-switch dogfood bug from 2026-05-20: index says the
+    // session was synced before, but the new branch's raw_sessions/ doesn't
+    // have the file. Without this guard, sync would skip and the new branch
+    // would stay perpetually incomplete.
+    const idx = loadIndex(dir);
+    upsertEntry(idx, entry);
+    plantIndexedFile(dir, entry);
+    unlinkSync(join(dir, entry.relativePath));
+    expect(hasUnchanged(idx, "claude", "abc-123", 1234567890, "deadbeef", dir)).toBe(false);
   });
 
   it("saves pretty-printed JSON", () => {

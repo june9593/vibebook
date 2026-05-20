@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeBranchName, deviceBranchFromHostname } from "../src/device.js";
+import { sanitizeBranchName, deviceBranchFromHostname, isStableDeviceName } from "../src/device.js";
 
 describe("sanitizeBranchName", () => {
   it("keeps alnum, dash, underscore, dot", () => {
@@ -37,5 +37,23 @@ describe("deviceBranchFromHostname", () => {
     const b = deviceBranchFromHostname();
     expect(b.length).toBeGreaterThan(0);
     expect(b).toMatch(/^[A-Za-z0-9._-]+$/);
+  });
+});
+
+describe("isStableDeviceName", () => {
+  it("flags Bonjour / mDNS names (.local) as drift-prone", () => {
+    expect(isStableDeviceName("Mac-mini-2.local")).toBe(false);
+    expect(isStableDeviceName("yuedeMacBook-Pro-2.local")).toBe(false);
+  });
+  it("flags corp DHCP-style ALL-CAPS dotted names as drift-prone", () => {
+    expect(isStableDeviceName("MIS-EV2-BB1.surfacescenarios.org")).toBe(false);
+  });
+  it("accepts physical-label style names as stable", () => {
+    expect(isStableDeviceName("mini2")).toBe(true);
+    expect(isStableDeviceName("work-laptop")).toBe(true);
+    expect(isStableDeviceName("yue-mini2")).toBe(true);
+  });
+  it("accepts mixed-case names without a dot as stable", () => {
+    expect(isStableDeviceName("yuedeMacBook-Pro-2")).toBe(true);
   });
 });

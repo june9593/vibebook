@@ -1,8 +1,9 @@
-import { existsSync, readFileSync, readdirSync, type Dirent } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, type Dirent } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import chalk from "chalk";
+import { isStableDeviceName } from "../device.js";
 
 /**
  * `vibebook doctor` — opinionated health check. Prints a one-line status
@@ -119,6 +120,24 @@ export async function doctorCmd(): Promise<void> {
       });
     }
 
+    // 4b. Device branch drift check. hostname() on macOS varies across
+    //     networks (mDNS / corp DHCP / hotspot) — if init wrote the volatile
+    //     value, each network creates a new branch and the spool fragments.
+    if (config.deviceBranch !== undefined) {
+      if (!isStableDeviceName(config.deviceBranch)) {
+        checks.push({
+          name: "Device branch", status: "warn",
+          detail: `'${config.deviceBranch}' looks like a volatile macOS hostname — sync may push to a new branch when you change networks`,
+          fix: `vibebook config --device <stable-name>   # e.g. 'mini2', 'work-laptop'`,
+        });
+      } else {
+        checks.push({
+          name: "Device branch", status: "ok",
+          detail: config.deviceBranch,
+        });
+      }
+    }
+
     // 5. Orphan *.raw.json scan (sessions captured before v0.5.0 don't
     //    have the original .jsonl preserved, so `vibebook resume` can't
     //    replay them. Only meaningful when the repo exists.)
@@ -134,6 +153,25 @@ export async function doctorCmd(): Promise<void> {
         checks.push({
           name: "Resume-ready spool", status: "ok",
           detail: "all spooled sessions have sibling .jsonl",
+        });
+      }
+
+      // 5b. Oversized jsonl scan. 0.5.2+ writer caps at 95 MB, but pre-0.5.2
+      //     spools (and any direct copies) may still hold >100 MB jsonls
+      //     that block git push to GitHub.
+      const oversized = findOversizedJsonls(config.repoPath, 50 * 1024 * 1024);
+      if (oversized.length > 0) {
+        const hardRejects = oversized.filter((x) => x.size > 100 * 1024 * 1024).length;
+        const lines = oversized.slice(0, 5).map((x) => `  ${(x.size / 1024 / 1024).toFixed(1)} MB  ${x.path}`).join("\n");
+        const more = oversized.length > 5 ? `\n  …and ${oversized.length - 5} more` : "";
+        checks.push({
+          name: "Oversized jsonl",
+          status: hardRejects > 0 ? "fail" : "warn",
+          detail:
+            `${oversized.length} jsonl(s) over 50 MB${hardRejects > 0 ? ` (${hardRejects} over GitHub's 100 MB hard cap — push will fail)` : ""}:\n${lines}${more}`,
+          fix: hardRejects > 0
+            ? `find "${join(config.repoPath, "raw_sessions")}" -name "*.jsonl" -size +95M -delete   # remove only the >95 MB ones`
+            : undefined,
         });
       }
     }
@@ -222,6 +260,7 @@ interface MinimalConfig {
   repoPath: string;
   repoUrl?: string;
   encrypt?: boolean;
+  deviceBranch?: string;
 }
 
 function readConfigSafe(): MinimalConfig | null {
@@ -265,6 +304,45 @@ function findOrphanedRawJsons(repoPath: string): string[] {
   };
   walk(root);
   return orphans;
+}
+
+/**
+ * Walk `<repoPath>/raw_sessions/` and return paths of `*.jsonl` files
+ * larger than `thresholdBytes`. GitHub warns at 50 MB and hard-rejects
+ * pushes containing files >100 MB; oversized jsonls block sync and
+ * shouldn't be there if writer.ts is current (>=0.5.2 caps at 95 MB).
+ * Used by `vibebook doctor` to surface stale ones from earlier syncs.
+ *
+ * Returns paths sorted descending by size, so callers can show the worst
+ * offenders first.
+ */
+function findOversizedJsonls(repoPath: string, thresholdBytes: number): Array<{ path: string; size: number }> {
+  const root = join(repoPath, "raw_sessions");
+  if (!existsSync(root)) return [];
+  const hits: Array<{ path: string; size: number }> = [];
+  const walk = (dir: string): void => {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) {
+        walk(p);
+        continue;
+      }
+      if (!e.isFile() || !e.name.endsWith(".jsonl")) continue;
+      try {
+        const size = statSync(p).size;
+        if (size > thresholdBytes) hits.push({ path: p, size });
+      } catch { /* race: file vanished mid-walk */ }
+    }
+  };
+  walk(root);
+  hits.sort((a, b) => b.size - a.size);
+  return hits;
 }
 
 function isCryptFilterWired(repoPath: string): boolean {

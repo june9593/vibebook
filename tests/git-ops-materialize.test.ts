@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
-import { materializeRepoAtPath } from "../src/git-ops.js";
+import { materializeRepoAtPath, adoptPluginDir } from "../src/git-ops.js";
 
 describe("materializeRepoAtPath", () => {
   let tmp: string;
@@ -70,5 +70,63 @@ describe("materializeRepoAtPath", () => {
     mkdirSync(target);
     writeFileSync(join(target, "file.txt"), "x");
     await expect(materializeRepoAtPath(target, originUrl)).rejects.toThrow(/not a git repo/);
+  });
+});
+
+describe("adoptPluginDir", () => {
+  let tmp: string;
+  let originPath: string;
+
+  beforeEach(async () => {
+    tmp = mkdtempSync(join(tmpdir(), "memvc-adopt-"));
+    originPath = join(tmp, "origin.git");
+    mkdirSync(originPath);
+    await simpleGit(originPath).init(true);
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("adopts a non-git dir full of plugin data into a git repo on the requested branch", async () => {
+    // Simulate the plugin-first dir: book/ + raw_sessions/ present, no .git
+    const target = join(tmp, "session-repo");
+    mkdirSync(join(target, "book/edge-memvc/chronicle"), { recursive: true });
+    mkdirSync(join(target, "raw_sessions/claude/edge-memvc/2026-05-20"), { recursive: true });
+    writeFileSync(join(target, "book/edge-memvc/chronicle/test.md"), "# test\n");
+    writeFileSync(
+      join(target, "raw_sessions/claude/edge-memvc/2026-05-20/sess__abc.jsonl"),
+      "{}\n",
+    );
+
+    const r = await adoptPluginDir(target, originPath, "mini2");
+    expect(r.kind).toBe("adopted");
+
+    // .git was created
+    expect(existsSync(join(target, ".git"))).toBe(true);
+
+    // Plugin files preserved
+    expect(existsSync(join(target, "book/edge-memvc/chronicle/test.md"))).toBe(true);
+    expect(existsSync(join(target, "raw_sessions/claude/edge-memvc/2026-05-20/sess__abc.jsonl"))).toBe(true);
+
+    // Correct branch ref (unborn until first commit lands, but HEAD is pointed)
+    const sg = simpleGit(target);
+    const head = await sg.raw(["symbolic-ref", "HEAD"]);
+    expect(head.trim()).toBe("refs/heads/mini2");
+
+    // Origin set
+    const remote = (await sg.getConfig("remote.origin.url")).value;
+    expect(remote).toBe(originPath);
+  });
+
+  it("refuses to adopt a dir that already has .git/", async () => {
+    const target = join(tmp, "already-git");
+    mkdirSync(target);
+    await simpleGit(target).init();
+    await expect(adoptPluginDir(target, originPath, "mini2")).rejects.toThrow(/already has a \.git/);
+  });
+
+  it("refuses to adopt a non-existent dir", async () => {
+    await expect(adoptPluginDir(join(tmp, "nope"), originPath, "mini2")).rejects.toThrow(/does not exist/);
   });
 });
