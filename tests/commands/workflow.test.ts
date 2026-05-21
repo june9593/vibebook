@@ -109,6 +109,46 @@ describe("workflowInitCmd (remote mode → writes to main via temp worktree)", (
     vi.resetModules();
   });
 
+  it("works when primary working tree is already on main (regression: was hitting 'main is already used by worktree')", async () => {
+    // Pre-condition: user's session-repo is on `main` branch (e.g. fresh init, no device branch yet)
+    const { simpleGit } = await import("simple-git");
+    const g = simpleGit(workRepo);
+    // First, push device branch so origin has at least one ref
+    // (already done in beforeEach via the "seed" commit + push to test-device)
+    // Now switch primary working tree to main (creating it if needed)
+    try {
+      await g.checkout("main");
+    } catch {
+      await g.raw(["checkout", "--orphan", "main"]);
+      await g.raw(["rm", "-rf", "--cached", "--ignore-unmatch", "."]);
+      writeFileSync(join(workRepo, ".keep"), "init\n");
+      await g.add(".keep");
+      await g.commit("init main");
+      await g.push("origin", "main", ["-u"]);
+    }
+    // Sanity: confirm primary working tree is currently on main
+    const status = await g.status();
+    expect(status.current).toBe("main");
+
+    // NOW run workflow init. Previously this failed with
+    //   fatal: 'main' is already used by worktree at '<workRepo>'
+    const { workflowInitCmd } = await import("../../src/commands/workflow.js");
+    await expect(workflowInitCmd({})).resolves.not.toThrow();
+
+    // Verify origin/main has the workflow + script
+    const verifyClone = mkdtempSync(join(tmpdir(), "vibebook-wf-mainconflict-"));
+    await simpleGit().clone(bareRemote, verifyClone);
+    await simpleGit(verifyClone).checkout("main");
+    expect(existsSync(join(verifyClone, ".github", "workflows", "vibebook-aggregate.yml"))).toBe(true);
+    expect(existsSync(join(verifyClone, "scripts", "merge-books.mjs"))).toBe(true);
+    rmSync(verifyClone, { recursive: true, force: true });
+
+    // Verify no leftover temp branches in the primary repo
+    const branches = await g.branch();
+    const tempBranches = branches.all.filter((b) => b.startsWith("vibebook-tmp-"));
+    expect(tempBranches).toEqual([]);
+  }, 30_000);
+
   it("commits and pushes workflow yaml + merge-books.mjs to origin/main (not device branch)", async () => {
     const { workflowInitCmd } = await import("../../src/commands/workflow.js");
     await workflowInitCmd({});

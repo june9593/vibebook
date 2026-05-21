@@ -271,20 +271,27 @@ export async function commitToMainViaWorktree(
     .all.some((b) => b === "origin/main");
 
   const worktreePath = mkdtempSync(join(tmpdir(), "vibebook-main-"));
+  // Use a unique temp branch name (not "main") to avoid the worktree conflict
+  // git raises if the user's primary working tree is currently on `main`:
+  //   fatal: 'main' is already used by worktree at <repoPath>
+  // We push to origin/main via `HEAD:main` refspec instead of relying on a
+  // locally-named branch.
+  const tempBranch = `vibebook-tmp-main-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   // simple-git doesn't expose worktree directly; use raw.
   try {
     if (remoteMainExists) {
-      onProgress?.(`creating temp worktree on main...`);
-      await git.raw(["worktree", "add", worktreePath, "origin/main"]);
-      // Detach is OK; we'll push HEAD:main below.
+      onProgress?.(`creating temp worktree on main (via ${tempBranch})...`);
+      // -b <tempBranch> at origin/main: create the new branch in the worktree.
+      // This new branch ref lives in the primary repo (not the worktree only),
+      // so we delete it in finally.
+      await git.raw(["worktree", "add", "-b", tempBranch, worktreePath, "origin/main"]);
     } else {
-      // Brand-new repo with no main yet. Create an orphan main from scratch.
-      onProgress?.(`creating orphan main (no remote main yet)...`);
+      // Brand-new repo with no main yet. Create an orphan branch (not named main).
+      onProgress?.(`creating orphan temp branch ${tempBranch} (no remote main yet)...`);
       await git.raw(["worktree", "add", "--detach", worktreePath]);
-      // Inside the worktree, switch to orphan main.
       const { simpleGit } = await import("simple-git");
       const wgit = simpleGit(worktreePath);
-      await wgit.raw(["checkout", "--orphan", "main"]);
+      await wgit.raw(["checkout", "--orphan", tempBranch]);
       // Clear any inherited files from the parent ref.
       await wgit.raw(["rm", "-rf", "."]).catch(() => undefined);
     }
@@ -294,29 +301,32 @@ export async function commitToMainViaWorktree(
 
     const { simpleGit } = await import("simple-git");
     const wgit = simpleGit(worktreePath);
-    // Ensure we're on a branch named main inside the worktree (not detached).
-    if (remoteMainExists) {
-      await wgit.raw(["checkout", "-B", "main"]);
-    }
     await wgit.add(relPaths);
     const status = await wgit.status();
     if (status.staged.length === 0) {
       onProgress?.(`nothing changed on main`);
       return { committed: false, pushed: false };
     }
-    onProgress?.(`git commit on main (${status.staged.length} staged)...`);
+    onProgress?.(`git commit on ${tempBranch} (${status.staged.length} staged)...`);
     await wgit.commit(commitMessage);
-    onProgress?.(`git push origin main...`);
-    const pr = await pushWithProgress(worktreePath, "main");
-    if (!pr.ok) {
-      throw new Error(`push origin main failed: ${pr.stderrTail.split("\n").slice(-3).join(" ") || "unknown"}`);
+    onProgress?.(`git push origin HEAD:main...`);
+    // Push the temp branch's HEAD to the remote `main` ref. This works
+    // whether or not we have a local `main` branch — we explicitly use
+    // a refspec.
+    try {
+      await wgit.raw(["push", "origin", `HEAD:main`]);
+    } catch (err) {
+      throw new Error(`push origin HEAD:main failed: ${(err as Error).message}`);
     }
     return { committed: true, pushed: true };
   } finally {
-    // Always clean up the worktree, even on failure. `git worktree remove`
-    // tolerates a missing dir; we follow it with a filesystem rm just in case.
+    // Always clean up the worktree AND the temp branch, even on failure.
+    // `git worktree remove` tolerates a missing dir; we follow it with a
+    // filesystem rm just in case. Then delete the temp branch ref so it
+    // doesn't leak into the user's repo.
     try { await git.raw(["worktree", "remove", "--force", worktreePath]); } catch { /* ignore */ }
     try { rmSync(worktreePath, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { await git.branch(["-D", tempBranch]); } catch { /* ignore — never created */ }
   }
 }
 
