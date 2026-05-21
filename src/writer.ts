@@ -14,11 +14,6 @@ export interface WriteSessionOptions {
 
 export interface WrittenPaths {
   md: string;
-  /** @deprecated removed in 0.6 — Task 5 will clean up sync.ts references.
-   *  Points to md for now so sync.ts compiles without modification. */
-  raw: string;
-  /** @deprecated removed in 0.6 — Task 5 will clean up sync.ts references */
-  jsonl?: string;
 }
 
 /** Threshold above which tool_result.content / tool_use.input gets truncated.
@@ -50,7 +45,7 @@ export function writeSession(
     renderMarkdown(s, { includeReasoning, fullToolResults }),
   );
 
-  return { md: mdRel, raw: mdRel };
+  return { md: mdRel };
 }
 
 interface RenderCtx {
