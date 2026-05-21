@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.6.1 — 2026-05-21
+
+Fast follow-up to 0.6.0 covering the gaps exposed by Yue's fresh-init
+test on mini2: a real bug that blocked auto workflow install, plus
+overdue wizard polish.
+
+### Bug fixes
+
+- **`vibebook workflow init` no longer fails when the user's primary
+  working tree is on `main`.** Previously the worktree helper used
+  `git checkout -B main` inside the temp worktree, which git refuses
+  when `main` is already checked out elsewhere (very common after
+  fresh `vibebook init` — local default branch is `main`). Failure was:
+  `fatal: 'main' is already used by worktree at <repoPath>`. Fix:
+  worktree now uses a unique temp branch name (`vibebook-tmp-main-<ts>-<rand>`)
+  and pushes with `git push origin HEAD:main`, then cleans up the
+  temp branch ref in `finally`.
+
+### Wizard polish (init wizard goes from 9 questions to 7)
+
+- **Q6 (Enable CI aggregation?) dropped** — now auto-true when
+  sync-to-remote, auto-false when local-only. Workflow init still
+  runs at the end of init (now succeeds even on `main` thanks to
+  the bug fix above). Escape hatch: edit `~/.vibebook/config.json`
+  to set `enableAggregateCI: false`.
+- **Q7 (Include reasoning?) dropped** — reasoning blocks are part
+  of the context.md content-block stream by design in 0.6+;
+  truncation already handles size. The config field is retained for
+  backward compat but is always `true`.
+- **Q6 (was Q8): device name default now strips `.local`, `.lan`,
+  and corp FQDN suffixes**. So `Mac-mini-2.local` defaults to
+  `Mac-mini-2` rather than the volatile mDNS form. Still warns if
+  the cleaned name looks DHCP-like.
+- **Closing message refreshed** to make cross-device flow obvious:
+  "Try on this machine: vibebook sync", then "On ANOTHER machine
+  after vibebook init + vibebook sync: vibebook list-sessions +
+  vibebook resume `<id>`".
+
 ## 0.6.0 — 2026-05-21
 
 ### BREAKING — Spool format simplified to single context.md per session

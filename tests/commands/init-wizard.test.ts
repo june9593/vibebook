@@ -11,6 +11,28 @@ describe("defaultLocalPath", () => {
   });
 });
 
+describe("stripVolatileSuffixes", () => {
+  it("strips .local (Bonjour / mDNS)", async () => {
+    const { stripVolatileSuffixes } = await import("../../src/commands/init-wizard.js");
+    expect(stripVolatileSuffixes("Mac-mini-2.local")).toBe("Mac-mini-2");
+    expect(stripVolatileSuffixes("yuedeMacBook-Pro-2.local")).toBe("yuedeMacBook-Pro-2");
+  });
+  it("strips .lan", async () => {
+    const { stripVolatileSuffixes } = await import("../../src/commands/init-wizard.js");
+    expect(stripVolatileSuffixes("Mac.lan")).toBe("Mac");
+  });
+  it("strips corp FQDN suffixes", async () => {
+    const { stripVolatileSuffixes } = await import("../../src/commands/init-wizard.js");
+    expect(stripVolatileSuffixes("MIS-EV2-BB1.surfacescenarios.org")).toBe("MIS-EV2-BB1");
+    expect(stripVolatileSuffixes("host42.corp.example.com")).toBe("host42");
+  });
+  it("leaves a bare label unchanged", async () => {
+    const { stripVolatileSuffixes } = await import("../../src/commands/init-wizard.js");
+    expect(stripVolatileSuffixes("mini2")).toBe("mini2");
+    expect(stripVolatileSuffixes("work-laptop")).toBe("work-laptop");
+  });
+});
+
 describe("applyWizardAnswers", () => {
   let tmpHome: string;
   let originUrl: string;
@@ -52,7 +74,6 @@ describe("applyWizardAnswers", () => {
       encrypt: true,
       passphraseEntered: "secret",
       enableAggregateCI: true,
-      includeReasoning: true,
       deviceBranch: "test-device",
     });
     const { existsSync, readFileSync, statSync } = await import("node:fs");
@@ -77,7 +98,6 @@ describe("applyWizardAnswers", () => {
       localPath,
       encrypt: false,
       enableAggregateCI: false,
-      includeReasoning: false,
       deviceBranch: "test-device",
     });
     const { existsSync } = await import("node:fs");
@@ -99,9 +119,7 @@ describe("runWizard end-to-end transcript", () => {
       "y",                             // Q3 encrypt
       "secret123",                     // Q4 passphrase
       "secret123",                     // Q4 confirm
-      "y",                             // Q6 enable aggregate CI
-      "y",                             // Q7 includeReasoning
-      "mini2",                         // Q8 stable device name (override hostname default)
+      "mini2",                         // Q6 stable device name (override hostname default)
     ];
     const stdin = new Readable({ read() {} }) as Readable & { isTTY?: boolean };
     stdin.isTTY = true;
@@ -128,16 +146,15 @@ describe("runWizard end-to-end transcript", () => {
     expect(a.repoUrl).toBe("git@github.com:you/repo.git");
     expect(a.encrypt).toBe(true);
     expect(a.passphraseEntered).toBe("secret123");
+    // 0.6.1: Q6 dropped — enableAggregateCI auto-set true for sync-to-remote
     expect(a.enableAggregateCI).toBe(true);
-    expect(a.includeReasoning).toBe(true);
     expect(a.deviceBranch).toBe("mini2");
   });
 
   it("local-only mode (Q0=n) skips remote-only questions (including aggregate CI)", async () => {
     const lines = [
       "n",                              // Q0 sync to remote → no
-      "y",                              // Q7 includeReasoning (Q6 skipped — local-only)
-      "",                               // Q8 → accept hostname default
+      "",                               // Q6 → accept hostname default
     ];
     const stdin = new Readable({ read() {} }) as Readable & { isTTY?: boolean };
     stdin.isTTY = true;
@@ -163,8 +180,7 @@ describe("runWizard end-to-end transcript", () => {
     expect(a.repoUrl).toBe("");
     expect(a.encrypt).toBe(false);
     expect(a.passphraseEntered).toBeUndefined();
-    expect(a.enableAggregateCI).toBe(false); // local-only mode → no CI question asked
-    expect(a.includeReasoning).toBe(true);
+    expect(a.enableAggregateCI).toBe(false); // local-only mode → no CI
     expect(a.deviceBranch.length).toBeGreaterThan(0); // hostname() default accepted
   });
 });

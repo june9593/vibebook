@@ -16,14 +16,13 @@ export interface WizardAnswers {
   localPath: string;
   encrypt: boolean;
   passphraseEntered?: string;
-  /** User opted into the CI cross-device aggregation workflow. Only
-   *  meaningful when syncToRemote is true. */
+  /** True if syncToRemote was chosen. Drives auto-install of the CI
+   *  aggregation workflow. Local-only repos never enable CI. */
   enableAggregateCI: boolean;
-  /** Render assistant reasoning into raw_sessions/*.md (Q7). Default true. */
-  includeReasoning: boolean;
-  /** Stable git-branch name for this machine. User picks at Q8 because
-   *  hostname() drifts on macOS across networks; we default to hostname()
-   *  but recommend overriding with a physical-label name. */
+  /** Stable git-branch name for this machine. User picks at Q6 because
+   *  hostname() drifts on macOS across networks; we default to a cleaned
+   *  hostname (stripped of .local / .lan suffixes) but recommend a
+   *  physical-label name. */
   deviceBranch: string;
 }
 
@@ -96,45 +95,48 @@ export async function runWizard(): Promise<WizardAnswers> {
     console.log(chalk.gray("  local-only mode: no remote URL, no encryption, no push."));
   }
 
-  // Q6: opt-in to cross-device CI aggregation. Only offered when syncToRemote
-  // — local-only repos have no CI to run.
-  // (v0.1 had a "claude model" question here. Removed in v0.2 because the LLM
-  // lives entirely in the user's Claude Code session now — model selection
-  // happens there via /model, not at vibebook init time.)
-  // (v0.5: Q5 "digest enabled" and Q8 "recommend memex" both dropped. Digest
-  // is now handled by the Claude Code plugin — install it after init. Memex
-  // is similarly an external choice the user makes via /plugin.)
-  let enableAggregateCI = false;
-  if (syncToRemote) {
-    enableAggregateCI = await promptYesNo(
-      chalk.cyan("Q6") + " Enable CI cross-device book aggregation? (GitHub Actions merges device branches into main)",
-      false,
-    );
-  }
+  // Q5 / Q6 / Q7 dropped in 0.6.1:
+  //   - Q6 (enable CI aggregation): now defaults true when sync-to-remote
+  //     (the CI workflow is small + universally useful; escape hatch is
+  //     editing config.json's enableAggregateCI: false post-init).
+  //   - Q7 (include reasoning): always true in 0.6+ — reasoning blocks are
+  //     part of the context.md by design; truncation handles size.
+  //   (v0.1 had a "claude model" question here. Removed in v0.2 because the
+  //   LLM lives entirely in the user's Claude Code session now.)
+  //   (v0.5: Q5 "digest enabled" and the original Q8 "recommend memex"
+  //   dropped.)
+  const enableAggregateCI = syncToRemote;
 
-  // Q7: include assistant reasoning in synced md files? Reasoning adds
-  // 30-100% to md size; recommend on when the summarizing model has 400K+
-  // context, off when it's a smaller model.
-  const includeReasoning = await promptYesNo(
-    chalk.cyan("Q7") + " Include assistant 'reasoning/thinking' in synced md? (recommended ON for ≥400K-context models like Opus 1M; OFF for smaller models — adds 30-100% to md size)",
-    true,
-  );
-
-  // Q8: device branch name. hostname() drifts on macOS (mDNS in home wifi,
-  // DHCP-given names on corp VPN, hotspot etc.) — each network creates a new
-  // device branch, fragmenting the spool. We default to the current hostname
-  // but strongly recommend overriding with a physical-label-style name.
-  const hostnameDefault = deviceBranchFromHostname();
+  // Q6 (was Q8 pre-0.6.1): device branch name. hostname() drifts on macOS
+  // (mDNS in home wifi, DHCP-given names on corp VPN, hotspot etc.) — each
+  // network creates a new device branch, fragmenting the spool. We strip
+  // common volatile suffixes (.local / .lan) from the default and warn if
+  // the cleaned name still looks volatile.
+  const hostnameDefault = stripVolatileSuffixes(deviceBranchFromHostname());
   const stableLooking = isStableDeviceName(hostnameDefault);
   const stableHint = stableLooking
     ? "current hostname looks stable, can keep"
-    : "WARNING: current hostname looks like macOS drift (e.g. *.local / DHCP) — recommend overriding with a physical label like 'mini2' or 'work-laptop'";
+    : "WARNING: current hostname looks like macOS drift (e.g. DHCP) — recommend overriding with a physical label like 'mini2' or 'work-laptop'";
   const deviceBranch = (await prompt(
-    chalk.cyan("Q8") + ` Stable device name for this machine's git branch? (${stableHint})`,
+    chalk.cyan("Q6") + ` Stable device name for this machine's git branch? (${stableHint})`,
     hostnameDefault,
   )).trim() || hostnameDefault;
 
-  return { repoUrl, localPath, encrypt, passphraseEntered, enableAggregateCI, includeReasoning, deviceBranch };
+  return { repoUrl, localPath, encrypt, passphraseEntered, enableAggregateCI, deviceBranch };
+}
+
+/** Strip common macOS-volatile suffixes from a hostname-derived branch name.
+ *  `Mac-mini-2.local` → `Mac-mini-2`; `MIS-EV2-BB1.surfacescenarios.org` →
+ *  `MIS-EV2-BB1` (the FQDN suffix is irrelevant for vibebook's purposes; the
+ *  identifying part of a personal machine name is the bare hostname). */
+export function stripVolatileSuffixes(name: string): string {
+  return name
+    .replace(/\.local$/i, "")
+    .replace(/\.lan$/i, "")
+    // Strip first .<dotted-suffix> on FQDN-shaped names; preserves multi-dot
+    // user-provided names like "yue.mini.2" by only touching the case where
+    // the suffix contains letters (DNS-style).
+    .replace(/\.[a-z][a-z0-9.-]*$/i, "");
 }
 
 /**
@@ -206,7 +208,10 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
     deviceBranch: a.deviceBranch,
     runner: "claude-cli",
     enableAggregateCI: a.enableAggregateCI,
-    includeReasoning: a.includeReasoning,
+    // 0.6+: reasoning blocks are always rendered into context.md (they're
+    // part of the content-block stream by design; truncation handles size).
+    // The schema retains the field but the wizard no longer asks; default true.
+    includeReasoning: true,
     threadingConcurrency: DEFAULT_THREADING_CONCURRENCY,
     threadingMaxAttempts: DEFAULT_THREADING_MAX_ATTEMPTS,
     // digestEnabled retained at schema default (true) for downstream
@@ -237,10 +242,12 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
   }
 
   console.log("");
-  console.log(chalk.cyan("Try:"));
-  console.log("  vibebook sync                    # push your sessions");
-  console.log("  vibebook list-sessions           # list sessions across machines");
-  console.log("  vibebook resume <sessionId>      # resume a session from another machine");
+  console.log(chalk.cyan("Try on this machine:"));
+  console.log("  vibebook sync                    # extract local sessions + push to your device branch");
+  console.log("");
+  console.log(chalk.cyan("On ANOTHER machine after vibebook init + vibebook sync:"));
+  console.log("  vibebook list-sessions --since 7d        # see what's synced from elsewhere");
+  console.log("  cd <project-dir> && vibebook resume <id> # spawn claude with that prior session's context");
   console.log("");
   console.log(chalk.cyan("For digest + recall (chronicles, topics, bookmark recall):"));
   console.log(chalk.gray("  Install the Claude Code plugin:"));
