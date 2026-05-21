@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { mkdtempSync, mkdirSync, existsSync, cpSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, existsSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -100,32 +100,5 @@ describe("runSync — extract + raw push only (v0.2: no LLM)", () => {
     await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
     expect(existsSync(join(repo, "book"))).toBe(false);
     expect(existsSync(join(repo, ".vibebook/index.book.json"))).toBe(false);
-  });
-
-  it("stamps originSessionId on index entry when fork registry has the sessionId", async () => {
-    // Plant a fork registry entry mapping the fixture's sessionId to a fake origin
-    const fakeHome = mkdtempSync(join(tmpdir(), "memvc-fork-home-"));
-    mkdirSync(join(fakeHome, ".vibebook"), { recursive: true });
-    writeFileSync(
-      join(fakeHome, ".vibebook/resume-forks.json"),
-      JSON.stringify({
-        version: 1,
-        forks: {
-          "abc12345-cbf6-41f0-ab88-5cb425caba57": {
-            originSessionId: "origin-from-laptop-A",
-            resumedAt: "2026-05-14T00:00:00Z",
-          },
-        },
-      }),
-    );
-    vi.stubEnv("HOME", fakeHome);
-    try {
-      await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
-      const idx = loadIndex(repo);
-      const entry = Object.values(idx.entries)[0]!;
-      expect(entry.originSessionId).toBe("origin-from-laptop-A");
-    } finally {
-      vi.unstubAllEnvs();
-    }
   });
 });

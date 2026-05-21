@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { readFileSync } from "node:fs";
+import chalk from "chalk";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -146,15 +147,18 @@ export async function run(argv: string[]) {
       console.table(rows);
     });
   program
-    .command("resume <sessionId>")
-    .description("Copy a spool session into ~/.claude/projects/ and emit the `claude --resume` command to run.")
-    .action(async (sessionId: string) => {
+    .command("resume <id>")
+    .description("Find a session's context.md and spawn a fresh `claude` session with it as the first prompt.")
+    .option("--print", "print the claude invocation instead of spawning it")
+    .option("--cwd <path>", "override the cwd used for project-match validation (default: process.cwd())")
+    .action(async (id: string, opts: { print?: boolean; cwd?: string }) => {
       const { resumeCmd } = await import("./commands/resume/resume.js");
-      const result = await resumeCmd({ sessionId });
-      console.log(`Session forked: ${result.originSessionId} → ${result.newSessionId}`);
-      console.log(`Written to: ${result.dest}`);
-      console.log(`Continue with:`);
-      console.log(`  ${result.hint}`);
+      try {
+        await resumeCmd({ idOrPrefix: id, print: opts.print, cwd: opts.cwd });
+      } catch (err) {
+        console.error(chalk.red(String((err as Error).message)));
+        process.exit(1);
+      }
     });
   program
     .command("config")

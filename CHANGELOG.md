@@ -1,5 +1,65 @@
 # Changelog
 
+## 0.6.0 — 2026-05-21
+
+### BREAKING — Spool format simplified to single context.md per session
+
+Pre-0.6: each session produced `.md` + `.raw.json` + `.jsonl` in the spool.
+0.6: only `.md`, but the `.md` is now a *full conversation context* —
+includes `tool_use` blocks, `tool_result` blocks, `thinking` blocks, and
+YAML frontmatter with session metadata.
+
+### BREAKING — `vibebook resume` mechanism changed
+
+Pre-0.6: tried to inject jsonl into `~/.claude/projects/` so
+`claude --resume <id>` would pick it up. Dogfooded on 2026-05-20 — doesn't
+work cross-device because Claude Code reads more state than just the
+jsonl file.
+
+0.6: spawns a fresh `claude` session passing the prior session's context
+markdown as the first user prompt. Claude reads it, acknowledges,
+awaits next instruction. No reverse-engineering of Claude Code internals;
+uses standard `claude [prompt]` public CLI.
+
+### NEW commands / flags
+
+- `vibebook resume <id-or-prefix> [--print] [--cwd <path>]` — shortId,
+  prefix, or full UUID all accepted. `--print` skips spawn, prints the
+  invocation for manual paste. `--cwd` overrides project-match validation.
+
+### Drops
+
+- `~/.vibebook/resume-forks.json` registry (no fork tracking needed)
+- `IndexEntry.originSessionId` field (no longer written; still read for
+  back-compat)
+- jsonl + raw.json in spool (no longer written)
+- `vibebook doctor` orphan-jsonl + oversized-jsonl checks (irrelevant
+  when spool has no jsonl). New: 0.5.x residue check + fork-registry
+  residue check, both with cleanup commands.
+
+### Truncation
+
+Large `tool_result` / `tool_use.input` blocks (>20 KB) are truncated in
+the rendered `.md` to first 30 + last 10 lines (or first 4000 + last
+1000 chars for single-line blocks), with a footer noting size. This
+keeps long Chromium / Edge sessions (gigabytes of file reads) under
+GitHub's 100 MB push limit. Override with `VIBEBOOK_FULL_TOOL_RESULTS=1`.
+
+### Migration
+
+- First `vibebook sync` after upgrade writes new-format `.md` *only* for
+  sessions whose source jsonl mtime/sha changed. To force re-extract
+  existing sessions in the new format:
+  ```
+  rm ~/.vibebook/session-repo/.vibebook/index.json
+  vibebook sync
+  ```
+- Old `.raw.json` / `.jsonl` files in the spool aren't auto-deleted;
+  `vibebook doctor` reports them with cleanup commands.
+- `~/.vibebook/resume-forks.json` from 0.5.1 is dead; `doctor` reports it.
+- vibebook-plugin needs no update — it already reads `.md` (just sees
+  richer content now).
+
 ## 0.5.3 — 2026-05-20
 
 Cross-device dogfood round 2 exposed the **CI aggregation workflow was

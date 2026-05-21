@@ -1,84 +1,122 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, dirname } from "node:path";
-import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { join, resolve } from "node:path";
+import chalk from "chalk";
 import { readConfig } from "../../config.js";
 import { loadIndex } from "../../index-store.js";
-import { rewriteJsonlPaths, type PathMap } from "./path-rewrite.js";
-import { recordFork, rewriteSessionId } from "./fork.js";
+import { findEntries } from "./fuzzy-match.js";
+import { renderResumePrompt, chooseInvocation } from "./render-prompt.js";
 
 export interface ResumeOptions {
-  sessionId: string;
+  /** Session id, shortId, or any UUID prefix (case-insensitive). */
+  idOrPrefix: string;
+  /** When true: don't spawn claude, print the invocation instead. */
+  print?: boolean;
+  /** Override the cwd used for project-match validation. Defaults to process.cwd(). */
+  cwd?: string;
 }
 
+/** Result returned by resumeCmd. Mostly for unit tests; the human-facing
+ *  output goes to stdout/stderr directly. */
 export interface ResumeResult {
-  /** Where the jsonl was written on this machine. */
-  dest: string;
-  /** This machine's local cwd for the project (after pathMap translation). */
-  localCwd: string;
-  /** A one-line hint for the user, e.g. `cd /path && claude --resume <newId>`. */
-  hint: string;
-  /** The new sessionId assigned to the fork on this device. */
-  newSessionId: string;
-  /** The original sessionId on the source device (recorded in the fork registry). */
-  originSessionId: string;
+  matchedSessionId: string;
+  expectedCwd: string;
+  mdPath: string;
+  invocation: string[];
+  spawned: boolean;
 }
 
+/**
+ * `vibebook resume <id>` — find the source session's markdown, build a prompt
+ * with the conversation history, and launch a fresh `claude` session with
+ * that prompt as the first user turn. The new Claude reads the prior context
+ * and asks the user what to continue with.
+ *
+ * Does NOT touch ~/.claude/projects/, does NOT call `claude --resume`, does
+ * NOT update any Claude internal state. Uses only the public `claude [prompt]`
+ * CLI interface.
+ */
 export async function resumeCmd(opts: ResumeOptions): Promise<ResumeResult> {
   const cfg = readConfig();
   const idx = loadIndex(cfg.repoPath);
 
-  // Find the entry. Try both tool prefixes since callers may not know which.
-  const candidates = [`claude:${opts.sessionId}`, `copilot:${opts.sessionId}`];
-  const entry = candidates.map((k) => idx.entries[k]).find(Boolean);
-  if (!entry) {
+  // 1. Fuzzy match by id / prefix / full UUID
+  const matches = findEntries(idx, opts.idOrPrefix);
+  if (matches.length === 0) {
     throw new Error(
-      `Session ${opts.sessionId} not found in spool index at ${cfg.repoPath}/.vibebook/index.json. ` +
-      `Did you run 'vibebook sync' to pull from the device that holds it?`,
+      `No session matches '${opts.idOrPrefix}'. ` +
+      `Run 'vibebook list-sessions' to see what's available.`,
+    );
+  }
+  if (matches.length > 1) {
+    const lines = [
+      `Multiple matches for '${opts.idOrPrefix}':`,
+      ...matches.map(
+        (m) => `  ${m.shortId}  ${m.displayName.slice(0, 50)}  (${m.startedAt.slice(0, 10)})`,
+      ),
+      ``,
+      `Pass a longer id prefix to disambiguate.`,
+    ];
+    throw new Error(lines.join("\n"));
+  }
+  const entry = matches[0]!;
+
+  // 2. Validate cwd (after pathMap translation)
+  const pathMap = cfg.pathMap ?? {};
+  const expectedCwd = applyPathMap(entry.projectRaw, pathMap);
+  const actualCwd = resolve(opts.cwd ?? process.cwd());
+  if (actualCwd !== expectedCwd) {
+    throw new Error(
+      `This session was for ${expectedCwd}\n` +
+      `cd there first:  cd ${expectedCwd}`,
     );
   }
 
-  const pathMap: PathMap = cfg.pathMap ?? {};
-
-  // Translate the source's cwd to this machine's
-  const localCwd = applyPathMap(entry.projectRaw, pathMap);
-
-  // Source jsonl: same path as relativePath but .jsonl extension instead of .raw.json
-  const srcAbs = join(cfg.repoPath, entry.relativePath.replace(/\.raw\.json$/, ".jsonl"));
-  if (!existsSync(srcAbs)) {
+  // 3. Locate context md (handle legacy .raw.json relativePath by falling back to .md)
+  const mdRelative = entry.relativePath.replace(/\.raw\.json$/, ".md");
+  const mdPath = join(cfg.repoPath, mdRelative);
+  if (!existsSync(mdPath)) {
     throw new Error(
-      `Source jsonl missing on disk: ${srcAbs}. ` +
-      `Either this session predates v0.5.0 spool format, or its jsonl exceeded ` +
-      `the 95 MB cap and was skipped at sync time (see writer.ts). ` +
-      `If pre-0.5: re-sync after upgrade with 'rm -rf ~/.vibebook/session-repo/raw_sessions && vibebook sync'. ` +
-      `If oversized: nothing to do — that particular session can't be resumed cross-device.`,
+      `Context md missing: ${mdPath}. ` +
+      `The source device may not have synced this session yet, or you're ` +
+      `on a 0.5.x spool that hasn't been re-synced under 0.6.`,
     );
   }
-  const sourceJsonl = readFileSync(srcAbs, "utf8");
+  const contextMd = readFileSync(mdPath, "utf8");
 
-  // Fork: assign a new sessionId so this device's continuation doesn't
-  // collide with the source device's continuation when both spools sync up.
-  // Provenance is recorded in ~/.vibebook/resume-forks.json so the next
-  // `vibebook sync` can stamp originSessionId onto the new spool entry.
-  const originSessionId = entry.sessionId;
-  const newSessionId = randomUUID();
-  const idRewritten = rewriteSessionId(sourceJsonl, originSessionId, newSessionId);
-  const fullyRewritten = rewriteJsonlPaths(idRewritten, pathMap);
+  // 4. Build prompt + decide invocation
+  const prompt = renderResumePrompt(entry, contextMd);
+  const argv = chooseInvocation(prompt, entry.shortId);
 
-  // Write to ~/.claude/projects/<encoded-cwd>/<newSessionId>.jsonl
-  const encodedCwd = encodeCwdForClaude(localCwd);
-  const dest = join(homedir(), ".claude", "projects", encodedCwd, `${newSessionId}.jsonl`);
-  mkdirSync(dirname(dest), { recursive: true });
-  writeFileSync(dest, fullyRewritten);
+  // 5. Print or spawn
+  if (opts.print) {
+    console.log(`To continue, run:`);
+    console.log(`  cd ${expectedCwd}`);
+    console.log(`  ${argv.map(shellQuote).join(" ")}`);
+    return { matchedSessionId: entry.sessionId, expectedCwd, mdPath, invocation: argv, spawned: false };
+  }
 
-  recordFork(newSessionId, originSessionId);
+  console.log(chalk.green(`\n✓ Matched: "${entry.displayName}"`));
+  console.log(chalk.gray(`  Session id:  ${entry.sessionId}`));
+  console.log(chalk.gray(`  Started:     ${entry.startedAt}`));
+  console.log(chalk.gray(`  Context:     ${(Buffer.byteLength(contextMd, "utf8") / 1024).toFixed(1)} KB`));
+  console.log(chalk.cyan(`\nLaunching claude with context as first prompt...\n`));
 
-  const hint = `cd ${localCwd} && claude --resume ${newSessionId}`;
-  return { dest, localCwd, hint, newSessionId, originSessionId };
+  const r = spawnSync(argv[0]!, argv.slice(1), {
+    cwd: expectedCwd,
+    stdio: "inherit",
+  });
+  if (r.error) {
+    throw new Error(
+      `Failed to spawn 'claude': ${r.error.message}. ` +
+      `Make sure Claude Code is installed and on your PATH.`,
+    );
+  }
+  return { matchedSessionId: entry.sessionId, expectedCwd, mdPath, invocation: argv, spawned: true };
 }
 
-/** Apply the longest-prefix-wins path translation to a single path string. */
-function applyPathMap(path: string, pathMap: PathMap): string {
+/** Apply longest-prefix-wins path translation to a single path string. */
+function applyPathMap(path: string, pathMap: Record<string, string>): string {
   const entries = Object.entries(pathMap).sort(([a], [b]) => b.length - a.length);
   for (const [from, to] of entries) {
     if (path === from) return to;
@@ -87,8 +125,9 @@ function applyPathMap(path: string, pathMap: PathMap): string {
   return path;
 }
 
-/** Claude Code encodes a cwd into a directory name by replacing every `/`
- *  with `-`. So `/Users/me/code/my-app` becomes `-Users-me-code-my-app`. */
-function encodeCwdForClaude(cwd: string): string {
-  return cwd.replace(/\//g, "-");
+/** Minimal shell-quoting for the --print output. Wraps in single quotes
+ *  and escapes embedded single quotes via the standard close-quote dance. */
+function shellQuote(s: string): string {
+  if (/^[A-Za-z0-9_/.,@:=+-]+$/.test(s)) return s;
+  return `'${s.replace(/'/g, `'\\''`)}'`;
 }

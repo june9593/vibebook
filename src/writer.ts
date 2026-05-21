@@ -1,109 +1,174 @@
-import { mkdirSync, writeFileSync, copyFileSync, statSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { NormalizedSession } from "./types.js";
+import type { NormalizedSession, ContentBlock } from "./types.js";
 
 export interface WriteSessionOptions {
-  /** Render the assistant's reasoning/thinking as a `> 💭` blockquote in md.
-   *  When false, reasoning is dropped from md (still preserved in raw.json).
-   *  Default: true. */
+  /** Render the assistant's reasoning/thinking as `> 💭` blockquotes in md.
+   *  Default true. Set false for smaller context models that don't benefit
+   *  from reasoning context. */
   includeReasoning?: boolean;
+  /** Skip truncation of large tool_result / tool_use.input blocks.
+   *  Default false. Override via VIBEBOOK_FULL_TOOL_RESULTS=1. */
+  fullToolResults?: boolean;
 }
 
 export interface WrittenPaths {
-  raw: string;
   md: string;
-  /** Original jsonl copied alongside the .md/.raw.json. Undefined when the
-   *  source exceeds JSONL_MAX_BYTES (GitHub rejects pushes >100 MB and
-   *  warns >50 MB). Skipped jsonls cannot be `vibebook resume`d but the
-   *  .md/.raw.json digest still ships. */
-  jsonl?: string;
 }
 
-/** Hard cap on jsonl size we'll copy into the spool. GitHub's hard reject
- *  is 100 MB; we leave a 5 MB margin so combined commits don't push us over.
- *  Sessions above this still get .md + .raw.json. */
-export const JSONL_MAX_BYTES = 95 * 1024 * 1024;
+/** Threshold above which tool_result.content / tool_use.input gets truncated.
+ *  Empirical: a 20 KB code-fence in markdown is already large; tool outputs
+ *  bigger than this usually mean Claude Read a long file or Bash dumped a
+ *  build log — neither is high-value context for resume. The truncation
+ *  preserves first 30 + last 10 lines + a footer noting the original size. */
+export const TRUNCATE_THRESHOLD_BYTES = 20 * 1024;
 
-/** Soft warning threshold — GitHub starts complaining at 50 MB even though
- *  it accepts the push. We log a one-liner so users notice before the spool
- *  bloats. */
-export const JSONL_WARN_BYTES = 50 * 1024 * 1024;
-
-export function writeSession(repoRoot: string, s: NormalizedSession, opts: WriteSessionOptions = {}): WrittenPaths {
+export function writeSession(
+  repoRoot: string,
+  s: NormalizedSession,
+  opts: WriteSessionOptions = {},
+): WrittenPaths {
   const date = s.startedAt.slice(0, 10); // YYYY-MM-DD
   const dirRel = join("raw_sessions", s.tool, s.project, date);
   const absDir = join(repoRoot, dirRel);
   mkdirSync(absDir, { recursive: true });
 
   const base = `${s.nameSlug}__${s.shortId}`;
-  const rawRel = join(dirRel, `${base}.raw.json`);
   const mdRel = join(dirRel, `${base}.md`);
 
-  writeFileSync(join(repoRoot, rawRel), JSON.stringify(s, null, 2) + "\n");
-  writeFileSync(join(repoRoot, mdRel), renderMarkdown(s, opts.includeReasoning ?? true));
+  const includeReasoning = opts.includeReasoning ?? true;
+  const fullToolResults =
+    opts.fullToolResults ?? process.env.VIBEBOOK_FULL_TOOL_RESULTS === "1";
 
-  const jsonlRel = maybeCopyJsonl(repoRoot, dirRel, base, s.sourcePath);
+  writeFileSync(
+    join(repoRoot, mdRel),
+    renderMarkdown(s, { includeReasoning, fullToolResults }),
+  );
 
-  return jsonlRel ? { raw: rawRel, md: mdRel, jsonl: jsonlRel } : { raw: rawRel, md: mdRel };
+  return { md: mdRel };
 }
 
-/** Copy the original jsonl into the spool unless it exceeds the GitHub-push
- *  size cap. Returns the relative path on success, undefined on skip. */
-function maybeCopyJsonl(repoRoot: string, dirRel: string, base: string, sourcePath: string): string | undefined {
-  let size: number;
-  try {
-    size = statSync(sourcePath).size;
-  } catch {
-    // Source file gone — nothing we can do; skip silently. The .md/.raw.json
-    // we already wrote captures the session content.
-    return undefined;
-  }
-  if (size > JSONL_MAX_BYTES) {
-    const mb = (size / 1024 / 1024).toFixed(1);
-    console.warn(
-      `! oversized jsonl skipped (${mb} MB > 95 MB GitHub limit): ${sourcePath}\n` +
-      `  .md + .raw.json still written; this session can't be 'vibebook resume'd.`,
-    );
-    return undefined;
-  }
-  if (size > JSONL_WARN_BYTES) {
-    const mb = (size / 1024 / 1024).toFixed(1);
-    console.warn(`! large jsonl (${mb} MB > 50 MB): ${sourcePath} — git push may warn.`);
-  }
-  const jsonlRel = join(dirRel, `${base}.jsonl`);
-  copyFileSync(sourcePath, join(repoRoot, jsonlRel));
-  return jsonlRel;
+interface RenderCtx {
+  includeReasoning: boolean;
+  fullToolResults: boolean;
 }
 
-function renderMarkdown(s: NormalizedSession, includeReasoning: boolean): string {
-  const header = [
-    `# ${s.displayName}`,
-    "",
-    `**Tool:** ${s.tool}  `,
-    `**Project:** ${s.project} (\`${s.projectRaw}\`)  `,
-    `**Session ID:** \`${s.sessionId}\`  `,
-    `**Started:** ${s.startedAt}  `,
-    `**Ended:** ${s.endedAt}  `,
-    "",
+function renderMarkdown(s: NormalizedSession, ctx: RenderCtx): string {
+  return renderFrontmatter(s) + "\n\n" + renderBody(s, ctx);
+}
+
+function renderFrontmatter(s: NormalizedSession): string {
+  // YAML frontmatter — keep values simple strings to avoid quoting hazards.
+  // (project / displayName already get slugified upstream so they're safe.)
+  const lines = [
     "---",
-    "",
-  ].join("\n");
-  const body = s.messages.map((m) => {
-    const heading = m.role === "user" ? "## User" : m.role === "assistant" ? "## Assistant" : `## ${m.role}`;
+    `sessionId: ${s.sessionId}`,
+    `tool: ${s.tool}`,
+    `project: ${s.project}`,
+    `projectRaw: ${s.projectRaw}`,
+    `startedAt: ${s.startedAt}`,
+    `endedAt: ${s.endedAt}`,
+    `displayName: ${yamlSafeString(s.displayName)}`,
+    "---",
+  ];
+  return lines.join("\n");
+}
+
+/** YAML-safe one-line string. If the value contains anything quoting-hostile
+ *  (colons, hash, special chars), wrap in single quotes and escape internal
+ *  single quotes by doubling them (YAML 1.2 spec). */
+function yamlSafeString(s: string): string {
+  if (/^[A-Za-z0-9_一-鿿　-〿 -]+$/.test(s)) return s;
+  const escaped = s.replace(/'/g, "''");
+  return `'${escaped}'`;
+}
+
+function renderBody(s: NormalizedSession, ctx: RenderCtx): string {
+  const parts: string[] = [];
+  for (const m of s.messages) {
+    const heading =
+      m.role === "user" ? "## User" :
+      m.role === "assistant" ? "## Assistant" :
+      `## ${m.role}`;
     const ts = m.timestamp ? ` _(${m.timestamp})_` : "";
-    // When the assistant exposed reasoning/thinking content, render it as a
-    // blockquote prefixed with 💭 so the summarizing LLM can distinguish it
-    // from the actual reply. We put it BEFORE the text because reasoning is
-    // chronologically what came first.
-    const parts: string[] = [];
-    if (includeReasoning && m.reasoning) {
-      const quoted = m.reasoning.split("\n").map((l) => `> ${l}`).join("\n");
-      parts.push(`> 💭 _reasoning_\n${quoted}`);
+
+    const rendered = renderMessageContent(m.contentBlocks, m.text, m.reasoning, ctx);
+    if (!rendered.trim()) continue; // drop empty messages
+
+    parts.push(`${heading}${ts}\n\n${rendered}`);
+  }
+  return parts.join("\n\n");
+}
+
+function renderMessageContent(
+  blocks: ContentBlock[] | undefined,
+  fallbackText: string,
+  fallbackReasoning: string | undefined,
+  ctx: RenderCtx,
+): string {
+  // Path 1: rich content blocks available (Claude source, post-Task 2)
+  if (blocks && blocks.length > 0) {
+    const out: string[] = [];
+    for (const b of blocks) {
+      if (b.type === "thinking") {
+        if (!ctx.includeReasoning) continue;
+        out.push(renderThinking(b.thinking));
+      } else if (b.type === "text") {
+        if (b.text.trim()) out.push(b.text);
+      } else if (b.type === "tool_use") {
+        out.push(renderToolUse(b, ctx));
+      } else if (b.type === "tool_result") {
+        out.push(renderToolResult(b, ctx));
+      }
     }
-    if (m.text) parts.push(m.text);
-    // If neither text nor (rendered) reasoning, drop the empty turn.
-    if (parts.length === 0) return "";
-    return `${heading}${ts}\n\n${parts.join("\n\n")}\n`;
-  }).filter(Boolean).join("\n");
-  return header + body;
+    return out.join("\n\n");
+  }
+  // Path 2: legacy text-only message (Copilot source, or pre-Task 2 callers)
+  const out: string[] = [];
+  if (ctx.includeReasoning && fallbackReasoning) {
+    out.push(renderThinking(fallbackReasoning));
+  }
+  if (fallbackText) out.push(fallbackText);
+  return out.join("\n\n");
+}
+
+function renderThinking(text: string): string {
+  const quoted = text.split("\n").map((l) => `> ${l}`).join("\n");
+  return `> 💭 _thinking_\n${quoted}`;
+}
+
+function renderToolUse(b: Extract<ContentBlock, { type: "tool_use" }>, ctx: RenderCtx): string {
+  const inputStr = JSON.stringify(b.input, null, 2);
+  const truncated = ctx.fullToolResults
+    ? inputStr
+    : maybeTruncate(inputStr, "input");
+  return `### 🔧 tool_use: ${b.name}\n\n\`\`\`json\n${truncated}\n\`\`\``;
+}
+
+function renderToolResult(b: Extract<ContentBlock, { type: "tool_result" }>, ctx: RenderCtx): string {
+  const truncated = ctx.fullToolResults
+    ? b.content
+    : maybeTruncate(b.content, "output");
+  return `### ✅ tool_result\n\n\`\`\`\n${truncated}\n\`\`\``;
+}
+
+/** Truncate strings above TRUNCATE_THRESHOLD_BYTES. Preserves first 30 lines
+ *  + last 10 lines so the LLM still gets enough signal about what was read /
+ *  output, without dragging multi-MB file dumps into the context.
+ *
+ *  Returns the original string unchanged if under threshold. */
+function maybeTruncate(s: string, kind: "input" | "output"): string {
+  if (Buffer.byteLength(s, "utf8") <= TRUNCATE_THRESHOLD_BYTES) return s;
+  const lines = s.split("\n");
+  if (lines.length <= 50) {
+    // Single long line — truncate by character count
+    const head = s.slice(0, 4000);
+    const tail = s.slice(-1000);
+    return `${head}\n\n[... truncated: ${(Buffer.byteLength(s, "utf8") / 1024).toFixed(1)} KB total, showing first 4000 + last 1000 chars ...]\n\n${tail}`;
+  }
+  const head = lines.slice(0, 30).join("\n");
+  const tail = lines.slice(-10).join("\n");
+  const omitted = lines.length - 40;
+  const sizeKb = (Buffer.byteLength(s, "utf8") / 1024).toFixed(1);
+  return `${head}\n\n[... truncated: ${sizeKb} KB ${kind}, omitting ${omitted} middle lines ...]\n\n${tail}`;
 }

@@ -3,7 +3,7 @@ import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, basename } from "node:path";
 import type { SourceAdapter, DiscoveredSession } from "./base.js";
-import type { NormalizedSession, SessionMessage } from "../types.js";
+import type { NormalizedSession, SessionMessage, ContentBlock } from "../types.js";
 import { deriveSlug, projectSlugFromPath } from "../slug.js";
 import {
   inferProjectFromContent,
@@ -92,18 +92,22 @@ function parseClaudeJsonl(sourcePath: string, content: string): NormalizedSessio
     if (obj.type === "user" || obj.type === "assistant") {
       const ts = typeof obj.timestamp === "string" ? obj.timestamp : undefined;
       if (ts) { if (!startedAt) startedAt = ts; endedAt = ts; }
-      const { text: rawText, reasoning: rawReasoning } = extractParts(obj.message);
+      const { text: rawText, reasoning: rawReasoning, contentBlocks } = extractParts(obj.message);
       const text = sanitizeMessageText(rawText);
       const reasoning = sanitizeMessageText(rawReasoning);
-      // Drop the message only when BOTH text and reasoning are empty after
-      // sanitize. A message that's "just reasoning" still has summarization
-      // value and should be kept.
-      if (text || reasoning) {
+      // Drop the message only when text + reasoning + tool blocks are all
+      // empty. A message that's "just a tool_use" still carries information
+      // and should be kept.
+      const hasToolBlocks = contentBlocks.some(
+        (b) => b.type === "tool_use" || b.type === "tool_result",
+      );
+      if (text || reasoning || hasToolBlocks) {
         const msg: SessionMessage = {
           role: obj.type === "user" ? "user" : "assistant",
           text,
           timestamp: ts,
           raw: obj,
+          contentBlocks,
         };
         if (reasoning) msg.reasoning = reasoning;
         messages.push(msg);
@@ -159,23 +163,58 @@ function parseClaudeJsonl(sourcePath: string, content: string): NormalizedSessio
  *   - {type:"tool_use" / "tool_result"} → ignored (vibebook doesn't
  *     summarize tool traces; logex does the same)
  */
-function extractParts(message: any): { text: string; reasoning: string } {
-  if (!message) return { text: "", reasoning: "" };
+function extractParts(message: any): {
+  text: string;
+  reasoning: string;
+  contentBlocks: ContentBlock[];
+} {
+  if (!message) return { text: "", reasoning: "", contentBlocks: [] };
   const c = message.content;
-  if (typeof c === "string") return { text: c, reasoning: "" };
-  if (!Array.isArray(c)) return { text: "", reasoning: "" };
+  if (typeof c === "string") {
+    return {
+      text: c,
+      reasoning: "",
+      contentBlocks: [{ type: "text", text: c }],
+    };
+  }
+  if (!Array.isArray(c)) return { text: "", reasoning: "", contentBlocks: [] };
+
   const texts: string[] = [];
   const reasonings: string[] = [];
+  const blocks: ContentBlock[] = [];
   for (const p of c) {
     if (!p || typeof p !== "object") continue;
     if (p.type === "text" && typeof p.text === "string") {
       texts.push(p.text);
+      blocks.push({ type: "text", text: p.text });
     } else if (p.type === "thinking" && typeof p.thinking === "string" && p.thinking.length > 0) {
       reasonings.push(p.thinking);
+      blocks.push({ type: "thinking", thinking: p.thinking });
+    } else if (p.type === "tool_use" && typeof p.name === "string") {
+      const block: ContentBlock = { type: "tool_use", name: p.name, input: p.input ?? {} };
+      if (typeof p.id === "string") block.id = p.id;
+      blocks.push(block);
+    } else if (p.type === "tool_result") {
+      // tool_result.content can be a string OR an array of {type:"text",text:"..."} blocks.
+      // Flatten to a single string for our markdown renderer.
+      let content = "";
+      if (typeof p.content === "string") content = p.content;
+      else if (Array.isArray(p.content)) {
+        content = p.content
+          .map((part: any) => (typeof part?.text === "string" ? part.text : ""))
+          .join("");
+      }
+      const block: ContentBlock = { type: "tool_result", content };
+      if (typeof p.tool_use_id === "string") block.toolUseId = p.tool_use_id;
+      blocks.push(block);
     }
-    // tool_use / tool_result / image / etc. → drop
+    // image / etc. → drop
   }
-  return { text: texts.join("\n"), reasoning: reasonings.join("\n") };
+  return {
+    text: texts.join("\n"),
+    reasoning: reasonings.join("\n"),
+    contentBlocks: blocks,
+  };
 }
 
 /**

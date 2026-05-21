@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ClaudeCodeAdapter, sanitizeMessageText } from "../../src/sources/claude-code.js";
@@ -200,5 +200,82 @@ The actual user question after the separator`);
     expect(sanitizeMessageText(null)).toBe("");
     // @ts-expect-error testing runtime safety
     expect(sanitizeMessageText(undefined)).toBe("");
+  });
+});
+
+describe("extractParts via ClaudeCodeAdapter — content blocks", () => {
+  it("preserves text, thinking, tool_use, and tool_result blocks", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vbk-claude-cb-"));
+    const proj = join(root, "-Users-me-edge");
+    mkdirSync(proj, { recursive: true });
+    const jsonl = [
+      JSON.stringify({
+        type: "user",
+        sessionId: "sess-1",
+        cwd: "/Users/me/edge",
+        timestamp: "2026-05-20T10:00:00Z",
+        uuid: "u1",
+        message: { role: "user", content: "fix the auth bug" },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        sessionId: "sess-1",
+        cwd: "/Users/me/edge",
+        timestamp: "2026-05-20T10:00:05Z",
+        uuid: "u2",
+        parentUuid: "u1",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "Let me look at the auth code first" },
+            { type: "text", text: "Let me read the auth file." },
+            { type: "tool_use", id: "tu1", name: "Read", input: { file_path: "/Users/me/edge/auth.ts" } },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        sessionId: "sess-1",
+        cwd: "/Users/me/edge",
+        timestamp: "2026-05-20T10:00:06Z",
+        uuid: "u3",
+        parentUuid: "u2",
+        message: {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "tu1", content: "export function login() { return null; }" },
+          ],
+        },
+      }),
+    ].join("\n") + "\n";
+    writeFileSync(join(proj, "sess-1.jsonl"), jsonl);
+
+    const adapter = new ClaudeCodeAdapter(root);
+    const discovered = [];
+    for await (const d of adapter.discover()) discovered.push(d);
+    expect(discovered).toHaveLength(1);
+    const session = await discovered[0]!.load();
+    const msgs = session.messages;
+    expect(msgs).toHaveLength(3);
+
+    // User-text message: contentBlocks contains a single text block
+    expect(msgs[0]!.contentBlocks).toEqual([
+      { type: "text", text: "fix the auth bug" },
+    ]);
+
+    // Assistant message: thinking + text + tool_use blocks all preserved
+    const asst = msgs[1]!;
+    expect(asst.contentBlocks).toEqual([
+      { type: "thinking", thinking: "Let me look at the auth code first" },
+      { type: "text", text: "Let me read the auth file." },
+      { type: "tool_use", name: "Read", input: { file_path: "/Users/me/edge/auth.ts" }, id: "tu1" },
+    ]);
+
+    // User tool-result message: tool_result block preserved
+    expect(msgs[2]!.contentBlocks).toEqual([
+      { type: "tool_result", content: "export function login() { return null; }", toolUseId: "tu1" },
+    ]);
+
+    rmSync(root, { recursive: true, force: true });
   });
 });
