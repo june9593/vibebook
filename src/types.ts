@@ -1,13 +1,31 @@
 export type Tool = "claude" | "copilot";
 
+/** A single rich content block from the source jsonl. Mirrors the
+ *  Anthropic API content block shape so renderers can produce markdown
+ *  that captures the full conversation, including tool calls and results
+ *  (which previous vibebook versions stripped).
+ *
+ *  Sources that don't expose tool data (e.g. Copilot Chat) emit only
+ *  `text` and `thinking` blocks. Sources that do (Claude Code) emit
+ *  the full set. */
+export type ContentBlock =
+  | { type: "text"; text: string }
+  | { type: "thinking"; thinking: string }
+  | { type: "tool_use"; name: string; input: unknown; id?: string }
+  | { type: "tool_result"; content: string; toolUseId?: string };
+
 export interface SessionMessage {
   role: "user" | "assistant" | "tool" | "system";
+  /** Flat plain-text view, used for project inference + first-user-prompt
+   *  detection. For messages with tool blocks this is just the text parts
+   *  concatenated (no tool data). */
   text: string;
-  /** Assistant reasoning / thinking content. Surfaced where the source
-   *  preserves it as plaintext (Copilot's reasoningText field; rare cases
-   *  in Claude CLI). Rendered as a `> 💭` blockquote in the md so the
-   *  summarizing LLM can distinguish it from the actual assistant reply. */
+  /** Assistant reasoning / thinking content, flat string view. */
   reasoning?: string;
+  /** Rich structured content from the source. When present, the markdown
+   *  renderer uses this for full fidelity (tool_use, tool_result, etc.).
+   *  When absent, the renderer falls back to text + reasoning fields. */
+  contentBlocks?: ContentBlock[];
   timestamp?: string; // ISO 8601
   raw?: unknown;      // original message object for fidelity
 }
