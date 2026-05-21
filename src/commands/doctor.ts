@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync, type Dirent } from "node:fs";
+import { existsSync, readFileSync, readdirSync, type Dirent } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -18,9 +18,8 @@ import { isStableDeviceName } from "../device.js";
  *      Informational — npm vibebook handles cross-device sync on its own;
  *      the plugin only adds chronicle digest + recall.
  *   4. `~/.vibebook/config.json` exists, repoPath exists + is a git repo
- *   5. Spool scan for orphan *.raw.json files with no sibling *.jsonl
- *      (sessions captured before v0.5.0 — `vibebook resume` can't replay
- *      those)
+ *   5. 0.5.x spool residue (.raw.json + .jsonl) — vibebook 0.6 only writes .md
+ *   5b. resume-forks.json residue from 0.5.1 fork-tracking
  *   6. git crypt filter wired (when config.encrypt = true)
  *   7. memex on PATH (informational; not an error if missing)
  *
@@ -138,40 +137,35 @@ export async function doctorCmd(): Promise<void> {
       }
     }
 
-    // 5. Orphan *.raw.json scan (sessions captured before v0.5.0 don't
-    //    have the original .jsonl preserved, so `vibebook resume` can't
-    //    replay them. Only meaningful when the repo exists.)
+    // 5. 0.5.x spool residue check. vibebook 0.6 only writes .md per session.
+    //    Existing .raw.json and .jsonl from 0.5.x are dead weight; suggest cleanup.
     if (repoExists) {
-      const orphans = findOrphanedRawJsons(config.repoPath);
-      if (orphans.length > 0) {
+      const residue = countResidue(config.repoPath);
+      if (residue.rawJsonCount + residue.jsonlCount > 0) {
+        const lines = [
+          `${residue.rawJsonCount} .raw.json files, ${residue.jsonlCount} .jsonl files in spool`,
+          `(vibebook 0.6 only writes .md — these are 0.5.x residue)`,
+        ];
         checks.push({
-          name: "Resume-ready spool", status: "warn",
-          detail: `${orphans.length} session(s) predate v0.5.0 (no sibling .jsonl) — \`vibebook resume\` won't work for them`,
-          fix: `rm -rf "${join(config.repoPath, "raw_sessions")}" && vibebook sync   # re-extracts with .jsonl preserved; book/ is unaffected`,
-        });
-      } else {
-        checks.push({
-          name: "Resume-ready spool", status: "ok",
-          detail: "all spooled sessions have sibling .jsonl",
+          name: "0.5.x spool residue",
+          status: "warn",
+          detail: lines.join(" — "),
+          fix:
+            `find "${join(config.repoPath, "raw_sessions")}" -name "*.jsonl" -delete && ` +
+            `find "${join(config.repoPath, "raw_sessions")}" -name "*.raw.json" -delete && ` +
+            `rm "${join(config.repoPath, ".vibebook/index.json")}" && ` +
+            `vibebook sync   # regenerates index + new-format .md per session`,
         });
       }
 
-      // 5b. Oversized jsonl scan. 0.5.2+ writer caps at 95 MB, but pre-0.5.2
-      //     spools (and any direct copies) may still hold >100 MB jsonls
-      //     that block git push to GitHub.
-      const oversized = findOversizedJsonls(config.repoPath, 50 * 1024 * 1024);
-      if (oversized.length > 0) {
-        const hardRejects = oversized.filter((x) => x.size > 100 * 1024 * 1024).length;
-        const lines = oversized.slice(0, 5).map((x) => `  ${(x.size / 1024 / 1024).toFixed(1)} MB  ${x.path}`).join("\n");
-        const more = oversized.length > 5 ? `\n  …and ${oversized.length - 5} more` : "";
+      // 5b. resume-forks.json residue (from 0.5.1 fork-tracking, removed in 0.6)
+      const forkRegPath = join(homedir(), ".vibebook/resume-forks.json");
+      if (existsSync(forkRegPath)) {
         checks.push({
-          name: "Oversized jsonl",
-          status: hardRejects > 0 ? "fail" : "warn",
-          detail:
-            `${oversized.length} jsonl(s) over 50 MB${hardRejects > 0 ? ` (${hardRejects} over GitHub's 100 MB hard cap — push will fail)` : ""}:\n${lines}${more}`,
-          fix: hardRejects > 0
-            ? `find "${join(config.repoPath, "raw_sessions")}" -name "*.jsonl" -size +95M -delete   # remove only the >95 MB ones`
-            : undefined,
+          name: "0.5.1 fork registry residue",
+          status: "warn",
+          detail: `~/.vibebook/resume-forks.json exists (no longer used)`,
+          fix: `rm ${forkRegPath}`,
         });
       }
 
@@ -290,76 +284,25 @@ function readConfigSafe(): MinimalConfig | null {
   }
 }
 
-/**
- * Walk `<repoPath>/raw_sessions/` and return paths of `*.raw.json` files
- * that don't have a matching `*.jsonl` sibling. Pre-v0.5.0 sync runs
- * only emitted the .raw.json envelope; without the .jsonl we can't
- * `vibebook resume` those threads.
- */
-function findOrphanedRawJsons(repoPath: string): string[] {
+function countResidue(repoPath: string): { rawJsonCount: number; jsonlCount: number } {
   const root = join(repoPath, "raw_sessions");
-  if (!existsSync(root)) return [];
-  const orphans: string[] = [];
+  if (!existsSync(root)) return { rawJsonCount: 0, jsonlCount: 0 };
+  let rawJsonCount = 0;
+  let jsonlCount = 0;
   const walk = (dir: string): void => {
     let entries: Dirent[];
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
+    try { entries = readdirSync(dir, { withFileTypes: true }); }
+    catch { return; }
     for (const e of entries) {
       const p = join(dir, e.name);
-      if (e.isDirectory()) {
-        walk(p);
-        continue;
-      }
-      if (!e.isFile() || !e.name.endsWith(".raw.json")) continue;
-      const base = e.name.slice(0, -".raw.json".length);
-      const sibling = join(dir, `${base}.jsonl`);
-      if (!existsSync(sibling)) orphans.push(p);
+      if (e.isDirectory()) { walk(p); continue; }
+      if (!e.isFile()) continue;
+      if (e.name.endsWith(".raw.json")) rawJsonCount++;
+      else if (e.name.endsWith(".jsonl")) jsonlCount++;
     }
   };
   walk(root);
-  return orphans;
-}
-
-/**
- * Walk `<repoPath>/raw_sessions/` and return paths of `*.jsonl` files
- * larger than `thresholdBytes`. GitHub warns at 50 MB and hard-rejects
- * pushes containing files >100 MB; oversized jsonls block sync and
- * shouldn't be there if writer.ts is current (>=0.5.2 caps at 95 MB).
- * Used by `vibebook doctor` to surface stale ones from earlier syncs.
- *
- * Returns paths sorted descending by size, so callers can show the worst
- * offenders first.
- */
-function findOversizedJsonls(repoPath: string, thresholdBytes: number): Array<{ path: string; size: number }> {
-  const root = join(repoPath, "raw_sessions");
-  if (!existsSync(root)) return [];
-  const hits: Array<{ path: string; size: number }> = [];
-  const walk = (dir: string): void => {
-    let entries: Dirent[];
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      const p = join(dir, e.name);
-      if (e.isDirectory()) {
-        walk(p);
-        continue;
-      }
-      if (!e.isFile() || !e.name.endsWith(".jsonl")) continue;
-      try {
-        const size = statSync(p).size;
-        if (size > thresholdBytes) hits.push({ path: p, size });
-      } catch { /* race: file vanished mid-walk */ }
-    }
-  };
-  walk(root);
-  hits.sort((a, b) => b.size - a.size);
-  return hits;
+  return { rawJsonCount, jsonlCount };
 }
 
 function isCryptFilterWired(repoPath: string): boolean {
