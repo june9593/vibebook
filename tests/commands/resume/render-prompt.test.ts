@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync, rmSync } from "node:fs";
 import {
   renderResumePrompt,
+  renderResumePromptChunked,
+  extractMdHeader,
   chooseInvocation,
   ARG_MAX_BYTES,
 } from "../../../src/commands/resume/render-prompt.js";
@@ -63,5 +65,77 @@ describe("chooseInvocation", () => {
     expect(existsSync(tmpPath)).toBe(true);
     expect(readFileSync(tmpPath, "utf8")).toBe(big);
     rmSync(tmpPath);
+  });
+});
+
+describe("extractMdHeader", () => {
+  it("returns null for legacy 0.6 md (no manifest_version)", () => {
+    const md = "---\nsessionId: x\ntool: claude\n---\n\n## User\n\nhi\n";
+    expect(extractMdHeader(md)).toBeNull();
+  });
+
+  it("returns null when manifest_version present but no ## User/Assistant in body", () => {
+    const md = "---\nmanifest_version: 1\n---\n\nbody without headings\n";
+    expect(extractMdHeader(md)).toBeNull();
+  });
+
+  it("returns the prefix ending right before the first ## User/Assistant heading", () => {
+    const md = [
+      "---",
+      "sessionId: x",
+      "manifest_version: 1",
+      "user_turns: 3",
+      "---",
+      "",
+      "# Table of Contents",
+      "| # | Time | Marker | Preview | Line |",
+      "| 1 | 04-17 10:00 | 🧑 | first user | →L11 |",
+      "",
+      "## User _(2026-04-17T10:00:00Z)_",
+      "",
+      "first user",
+    ].join("\n");
+    const header = extractMdHeader(md);
+    expect(header).not.toBeNull();
+    expect(header).toContain("manifest_version: 1");
+    expect(header).toContain("# Table of Contents");
+    expect(header).not.toContain("## User");
+  });
+
+  it("matches first ## Assistant if it comes before ## User (rare but legal)", () => {
+    const md = [
+      "---",
+      "manifest_version: 1",
+      "---",
+      "",
+      "# Table of Contents",
+      "",
+      "## Assistant _(t)_",
+      "",
+      "kickoff",
+    ].join("\n");
+    const header = extractMdHeader(md);
+    expect(header).not.toBeNull();
+    expect(header).not.toContain("## Assistant");
+  });
+});
+
+describe("renderResumePromptChunked", () => {
+  it("instructs Claude to Read from disk via TOC offsets, not load whole file", () => {
+    const header = "---\nmanifest_version: 1\nuser_turns: 50\n---\n\n# Table of Contents\n| 1 | x | 🧑 | first | →L42 |";
+    const prompt = renderResumePromptChunked(entry, "/tmp/foo.md", header, 9_500_000, { device: "macmini" });
+    // Points at the on-disk file
+    expect(prompt).toContain("/tmp/foo.md");
+    // Reports size in MB so Claude knows it's big
+    expect(prompt).toContain("9.1 MB");
+    // Explains the TOC navigation pattern
+    expect(prompt).toContain("→L<number>");
+    expect(prompt).toContain("offset:");
+    // Embeds the header inline
+    expect(prompt).toContain("manifest_version: 1");
+    expect(prompt).toContain("→L42");
+    // Carries session metadata + device
+    expect(prompt).toContain("macmini");
+    expect(prompt).toContain("Trace memory leak");
   });
 });

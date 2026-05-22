@@ -1,11 +1,16 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import chalk from "chalk";
 import { readConfig } from "../../config.js";
 import { loadIndex } from "../../index-store.js";
 import { findEntries } from "./fuzzy-match.js";
-import { renderResumePrompt, chooseInvocation } from "./render-prompt.js";
+import {
+  renderResumePrompt,
+  renderResumePromptChunked,
+  extractMdHeader,
+  chooseInvocation,
+} from "./render-prompt.js";
 
 export interface ResumeOptions {
   /** Session id, shortId, or any UUID prefix (case-insensitive). */
@@ -83,9 +88,18 @@ export async function resumeCmd(opts: ResumeOptions): Promise<ResumeResult> {
     );
   }
   const contextMd = readFileSync(mdPath, "utf8");
+  const mdBytes = statSync(mdPath).size;
 
-  // 4. Build prompt + decide invocation
-  const prompt = renderResumePrompt(entry, contextMd);
+  // 4. Build prompt. Prefer the chunked path on 0.7+ md so very large
+  //    sessions don't blow the resuming Claude's context window — the
+  //    header (frontmatter + manifest + TOC) goes inline, the body stays
+  //    on disk for targeted Read access via the TOC's line offsets. Falls
+  //    back to embedding the full md when extractMdHeader returns null
+  //    (older 0.6 sessions without manifest_version:1).
+  const headerMd = extractMdHeader(contextMd);
+  const prompt = headerMd !== null
+    ? renderResumePromptChunked(entry, mdPath, headerMd, mdBytes)
+    : renderResumePrompt(entry, contextMd);
   const argv = chooseInvocation(prompt, entry.shortId);
 
   // 5. Print or spawn
@@ -99,7 +113,7 @@ export async function resumeCmd(opts: ResumeOptions): Promise<ResumeResult> {
   console.log(chalk.green(`\n✓ Matched: "${entry.displayName}"`));
   console.log(chalk.gray(`  Session id:  ${entry.sessionId}`));
   console.log(chalk.gray(`  Started:     ${entry.startedAt}`));
-  console.log(chalk.gray(`  Context:     ${(Buffer.byteLength(contextMd, "utf8") / 1024).toFixed(1)} KB`));
+  console.log(chalk.gray(`  Context:     ${(mdBytes / 1024).toFixed(1)} KB ${headerMd !== null ? "(chunked — header inline, body on disk)" : "(full embed)"}`));
   console.log(chalk.cyan(`\nLaunching claude with context as first prompt...\n`));
 
   const r = spawnSync(argv[0]!, argv.slice(1), {
