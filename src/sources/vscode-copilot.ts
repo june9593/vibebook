@@ -3,7 +3,7 @@ import { readdirSync, readFileSync, statSync, existsSync, Dirent } from "node:fs
 import { homedir } from "node:os";
 import { join, basename } from "node:path";
 import type { SourceAdapter, DiscoveredSession } from "./base.js";
-import type { NormalizedSession, SessionMessage } from "../types.js";
+import type { NormalizedSession, SessionMessage, ContentBlock } from "../types.js";
 import { deriveSlug, projectSlugFromPath } from "../slug.js";
 import { sanitizeMessageText } from "./claude-code.js";
 
@@ -97,31 +97,63 @@ function parseCopilotJson(sourcePath: string, content: string, workspacePath: st
   return buildSessionFromRequests(sourcePath, sessionId, requests, workspacePath);
 }
 
+/**
+ * chatSessions/<id>.jsonl is a *live state log* with a rolling-window snapshot
+ * pattern, NOT a complete conversation transcript. We discovered this on
+ * 2026-05-22 after vibebook 0.5/0.6 was found to only capture the LAST turn
+ * (~5–8% of the actual conversation) on multi-turn Copilot agent sessions.
+ *
+ * Event schema:
+ *   - kind=0 (first line): initial state with v.requests (usually `[]`).
+ *   - kind=1: replace top-level state path (e.g. inputState, responderUsername).
+ *     Not relevant to conversation turns; we ignore.
+ *   - kind=2 with k=["requests"]: VS Code's snapshot is a 1-element array
+ *     containing only the *latest* turn. But the conceptual `requests` array
+ *     grows monotonically across turns — subsequent patches reference
+ *     k=["requests", N, ...] where N is the chronological turn index (0, 1, 2…).
+ *     So we APPEND v[0] to our growing turns list rather than replacing.
+ *   - kind=2 with k=["requests", N, "response"]: REPLACE the response array of
+ *     turn N. Each patch is a full replacement (not a delta), so the last
+ *     such patch for any given N wins.
+ *   - kind=2 with k=["requests", N]: replace turn N entirely.
+ *   - kind=2 with k=["requests", N, ...deep path]: deep-set into turn N.
+ */
 function parseCopilotChatSessionsJsonl(sourcePath: string, content: string, workspacePath: string): NormalizedSession {
   const fileBase = basename(sourcePath, ".jsonl");
   let sessionId = fileBase;
-  let requests: any[] = [];
+  const turns: any[] = [];
   const lines = content.split("\n");
   for (const line of lines) {
     const s = line.trim();
     if (!s) continue;
     let obj: any;
     try { obj = JSON.parse(s); } catch { continue; }
+
     if (obj?.kind === 0 && obj?.v) {
       if (typeof obj.v.sessionId === "string" && obj.v.sessionId) sessionId = obj.v.sessionId;
-      if (Array.isArray(obj.v.requests)) requests = obj.v.requests;
-    } else if (obj?.kind === 2 && Array.isArray(obj.k) && obj.k[0] === "requests" && obj.k.length === 1 && Array.isArray(obj.v)) {
-      // Full requests snapshot
-      requests = obj.v;
-    } else if (obj?.kind === 2 && Array.isArray(obj.k) && obj.k[0] === "requests" && obj.k.length >= 2 && typeof obj.k[1] === "number") {
-      // Targeted append/update: k = ["requests", index, ...path]
+      if (Array.isArray(obj.v.requests)) {
+        // Initial state — seed turns from whatever was already in v.requests
+        for (const r of obj.v.requests) turns.push(r);
+      }
+      continue;
+    }
+
+    if (obj?.kind !== 2 || !Array.isArray(obj.k) || obj.k[0] !== "requests") continue;
+
+    if (obj.k.length === 1 && Array.isArray(obj.v)) {
+      // Snapshot event. v is a rolling window (typically a single element).
+      // Append each element to grow our chronological turn list.
+      for (const r of obj.v) turns.push(r);
+    } else if (obj.k.length >= 2 && typeof obj.k[1] === "number") {
       const idx = obj.k[1] as number;
+      // Grow sparsely if the patch references a turn we haven't seen yet
+      // (defensive — in well-formed logs the snapshot precedes the patch).
+      while (turns.length <= idx) turns.push({});
       if (obj.k.length === 2) {
-        requests[idx] = obj.v;
+        turns[idx] = obj.v;
       } else {
-        // Path into an existing request; best-effort deep set.
-        let cur: any = requests[idx];
-        if (cur === undefined) { cur = {}; requests[idx] = cur; }
+        let cur: any = turns[idx];
+        if (cur === undefined || cur === null) { cur = {}; turns[idx] = cur; }
         for (let i = 2; i < obj.k.length - 1; i++) {
           const seg = obj.k[i];
           if (cur[seg] === undefined) cur[seg] = typeof obj.k[i + 1] === "number" ? [] : {};
@@ -131,7 +163,7 @@ function parseCopilotChatSessionsJsonl(sourcePath: string, content: string, work
       }
     }
   }
-  return buildSessionFromRequests(sourcePath, sessionId, requests, workspacePath);
+  return buildSessionFromRequests(sourcePath, sessionId, turns, workspacePath);
 }
 
 function buildSessionFromRequests(
@@ -154,20 +186,14 @@ function buildSessionFromRequests(
       if (userText) messages.push({ role: "user", text: userText, timestamp: ts, raw: r.message });
     }
     const respParts = Array.isArray(r.response) ? r.response : [];
-    const assistantTextRaw = respParts
-      .map((p: any) => {
-        if (p?.kind === "markdownContent") return p?.content?.value ?? "";
-        if (p?.kind === "textEditGroup") return "";
-        if (typeof p?.value === "string") return p.value;
-        return "";
-      })
-      .filter(Boolean)
-      .join("\n");
-    if (assistantTextRaw) {
-      const assistantText = sanitizeMessageText(assistantTextRaw);
-      if (assistantText) {
-        messages.push({ role: "assistant", text: assistantText, timestamp: ts, raw: respParts });
-      }
+    const { text: rawText, reasoning: rawReasoning, contentBlocks } = extractCopilotResponseParts(respParts);
+    const text = sanitizeMessageText(rawText);
+    const reasoning = sanitizeMessageText(rawReasoning);
+    if (text || reasoning || contentBlocks.length > 0) {
+      const msg: SessionMessage = { role: "assistant", text, timestamp: ts, raw: respParts };
+      if (reasoning) msg.reasoning = reasoning;
+      if (contentBlocks.length > 0) msg.contentBlocks = contentBlocks;
+      messages.push(msg);
     }
   }
 
@@ -187,6 +213,58 @@ function buildSessionFromRequests(
     displayName: display,
     messages,
     sourcePath,
+  };
+}
+
+/**
+ * Pull text + reasoning + tool calls out of a Copilot response parts array.
+ *
+ * Response part kinds observed (chatSessions format):
+ *   - markdownContent → visible assistant text (.content.value)
+ *   - thinking        → reasoning (.value)
+ *   - toolInvocationSerialized → tool call (.toolId + .pastTenseMessage / .invocationMessage)
+ *   - textEditGroup, inlineReference, mcpServersStarting, progressTaskSerialized → UI noise, drop
+ *   - null / no-kind  → drop
+ *
+ * Tool *results* are NOT captured by VS Code in chatSessions — only the
+ * invocation marker. So tool blocks carry a placeholder result indicating
+ * the result is unavailable from the source.
+ */
+function extractCopilotResponseParts(parts: any[]): {
+  text: string;
+  reasoning: string;
+  contentBlocks: ContentBlock[];
+} {
+  const texts: string[] = [];
+  const reasonings: string[] = [];
+  const blocks: ContentBlock[] = [];
+  for (const p of parts) {
+    if (!p || typeof p !== "object") continue;
+    const k = p.kind;
+    if (k === "markdownContent") {
+      const v = typeof p?.content?.value === "string" ? p.content.value : "";
+      if (v) { texts.push(v); blocks.push({ type: "text", text: v }); }
+    } else if (k === "thinking") {
+      const v = typeof p?.value === "string" ? p.value : "";
+      if (v) { reasonings.push(v); blocks.push({ type: "thinking", thinking: v }); }
+    } else if (k === "toolInvocationSerialized") {
+      const toolId = typeof p?.toolId === "string" ? p.toolId : "tool";
+      const past = p?.pastTenseMessage?.value;
+      const cur = p?.invocationMessage?.value;
+      const label = (typeof past === "string" && past) || (typeof cur === "string" && cur) || "";
+      const input = p?.toolSpecificData ?? {};
+      const block: ContentBlock = { type: "tool_use", name: toolId, input };
+      if (typeof p?.toolCallId === "string") block.id = p.toolCallId;
+      blocks.push(block);
+      if (label) blocks.push({ type: "tool_result", content: label });
+    }
+    // textEditGroup / inlineReference / mcpServersStarting / progressTaskSerialized
+    // are UI / streaming-state noise and intentionally dropped.
+  }
+  return {
+    text: texts.join("\n"),
+    reasoning: reasonings.join("\n"),
+    contentBlocks: blocks,
   };
 }
 

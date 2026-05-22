@@ -1,0 +1,8 @@
+{"kind":0,"v":{"version":3,"sessionId":"sess-bbbb2222","requests":[]}}
+{"kind":1,"k":["responderUsername"],"v":"GitHub Copilot"}
+{"kind":2,"k":["requests"],"v":[{"requestId":"r1","message":{"text":"First user turn"},"response":[],"timestamp":1750000000000}]}
+{"kind":2,"k":["requests",0,"response"],"v":[{"kind":"markdownContent","content":{"value":"first assistant reply"}}]}
+{"kind":2,"k":["requests"],"v":[{"requestId":"r2","message":{"text":"Second user turn"},"response":[],"timestamp":1750000060000}]}
+{"kind":2,"k":["requests",1,"response"],"v":[{"kind":"thinking","value":"thinking about turn two"},{"kind":"toolInvocationSerialized","toolId":"mcp_demo_search","toolCallId":"call-1","invocationMessage":{"value":"running search"},"pastTenseMessage":{"value":"ran search"},"toolSpecificData":{"q":"hello"}}]}
+{"kind":2,"k":["requests"],"v":[{"requestId":"r3","message":{"text":"Third user turn asks a question"},"response":[],"timestamp":1750000120000}]}
+{"kind":2,"k":["requests",2,"response"],"v":[{"kind":"markdownContent","content":{"value":"third assistant reply with content"}}]}

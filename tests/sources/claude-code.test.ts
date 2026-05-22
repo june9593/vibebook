@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { ClaudeCodeAdapter, sanitizeMessageText } from "../../src/sources/claude-code.js";
 import { fileURLToPath } from "node:url";
 
-const fixturesDir = join(fileURLToPath(new URL(".", import.meta.url)), "..", "fixtures");
+const fixturesDir = join(fileURLToPath(new URL(".", import.meta.url)), "..", "fixtures", "claude");
 
 describe("ClaudeCodeAdapter", () => {
   it("parses a JSONL fixture into NormalizedSession", async () => {
