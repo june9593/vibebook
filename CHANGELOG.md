@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.6.2 — 2026-05-22
+
+### Bug fixes
+
+- **Copilot extractor (`chatSessions/<id>.jsonl`) reconstructs all turns
+  instead of just the last one.** VS Code stores Copilot Chat as a live
+  state log: each `kind=2 k=["requests"]` event is a snapshot whose
+  rolling window only shows the latest turn — but the conceptual
+  `requests` array grows monotonically across turns, and subsequent
+  patches reference `k=["requests", N, …]` with N as the chronological
+  turn index. Previous code treated each snapshot as a full replacement,
+  so multi-turn agent sessions captured ~5–8% of the actual conversation
+  (and the same session showed up split across multiple `.md` files in
+  `raw_sessions/` as each sync re-rendered whichever turn was current).
+  Fix walks events chronologically and APPENDS snapshot elements to a
+  growing `turns` array.
+
+- **Copilot agent-mode responses now extract `thinking` reasoning and
+  `toolInvocationSerialized` tool calls.** Previously only
+  `markdownContent` was extracted, which left agent sessions (which
+  use thinking + tool calls and rarely emit markdownContent directly)
+  with no assistant content at all. New extractor emits
+  `ContentBlock[]` with thinking + tool_use + tool_result blocks so the
+  resume context shows what tools were run.
+
+### Tests
+
+- 4 new Copilot tests covering chronological turn reconstruction,
+  `thinking`/`toolInvocationSerialized` extraction, and
+  `displayName`-from-first-turn derivation. Test fixtures reorganized
+  into `tests/fixtures/claude/` and `tests/fixtures/copilot/` to keep
+  the two adapters' recursive `.jsonl` discovery from cross-contaminating.
+
 ## 0.6.1 — 2026-05-21
 
 Fast follow-up to 0.6.0 covering the gaps exposed by Yue's fresh-init
