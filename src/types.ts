@@ -79,3 +79,39 @@ export interface IndexFile {
   version: 1;
   entries: Record<string, IndexEntry>; // key = `${tool}:${sessionId}`
 }
+
+/** Mechanical-fact summary computed at write-time and embedded in the
+ *  raw_sessions/*.md frontmatter as `manifest_version: 1` block. Consumers
+ *  (digest skill, resume) read this to orient without scanning the body.
+ *  Field semantics:
+ *   - commits: distinct git commit/tag/push events extracted from Bash
+ *     tool_use inputs. `line` is the absolute line number of the
+ *     containing tool_use in the final rendered md.
+ *   - files_touched: deduplicated union of file_paths from Read/Edit/Write/
+ *     MultiEdit tool_uses. Order = first-seen. Capped at 200 to bound size.
+ *   - tools_used: histogram of tool_use.name across the session.
+ *   - candidate_decisions: user-text turns matching a small decision-marker
+ *     keyword set (`我决定` / `decided to` / `let's go with` / `最后采用` /
+ *     `ok merged`). Heuristic-only; the digest skill treats these as hints,
+ *     not facts. Capped at 20. */
+export interface SessionManifest {
+  user_turns: number;
+  assistant_turns: number;
+  tools_used: Record<string, number>;
+  commits: { sha: string; msg: string; line: number }[];
+  files_touched: string[];
+  candidate_decisions: { line: number; preview: string }[];
+}
+
+/** One row in the importance-based table-of-contents block. `line` is the
+ *  absolute line number of the message's `## User`/`## Assistant` heading
+ *  in the final rendered md. Markers (1-3 emojis) describe what makes the
+ *  turn noteworthy: 🧑 real user msg, ✏️ file edit, 💾 commit/tag/push,
+ *  🤖 substantive assistant reply. */
+export interface TocEntry {
+  turn: number;
+  timestamp: string;
+  markers: string;
+  preview: string;
+  line: number;
+}

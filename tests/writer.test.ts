@@ -167,3 +167,89 @@ describe("writeSession (0.6 — single .md, frontmatter, content blocks)", () =>
     expect(asstCount).toBe(0);
   });
 });
+
+describe("writeSession — manifest + TOC", () => {
+  it("emits manifest_version + counts + tools_used in frontmatter", () => {
+    const { md } = writeSession(repo, session);
+    const body = readFileSync(join(repo, md), "utf8");
+    expect(body).toContain("manifest_version: 1");
+    expect(body).toContain("user_turns: 2");
+    expect(body).toContain("assistant_turns: 1");
+    expect(body).toContain("tools_used:");
+    expect(body).toMatch(/\n {2}Read: 1\n/);
+  });
+
+  it("emits files_touched (only the assistant's Read tool_use)", () => {
+    const { md } = writeSession(repo, session);
+    const body = readFileSync(join(repo, md), "utf8");
+    expect(body).toContain("files_touched:");
+    expect(body).toContain("  - '/auth.ts'"); // YAML-quoted because of '/'
+  });
+
+  it("emits a TOC block with row pointing into the body", () => {
+    // Build a session with a long-enough user message to qualify (>= 50 chars)
+    const longUser = "我们要修复一个auth bug, 用户登录后session会丢失, 这个问题已经debug好几天 — 看看历史的处理方式";
+    const s2: NormalizedSession = {
+      ...session,
+      messages: [
+        { role: "user", text: longUser, timestamp: "2026-04-17T10:00:00Z",
+          contentBlocks: [{ type: "text", text: longUser }] },
+      ],
+    };
+    const { md } = writeSession(repo, s2);
+    const body = readFileSync(join(repo, md), "utf8");
+    expect(body).toContain("# Table of Contents");
+    expect(body).toContain("| # | Time | Marker | Preview | Line |");
+    // The single TOC row should point at a line whose content is "## User"
+    const rowMatch = body.match(/\| 1 \| [^\n|]+ \| 🧑 \| [^\n|]+ \| →L(\d+) \|/);
+    expect(rowMatch).not.toBeNull();
+    const line = Number(rowMatch![1]);
+    const allLines = body.split("\n");
+    expect(allLines[line - 1]).toMatch(/^## User/);
+  });
+
+  it("TOC line numbers are correct after multi-message body (round-trip check)", () => {
+    const longUser = "x".repeat(60);
+    const longUser2 = "y".repeat(60);
+    const s2: NormalizedSession = {
+      ...session,
+      messages: [
+        { role: "user", text: longUser, timestamp: "2026-04-17T10:00:00Z",
+          contentBlocks: [{ type: "text", text: longUser }] },
+        { role: "assistant", text: "ok",
+          contentBlocks: [{ type: "text", text: "ok" }, { type: "tool_use", name: "Edit", input: { file_path: "/foo" } }] },
+        { role: "user", text: longUser2, timestamp: "2026-04-17T10:05:00Z",
+          contentBlocks: [{ type: "text", text: longUser2 }] },
+      ],
+    };
+    const { md } = writeSession(repo, s2);
+    const body = readFileSync(join(repo, md), "utf8");
+    const allLines = body.split("\n");
+    // For every row in the TOC, the claimed line must be a `## User` or `## Assistant`
+    const rows = [...body.matchAll(/\| \d+ \|[^\n|]+\|[^\n|]+\|[^\n|]+\| →L(\d+) \|/g)];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      const line = Number(r[1]);
+      expect(allLines[line - 1]).toMatch(/^## (User|Assistant)/);
+    }
+  });
+
+  it("commits[].line points at the assistant turn whose Bash ran git commit", () => {
+    const s2: NormalizedSession = {
+      ...session,
+      messages: [
+        { role: "user", text: "x".repeat(60), timestamp: "2026-04-17T10:00:00Z",
+          contentBlocks: [{ type: "text", text: "x".repeat(60) }] },
+        { role: "assistant", text: "",
+          contentBlocks: [{ type: "tool_use", name: "Bash", input: { command: 'git commit -m "feat: thing"' } }] },
+      ],
+    };
+    const { md } = writeSession(repo, s2);
+    const body = readFileSync(join(repo, md), "utf8");
+    const m = body.match(/^\s+-\s+\{ sha: '?'?,?\s*msg:\s*'feat: thing',\s*line:\s*(\d+)/m);
+    expect(m).not.toBeNull();
+    const line = Number(m![1]);
+    const allLines = body.split("\n");
+    expect(allLines[line - 1]).toMatch(/^## Assistant/);
+  });
+});

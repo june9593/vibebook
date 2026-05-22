@@ -1,5 +1,72 @@
 # Changelog
 
+## 0.7.0 — 2026-05-22
+
+Make raw_sessions md **navigable** so digest and resume can handle huge
+sessions (9MB+, 10000+ turns) without loading the whole body. Quality >
+size: 200MB md files are fine, as long as consumers can read what they
+need without OOM.
+
+### New: per-session manifest + Table of Contents
+
+Every newly-rendered `raw_sessions/*.md` now embeds, at the top:
+
+- **`manifest_version: 1`** (signal field for back-compat detection)
+- **Frontmatter manifest** with auto-extracted facts:
+  - `user_turns` / `assistant_turns` — total counts
+  - `tools_used` — histogram of tool_use.name
+  - `commits` — `git commit` / `git tag` events parsed from Bash tool_use,
+    each with the resulting line number in the rendered md
+  - `files_touched` — deduped union of Read/Edit/Write/MultiEdit file_paths
+    (capped at 200, first-seen)
+  - `candidate_decisions` — user-text turns matching decision-marker
+    keywords (我决定 / decided to / let's go with / 最后采用 / ok merged),
+    capped at 20. Heuristic only — digest skill treats as hints, not facts.
+- **`# Table of Contents` block** — importance-based jump table.
+  Includes a row for each real user turn (≥50 chars), file edit (Edit /
+  Write / MultiEdit), commit, and substantive assistant reply (≥200 chars
+  with no tool calls). Each row carries a `→L<line>` column = absolute
+  line of that turn's heading in the rendered md. Tool-result-only turns
+  are omitted.
+
+Real-world numbers on Yue's 4ec14999 session: 9.14MB → 9.81MB (~700KB
+header), 4900 user / 6941 assistant turns, 100 commits captured, 1966
+TOC rows. Every sampled TOC offset lands on the right `## User` or
+`## Assistant` heading.
+
+### Resume: chunked context loading
+
+`vibebook resume <id>` detects `manifest_version: 1` and switches to
+**chunked mode**: the prompt embeds only the header (frontmatter +
+manifest + TOC) inline, then points Claude at the on-disk md and
+instructs it to `Read offset:<line>` for the turns it needs. The
+resuming Claude orients via the manifest, picks 3–5 relevant rows
+from the TOC, and pulls just those segments — no longer trying to
+load 9MB into the context window.
+
+For pre-0.7 sessions (no `manifest_version`), the existing full-embed
+behavior remains unchanged.
+
+### Companion: vibebook-plugin SKILL.md P3 update
+
+The `/vibebook` write skill (separate `june9593/vibebook-plugin` repo,
+commit `84cff9f` on main) now checks for `manifest_version: 1` on every
+raw session md and uses the chunked navigation pattern when present.
+The fan-out size table is recalibrated from "total md size" to
+"effective read size" — a 9MB navigable md has ~100KB effective read
+size, so most sessions stay in the inline tier.
+
+### Implementation notes
+
+- New `src/digest/manifest.ts` + `src/digest/toc.ts` — pure functions,
+  testable in isolation (19 new tests).
+- `src/writer.ts` is now a two-pass renderer: render body first to
+  compute per-message line offsets, then build manifest + TOC with
+  prefix-patched absolute line numbers.
+- `src/commands/resume/render-prompt.ts` adds `extractMdHeader` and
+  `renderResumePromptChunked`; old functions retained for back-compat.
+- 227 vitest passing (up from 198 in 0.6.3; +29 new tests).
+
 ## 0.6.3 — 2026-05-22
 
 ### Bug fixes
