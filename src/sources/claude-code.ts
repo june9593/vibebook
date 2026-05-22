@@ -90,6 +90,14 @@ function parseClaudeJsonl(sourcePath: string, content: string): NormalizedSessio
     if (obj.sessionId && !sessionId) sessionId = obj.sessionId;
     if (obj.cwd && !cwd) cwd = obj.cwd;
     if (obj.type === "user" || obj.type === "assistant") {
+      // isMeta=true entries are system-injected pseudo-messages (slash-command
+      // skill body, command output replays, etc.) — never real user input.
+      // Without this filter, a session that started with `hi` + `/vibebook`
+      // (both too short to survive sanitization) would derive its displayName
+      // from the injected skill template, producing titles like
+      // "## Step 0 — Detect the mode (DO THIS FIRST)…" with no real user prompts
+      // in the rendered .md.
+      if (obj.isMeta === true) continue;
       const ts = typeof obj.timestamp === "string" ? obj.timestamp : undefined;
       if (ts) { if (!startedAt) startedAt = ts; endedAt = ts; }
       const { text: rawText, reasoning: rawReasoning, contentBlocks } = extractParts(obj.message);

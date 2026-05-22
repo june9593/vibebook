@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.3 — 2026-05-22
+
+### Bug fixes
+
+- **Claude extractor now filters `isMeta=true` entries.** These are
+  system-injected pseudo-messages (slash-command skill body, command
+  output replays) — not real user input. Symptom: a session that
+  started with `hi` + `/vibebook` (both too short to survive the
+  sanitizer's 10-char gate) would derive its displayName from the
+  injected `/vibebook` skill template, producing files like
+  `Step-0-—-Detect-the-mode-DO-THIS-FIRST-Before-anything-else-__a18dc3af.md`
+  with no real user prompts in the body. Real-world hit count on
+  Yue's machine: ≥1 session per project that runs `/vibebook` from a
+  short opener.
+
+  After the fix: such sessions still get written (their tool blocks
+  carry real information), but their `displayName` falls back to
+  `untitled` instead of a misleading skill-template excerpt.
+
 ## 0.6.2 — 2026-05-22
 
 ### Bug fixes
