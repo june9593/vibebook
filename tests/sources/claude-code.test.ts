@@ -278,4 +278,58 @@ describe("extractParts via ClaudeCodeAdapter — content blocks", () => {
 
     rmSync(root, { recursive: true, force: true });
   });
+
+  it("drops isMeta=true entries (slash-command skill body injections)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vbk-claude-meta-"));
+    const proj = join(root, "-Users-me-edge");
+    mkdirSync(proj, { recursive: true });
+    const jsonl = [
+      // Real user, but too short → sanitized away by 10-char gate
+      JSON.stringify({
+        type: "user", sessionId: "sess-meta", cwd: "/Users/me/edge",
+        timestamp: "2026-05-22T10:00:00Z", uuid: "u1",
+        message: { role: "user", content: "hi" },
+      }),
+      // The /vibebook slash command itself — tags strip to "vibebook" (8 chars, dropped)
+      JSON.stringify({
+        type: "user", sessionId: "sess-meta", cwd: "/Users/me/edge",
+        timestamp: "2026-05-22T10:00:01Z", uuid: "u2", parentUuid: "u1",
+        message: { role: "user", content: "<command-message>vibebook</command-message><command-name>/vibebook</command-name>" },
+      }),
+      // isMeta=true: system-injected skill body. Without the filter, its
+      // post-sanitize tail ("## Step 0 — Detect the mode…") would become
+      // the session's displayName.
+      JSON.stringify({
+        type: "user", sessionId: "sess-meta", cwd: "/Users/me/edge",
+        timestamp: "2026-05-22T10:00:02Z", uuid: "u3", parentUuid: "u2",
+        isMeta: true,
+        message: { role: "user", content: [{ type: "text", text: "Base directory for this skill: /Users/me/.claude/skills/vibebook\n\n# /vibebook — writes books\n---\n## Step 0 — Detect the mode (DO THIS FIRST)" }] },
+      }),
+      // Real assistant reply that follows the skill execution
+      JSON.stringify({
+        type: "assistant", sessionId: "sess-meta", cwd: "/Users/me/edge",
+        timestamp: "2026-05-22T10:00:03Z", uuid: "u4", parentUuid: "u3",
+        message: { role: "assistant", content: [{ type: "text", text: "Hi! What would you like to work on?" }] },
+      }),
+    ].join("\n") + "\n";
+    writeFileSync(join(proj, "sess-meta.jsonl"), jsonl);
+
+    const adapter = new ClaudeCodeAdapter(root);
+    const discovered = [];
+    for await (const d of adapter.discover()) discovered.push(d);
+    const session = await discovered[0]!.load();
+
+    // The isMeta user entry must NOT appear in messages
+    const userMsgs = session.messages.filter((m) => m.role === "user");
+    for (const m of userMsgs) {
+      expect(m.text).not.toContain("Step 0");
+      expect(m.text).not.toContain("Base directory");
+    }
+    // displayName falls back to "untitled" because all real user inputs
+    // were either too short or filtered as meta
+    expect(session.displayName).toBe("untitled");
+    expect(session.nameSlug).toBe("untitled");
+
+    rmSync(root, { recursive: true, force: true });
+  });
 });
