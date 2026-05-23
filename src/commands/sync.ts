@@ -207,6 +207,25 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     console.log(chalk.gray("Local-only mode (no remote URL configured); skipping commit/push."));
   }
 
+  // P7 (0.8.0): refresh the read-only aggregated worktree so `list-sessions`
+  // / `resume` can see every sibling device's raw_sessions. Best-effort —
+  // if this fails (no remote, first push didn't create main yet, network
+  // issue), we just log and move on; the user's own sync still succeeded.
+  if (pushed && opts.repoUrl) {
+    const { refreshAggregatedWorktree } = await import("../aggregated-store.js");
+    const ok = await refreshAggregatedWorktree(opts.repoPath);
+    if (ok) {
+      console.log(chalk.gray("  refreshed aggregated worktree (~/.vibebook/aggregated/)"));
+    } else {
+      // Likely "main has nothing yet" on a fresh repo — CI hasn't run an
+      // aggregate yet. Stays quiet unless DEBUG; this is the expected path
+      // on first sync of a brand-new remote.
+      if (process.env.VIBEBOOK_DEBUG) {
+        console.log(chalk.gray("  (aggregated worktree refresh skipped — no main yet?)"));
+      }
+    }
+  }
+
   return { newCount, skippedCount, pathsWritten, committed, pushed };
 }
 
