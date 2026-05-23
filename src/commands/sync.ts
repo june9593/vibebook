@@ -95,6 +95,14 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
         skippedCount++;
         continue;
       }
+      // Skip empty-shell sessions — VS Code creates a chatSessions/<id>.jsonl
+      // for every chat tab the user opens (even ones they immediately
+      // close), so we'd otherwise write a `1970-01-01/untitled__<id>.md`
+      // for each. Audit on 2026-05-23 found 142 such shells in Yue's repo.
+      if (s.messages.length === 0) {
+        skippedCount++;
+        continue;
+      }
       const rel = writeSession(opts.repoPath, s, { includeReasoning: opts.includeReasoning });
 
       // Working tree is always plaintext now; the clean filter handles

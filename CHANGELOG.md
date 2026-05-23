@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.7.1 — 2026-05-23
+
+Audit on Yue's first 0.7.0 sync surfaced 83 orphan .md files and 142
+empty-shell .md files. Both are Copilot-specific extractor bugs.
+
+### Bug fixes
+
+- **Copilot adapter: dedupe `chatSessions/` and `transcripts/` for the
+  same sessionId.** VS Code stores the same conversation in TWO formats
+  inside one workspace: `chatSessions/<id>.jsonl` (rolling-window state
+  log, fixed in 0.6.2/0.7.0) and `GitHub.copilot-chat/transcripts/<id>.jsonl`
+  (older event-stream). Pre-0.7.1 both got yielded as independent sources;
+  they produce different first-user prompts and different `startedAt`
+  timestamps for the same conversation, so the writer emitted two .md
+  files at different paths. The index keys by sessionId so only the
+  last-processed write got registered — the other became an orphan.
+  77 distinct shortIds were duplicated in Yue's repo (~85 orphan files).
+
+  Fix: per workspace, when both source formats have the same sessionId,
+  yield ONLY `chatSessions/` (the authoritative log we just hardened).
+  `transcripts/` remains the fallback for sessions where `chatSessions/`
+  doesn't exist.
+
+- **Sync skips empty-shell sessions (0 messages).** VS Code creates a
+  `chatSessions/<id>.jsonl` for every chat tab the user opens — even
+  ones they immediately close — and many of those files only carry
+  `kind=0` init + a `kind=1` metadata patch with no actual `requests`.
+  Pre-0.7.1 sync wrote one `1970-01-01/untitled__<id>.md` per shell
+  (epoch fallback because `startedAt` was empty). 142 such files
+  appeared across 43 different project dirs on Yue's machine.
+
+  Fix: skip writes when `session.messages.length === 0` in `runSync`.
+  Generalizes across sources, not just Copilot.
+
+### New: `vibebook prune`
+
+Clean up the orphan .md files that pre-0.7.1 syncs left behind. Scans
+`raw_sessions/*.md` and reports files NOT referenced by
+`.vibebook/index.json`. Default is dry-run; pass `--apply` to delete.
+Empty parent dirs are removed after their last file goes away.
+
+```sh
+vibebook prune           # list orphans (dry-run)
+vibebook prune --apply   # delete them
+```
+
 ## 0.7.0 — 2026-05-22
 
 Make raw_sessions md **navigable** so digest and resume can handle huge

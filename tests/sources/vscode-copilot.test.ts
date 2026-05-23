@@ -96,3 +96,47 @@ describe("VSCodeCopilotAdapter — chatSessions jsonl (rolling-window state log)
   });
 });
 
+describe("VSCodeCopilotAdapter — dedupe chatSessions/ vs transcripts/ for same sessionId", () => {
+  let storage: string;
+  beforeEach(() => {
+    storage = mkdtempSync(join(tmpdir(), "memvc-ws-dedupe-"));
+    const ws = join(storage, "hashC");
+    mkdirSync(join(ws, "chatSessions"), { recursive: true });
+    mkdirSync(join(ws, "GitHub.copilot-chat", "transcripts"), { recursive: true });
+    cpSync(join(fixturesDir, "workspace.json"), join(ws, "workspace.json"));
+    // Both sources, SAME sessionId. The dedupe must yield only chatSessions/.
+    cpSync(
+      join(fixturesDir, "vscode-copilot-chatsessions.jsonl"),
+      join(ws, "chatSessions", "shared-id-aaaa.jsonl"),
+    );
+    writeFileSync(
+      join(ws, "GitHub.copilot-chat", "transcripts", "shared-id-aaaa.jsonl"),
+      JSON.stringify({ type: "user.message", timestamp: "2026-05-22T10:00:00Z", data: { content: "transcript user msg should be ignored" } }) + "\n",
+    );
+  });
+
+  it("yields only chatSessions/ when both sources have the same sessionId in one workspace", async () => {
+    const adapter = new VSCodeCopilotAdapter(storage);
+    const found = [];
+    for await (const d of adapter.discover()) found.push(d);
+    expect(found).toHaveLength(1);
+    expect(found[0].sourcePath).toContain("chatSessions/");
+    expect(found[0].sourcePath).not.toContain("transcripts/");
+  });
+
+  it("still yields transcripts/ for sessionIds that have NO chatSessions/ counterpart", async () => {
+    // Add a transcript-only session
+    const ws = join(storage, "hashC");
+    writeFileSync(
+      join(ws, "GitHub.copilot-chat", "transcripts", "transcript-only-bbbb.jsonl"),
+      JSON.stringify({ type: "user.message", timestamp: "2026-05-22T10:00:00Z", data: { content: "this transcript-only session should survive the dedupe" } }) + "\n",
+    );
+    const adapter = new VSCodeCopilotAdapter(storage);
+    const sourcePaths: string[] = [];
+    for await (const d of adapter.discover()) sourcePaths.push(d.sourcePath);
+    expect(sourcePaths).toHaveLength(2);
+    expect(sourcePaths.some((p) => p.endsWith("chatSessions/shared-id-aaaa.jsonl"))).toBe(true);
+    expect(sourcePaths.some((p) => p.endsWith("transcripts/transcript-only-bbbb.jsonl"))).toBe(true);
+  });
+});
+
