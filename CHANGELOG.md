@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.8.0 — 2026-05-23
+
+P7 from the roadmap (locked Option A on 2026-05-22): **cross-device
+raw_sessions aggregation**. Before this, `vibebook resume <id>` could only
+see sessions captured by THIS device — to resume a session from a sibling
+machine you had to manually `git checkout <device-branch>` first. Now
+sibling-device sessions show up in `list-sessions` and `resume` works
+seamlessly against them.
+
+### How it works
+
+Three coordinated pieces:
+
+1. **`assets/scripts/merge-books.mjs` extension.** Besides aggregating
+   `book/` into main, the workflow now also walks each device branch's
+   `raw_sessions/` (via the device's `.vibebook/index.json`), unions
+   them into main (dedup by `tool:sessionId`, latest `sourceMtimeMs`
+   wins, latest `originDevice` annotated), and writes
+   `.vibebook/index.aggregated.json` carrying the union with
+   `originDevice` per entry. Pure git plumbing — ciphertext blobs are
+   copied as-is so encryption works without CI having the passphrase.
+   Prunes raw_sessions on main when a device retires a session.
+
+2. **Sync overlay** (`src/aggregated-store.ts`, new). After a successful
+   push, sync creates/refreshes a SECOND git worktree at
+   `~/.vibebook/aggregated/` checked out on `main`. The worktree shares
+   `.git` with `~/.vibebook/session-repo/` so the smudge filter is
+   inherited (encrypted files decrypt automatically). Best-effort —
+   failures (no main yet, network drop) are logged and don't break sync.
+
+3. **`list-sessions` + `resume` updates.** Both now read BOTH the device's
+   own `.vibebook/index.json` AND the aggregated worktree's
+   `index.aggregated.json`. Entries are deduped by `tool:sessionId`;
+   when a session exists in both, the own copy wins. `resume` resolves
+   the `.md` path under the aggregated worktree for sibling-device
+   sessions, so cross-device resume "just works" once a sync has refreshed
+   the overlay.
+
+### Migration
+
+Existing repos pick this up automatically:
+- Next CI aggregate run (triggered by any device push) writes the new
+  `.vibebook/index.aggregated.json` + populates `raw_sessions/` on main.
+- Next `vibebook sync` on each device creates `~/.vibebook/aggregated/`.
+- `vibebook list-sessions` then shows sibling-device sessions in the
+  output; `vibebook resume <id>` against them spawns Claude with the
+  cross-device context.
+
+No flags, no manual setup needed beyond `npm install -g vibebook@0.8.0`.
+
+### Tests
+
+- 2 new merge-books integration tests: raw_sessions aggregation + dedup,
+  and "no spool data = no aggregate artifacts" negative case.
+- 1 new list-sessions test: own + aggregated merge with `isOwn` flag and
+  duplicate handling.
+- 237/237 vitest passing (was 234 in 0.7.1; +3 new).
+
 ## 0.7.1 — 2026-05-23
 
 Audit on Yue's first 0.7.0 sync surfaced 83 orphan .md files and 142

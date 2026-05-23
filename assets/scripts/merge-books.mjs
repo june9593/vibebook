@@ -40,6 +40,8 @@ import { dirname, join } from "node:path";
 
 const REPO_ROOT = process.cwd();
 const BOOK_INDEX_PATH = ".vibebook/index.book.json";
+const SPOOL_INDEX_PATH = ".vibebook/index.json";
+const AGGREGATED_INDEX_PATH = ".vibebook/index.aggregated.json";
 
 function sh(cmd, args) {
   return execSync([cmd, ...args].join(" "), { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -80,6 +82,21 @@ function loadBookIndexFromBranch(ref) {
       return null;
     }
     if (!parsed.chronicles || !parsed.topics || !parsed.cards) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Read the device-side spool index (.vibebook/index.json). Keyed by
+ *  `${tool}:${sessionId}`. Used by the raw_sessions aggregation pass
+ *  added in 0.8.0 to union every device's raw .md files into main. */
+function loadSpoolIndexFromBranch(ref) {
+  const content = readFileFromBranch(ref, SPOOL_INDEX_PATH);
+  if (content === null) return null;
+  try {
+    const parsed = JSON.parse(content);
+    if (parsed.version !== 1 || !parsed.entries) return null;
     return parsed;
   } catch {
     return null;
@@ -176,8 +193,57 @@ function main() {
   }
   console.log(`cards: kept ${keptCardPaths.length} unique slugs (incl. _global)`);
 
+  // -------- raw_sessions: union by tool:sessionId, latest sourceMtimeMs wins --------
+  // P7 (0.8.0): cross-device raw_sessions aggregation. Devices push only their
+  // own raw_sessions/ to their device branch; main holds the union so any
+  // device can `vibebook resume <id>` against any other device's session.
+  // Pure copy of the (potentially encrypted) blob — CI doesn't have the
+  // git-crypt smudge filter installed, so `git show` yields ciphertext as-is,
+  // and we write ciphertext to main. Decryption happens on each device's
+  // local checkout via the smudge filter wired in `vibebook crypt init`.
+  const rawByKey = new Map(); // "tool:sessionId" -> { ref, device, entry }
+  for (const { ref, device } of perDevice) {
+    const spoolIdx = loadSpoolIndexFromBranch(ref);
+    if (!spoolIdx) {
+      console.log(`  ${device}: no v1 .vibebook/index.json — no raw_sessions to aggregate`);
+      continue;
+    }
+    for (const e of Object.values(spoolIdx.entries)) {
+      if (!e || !e.tool || !e.sessionId || !e.relativePath) continue;
+      const k = `${e.tool}:${e.sessionId}`;
+      const existing = rawByKey.get(k);
+      if (!existing || (e.sourceMtimeMs ?? 0) > (existing.entry.sourceMtimeMs ?? 0)) {
+        rawByKey.set(k, { ref, device, entry: e });
+      }
+    }
+  }
+  const keptRawPaths = [];
+  const aggregatedEntries = {};
+  for (const [k, { ref, device, entry }] of rawByKey.entries()) {
+    const body = readFileFromBranch(ref, entry.relativePath);
+    if (body === null) {
+      console.log(`  warn: ${ref}:${entry.relativePath} missing despite spool index; skipping`);
+      continue;
+    }
+    writeRel(entry.relativePath, body);
+    keptRawPaths.push(entry.relativePath);
+    aggregatedEntries[k] = { ...entry, originDevice: device };
+  }
+  console.log(`raw_sessions: kept ${keptRawPaths.length} unique sessions from ${perDevice.length} device(s)`);
+
+  // Write the union index ONLY when at least one device had spool data.
+  // Skipping the file on book-only repos (no `vibebook sync` ever run yet)
+  // keeps the test's "no aggregated artifacts when no spool" guarantee.
+  if (keptRawPaths.length > 0) {
+    writeRel(
+      AGGREGATED_INDEX_PATH,
+      JSON.stringify({ version: 1, entries: aggregatedEntries }, null, 2) + "\n",
+    );
+  }
+
   // -------- prune --------
   pruneStale(keptChroniclePaths, keptTopicPaths, keptCardPaths, perDevice);
+  pruneRawSessions(keptRawPaths);
 
   // -------- regen catalog --------
   const catalogPaths = regenCatalog({
@@ -191,13 +257,20 @@ function main() {
   console.log(`catalog: wrote ${catalogPaths.length} files`);
 
   // -------- commit --------
-  sh("git", ["add", "book/"]);
+  // Build add list dynamically: raw_sessions/ + .vibebook/index.aggregated.json
+  // only exist when at least one device had a v1 spool index. Skipping the
+  // dynamic check would fail `git add` on book-only repos (= fresh installs
+  // before anyone has run vibebook sync).
+  const addPaths = ["book/"];
+  if (existsSync(join(REPO_ROOT, "raw_sessions"))) addPaths.push("raw_sessions/");
+  if (existsSync(join(REPO_ROOT, AGGREGATED_INDEX_PATH))) addPaths.push(AGGREGATED_INDEX_PATH);
+  sh("git", ["add", ...addPaths]);
   const status = sh("git", ["status", "--porcelain"]);
   if (!status.trim()) {
     console.log("no changes to commit");
     return;
   }
-  const msg = `vibebook aggregate: ${chronicleByThread.size} chronicles, ${keptTopicPaths.length} topic-versions, ${cardByKey.size} cards across ${perDevice.length} device(s)`;
+  const msg = `vibebook aggregate: ${chronicleByThread.size} chronicles, ${keptTopicPaths.length} topic-versions, ${cardByKey.size} cards, ${keptRawPaths.length} raw_sessions across ${perDevice.length} device(s)`;
   sh("git", ["commit", "-m", JSON.stringify(msg)]);
   console.log(`committed: ${msg}`);
 }
@@ -242,6 +315,48 @@ function pruneSubdir(projDir, sub, liveSet) {
     const rel = `book/${proj}/${sub}/${name}`;
     if (!liveSet.has(rel)) {
       rmSync(join(dir, name), { force: true });
+    }
+  }
+}
+
+/**
+ * Walk raw_sessions/ on main and remove any .md not in the kept set. Same
+ * intent as pruneStale but for the cross-device raw_sessions aggregation
+ * (P7). Sweeps now-empty parent directories so a device retiring
+ * doesn't leave its <tool>/<project>/<date>/ skeleton behind.
+ */
+function pruneRawSessions(keptRawPaths) {
+  const liveSet = new Set(keptRawPaths);
+  const rawRoot = join(REPO_ROOT, "raw_sessions");
+  if (!existsSync(rawRoot)) return;
+  const dirsTouched = new Set();
+  const stack = [rawRoot];
+  while (stack.length > 0) {
+    const cur = stack.pop();
+    let entries;
+    try { entries = readdirSync(cur, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      const abs = join(cur, e.name);
+      if (e.isDirectory()) {
+        stack.push(abs);
+      } else if (e.isFile() && e.name.endsWith(".md")) {
+        const rel = abs.slice(REPO_ROOT.length + 1);
+        if (!liveSet.has(rel)) {
+          rmSync(abs, { force: true });
+          dirsTouched.add(dirname(abs));
+        }
+      }
+    }
+  }
+  // Sweep empty dirs upward from each touched dir.
+  for (const d of dirsTouched) {
+    let cur = d;
+    while (cur.startsWith(rawRoot) && cur !== rawRoot) {
+      let entries = [];
+      try { entries = readdirSync(cur); } catch { break; }
+      if (entries.length > 0) break;
+      try { rmSync(cur, { recursive: false, force: true }); } catch { break; }
+      cur = dirname(cur);
     }
   }
 }

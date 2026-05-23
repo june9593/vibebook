@@ -42,6 +42,16 @@ interface CardSeed {
   body: string;
 }
 
+interface RawSessionSeed {
+  /** e.g. "claude:abc12345-..." — the key in .vibebook/index.json */
+  sessionId: string;
+  tool: "claude" | "copilot";
+  project: string;
+  startedAt: string;
+  sourceMtimeMs: number;
+  body: string;
+}
+
 interface BranchSeed {
   device: string;
   /** project → chronicles[] */
@@ -50,6 +60,8 @@ interface BranchSeed {
   topics?: Record<string, TopicSeed[]>;
   /** project → cards[] (project may be "_global") */
   cards?: Record<string, CardSeed[]>;
+  /** raw_sessions to plant + register in .vibebook/index.json (P7) */
+  rawSessions?: RawSessionSeed[];
 }
 
 let bareRemote: string;
@@ -134,6 +146,37 @@ async function setupBranch(seed: BranchSeed): Promise<void> {
 
   mkdirSync(join(dir, ".vibebook"), { recursive: true });
   writeFileSync(join(dir, ".vibebook", "index.book.json"), JSON.stringify(bookIndex, null, 2));
+
+  // P7: raw_sessions + .vibebook/index.json (spool index, separate from
+  // index.book.json which only carries the digested book artifacts).
+  if (seed.rawSessions && seed.rawSessions.length > 0) {
+    const spoolIndex = {
+      version: 1,
+      entries: {} as Record<string, unknown>,
+    };
+    for (const rs of seed.rawSessions) {
+      const date = rs.startedAt.slice(0, 10);
+      const shortId = rs.sessionId.slice(0, 8);
+      const rel = `raw_sessions/${rs.tool}/${rs.project}/${date}/seed__${shortId}.md`;
+      writeFileTo(dir, rel, rs.body);
+      spoolIndex.entries[`${rs.tool}:${rs.sessionId}`] = {
+        sessionId: rs.sessionId,
+        shortId,
+        tool: rs.tool,
+        project: rs.project,
+        projectRaw: `/Users/test/${rs.project}`,
+        startedAt: rs.startedAt,
+        endedAt: rs.startedAt,
+        nameSlug: "seed",
+        displayName: "seed",
+        relativePath: rel,
+        sourcePath: `/fake/${rs.sessionId}.jsonl`,
+        sourceMtimeMs: rs.sourceMtimeMs,
+        sourceSha256: `sha-${rs.sessionId}`,
+      };
+    }
+    writeFileSync(join(dir, ".vibebook", "index.json"), JSON.stringify(spoolIndex, null, 2));
+  }
 
   await g.add(".");
   await g.commit(`seed ${seed.device}`);
@@ -429,5 +472,78 @@ describe("merge-books.mjs (v2 schema)", () => {
     await expect(runMerge()).resolves.toBeDefined();
     // Old article path was NOT carried over (we only read v2)
     expect(existsSync(join(workspace, "book/p/articles/x.md"))).toBe(false);
+  }, T);
+
+  it("aggregates raw_sessions/ + writes .vibebook/index.aggregated.json (P7)", async () => {
+    await setupBranch({
+      device: "Mac.lan",
+      rawSessions: [
+        {
+          sessionId: "sess-mac-aaaa", tool: "claude", project: "edge-src",
+          startedAt: "2026-04-20T10:00:00.000Z", sourceMtimeMs: 1_000_000,
+          body: "# md from Mac.lan (sess-mac)\n",
+        },
+        {
+          sessionId: "sess-shared", tool: "claude", project: "edge-src",
+          startedAt: "2026-04-20T11:00:00.000Z", sourceMtimeMs: 1_000_000,
+          body: "# OLD body from Mac.lan\n",
+        },
+      ],
+    });
+    await setupBranch({
+      device: "Mac-mini",
+      rawSessions: [
+        {
+          sessionId: "sess-mini-bbbb", tool: "copilot", project: "chromium",
+          startedAt: "2026-04-22T09:00:00.000Z", sourceMtimeMs: 2_000_000,
+          body: "# md from Mac-mini (sess-mini)\n",
+        },
+        {
+          sessionId: "sess-shared", tool: "claude", project: "edge-src",
+          startedAt: "2026-04-20T11:00:00.000Z", sourceMtimeMs: 2_000_000,
+          body: "# NEW body from Mac-mini (won via higher mtime)\n",
+        },
+      ],
+    });
+
+    await runMerge();
+
+    const macMd = join(workspace, "raw_sessions/claude/edge-src/2026-04-20/seed__sess-mac.md");
+    const miniMd = join(workspace, "raw_sessions/copilot/chromium/2026-04-22/seed__sess-min.md");
+    const sharedMd = join(workspace, "raw_sessions/claude/edge-src/2026-04-20/seed__sess-sha.md");
+    expect(existsSync(macMd)).toBe(true);
+    expect(existsSync(miniMd)).toBe(true);
+    expect(existsSync(sharedMd)).toBe(true);
+    // dedupe by tool:sessionId — Mac-mini's newer body wins for sess-shared
+    expect(readFileSync(sharedMd, "utf8")).toContain("NEW body from Mac-mini");
+
+    const aggPath = join(workspace, ".vibebook/index.aggregated.json");
+    expect(existsSync(aggPath)).toBe(true);
+    const agg = JSON.parse(readFileSync(aggPath, "utf8"));
+    expect(agg.version).toBe(1);
+    expect(Object.keys(agg.entries).sort()).toEqual([
+      "claude:sess-mac-aaaa",
+      "claude:sess-shared",
+      "copilot:sess-mini-bbbb",
+    ]);
+    // originDevice annotation lets consumers tell "which machine wrote this"
+    expect(agg.entries["claude:sess-mac-aaaa"].originDevice).toBe("Mac.lan");
+    expect(agg.entries["copilot:sess-mini-bbbb"].originDevice).toBe("Mac-mini");
+    expect(agg.entries["claude:sess-shared"].originDevice).toBe("Mac-mini");
+  }, T);
+
+  it("doesn't write raw_sessions/ or .vibebook/index.aggregated.json when no device has a spool index", async () => {
+    // Existing chronicle-only seeds (no rawSessions) should still merge book/
+    // cleanly, and the new aggregated files should NOT appear.
+    await setupBranch({
+      device: "Mac.lan",
+      chronicles: { p: [{ threadId: "t1", title: "T1",
+        updatedAt: "2026-04-20T10:00:00.000Z", body: "# c1\n" }] },
+    });
+    await runMerge();
+    expect(existsSync(join(workspace, "raw_sessions"))).toBe(false);
+    expect(existsSync(join(workspace, ".vibebook/index.aggregated.json"))).toBe(false);
+    // chronicle still aggregated normally
+    expect(existsSync(join(workspace, "book/p/chronicle/2026-04-20__t1__t1.md"))).toBe(true);
   }, T);
 });

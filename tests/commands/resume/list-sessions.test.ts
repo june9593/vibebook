@@ -107,4 +107,52 @@ describe("listSessionsCmd", () => {
     const result = await listSessionsCmd({ project: "nonexistent" });
     expect(result).toEqual([]);
   });
+
+  it("merges own + aggregated indices, marks each entry's isOwn flag (P7)", async () => {
+    // Plant an aggregated worktree with one extra session that the own
+    // index doesn't have, plus a duplicate of abc123 (own should win).
+    const aggDir = join(fakeHome, ".vibebook/aggregated/.vibebook");
+    mkdirSync(aggDir, { recursive: true });
+    writeFileSync(
+      join(aggDir, "index.aggregated.json"),
+      JSON.stringify({
+        version: 1,
+        entries: {
+          "claude:abc123": {
+            // duplicate — should NOT shadow the own copy
+            sessionId: "abc123", shortId: "abc123", tool: "claude",
+            project: "my-app", projectRaw: "/Users/other/code/my-app",
+            startedAt: "2026-05-10T00:00:00Z", endedAt: "2026-05-10T01:00:00Z",
+            nameSlug: "fix-thing", displayName: "Fix the thing (stale agg copy)",
+            relativePath: "raw_sessions/claude/my-app/2026-05-10/fix-thing__abc123.md",
+            sourcePath: "/elsewhere/abc123.jsonl",
+            sourceMtimeMs: 99, sourceSha256: "stale",
+            originDevice: "Mac-mini",
+          },
+          "claude:zzz999": {
+            // unique aggregated session — sibling-device only
+            sessionId: "zzz999", shortId: "zzz999", tool: "claude",
+            project: "my-app", projectRaw: "/Users/other/code/my-app",
+            startedAt: "2026-05-15T00:00:00Z", endedAt: "2026-05-15T02:00:00Z",
+            nameSlug: "sibling-only", displayName: "From the other Mac",
+            relativePath: "raw_sessions/claude/my-app/2026-05-15/sibling-only__zzz999.md",
+            sourcePath: "/elsewhere/zzz999.jsonl",
+            sourceMtimeMs: 100, sourceSha256: "agg",
+            originDevice: "Mac-mini",
+          },
+        },
+      }),
+    );
+
+    const { listSessionsCmd } = await import("../../../src/commands/resume/list-sessions.js");
+    const result = await listSessionsCmd({});
+    // 3 own + 1 unique aggregated = 4 total; the duplicate doesn't count twice
+    expect(result.length).toBe(4);
+    expect(result[0].sessionId).toBe("zzz999"); // newest
+    const ownAbc = result.find((r) => r.sessionId === "abc123")!;
+    expect(ownAbc.isOwn).toBe(true);
+    expect(ownAbc.displayName).toBe("Fix the thing"); // own copy wins
+    const aggZzz = result.find((r) => r.sessionId === "zzz999")!;
+    expect(aggZzz.isOwn).toBe(false);
+  });
 });

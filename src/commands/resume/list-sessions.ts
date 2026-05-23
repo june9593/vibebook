@@ -1,5 +1,6 @@
 import { readConfig } from "../../config.js";
 import { loadIndex } from "../../index-store.js";
+import { loadAggregatedIndex } from "../../aggregated-store.js";
 import type { IndexEntry } from "../../types.js";
 
 export interface ListSessionsOptions {
@@ -7,29 +8,48 @@ export interface ListSessionsOptions {
   project?: string;
   /** "1d" | "7d" | "30d" — only sessions whose endedAt is within this window */
   since?: string;
-  /** Device branch filter; matches IndexEntry's device when present.
-   *  IndexEntry doesn't have device field directly in v0.5.0 — accepted
-   *  but doesn't filter (placeholder for v0.6 device-tagging). */
+  /** Device branch filter — matches the entry's `originDevice` (aggregated
+   *  sessions only). Own sessions are excluded when this filter is set
+   *  unless device === config.deviceBranch. */
   device?: string;
 }
 
+/** Same shape as IndexEntry but with a derived `isOwn` flag so callers know
+ *  whether to look at sessionRepo/ or ~/.vibebook/aggregated/ for the .md. */
+export type ListedSession = IndexEntry & { isOwn: boolean };
+
 /**
- * Returns sessions from the spool's index.json, filtered + sorted newest-first.
- * Caller (CLI handler) is responsible for printing as a table.
+ * Returns sessions from BOTH the device's own spool index AND the union
+ * `.vibebook/index.aggregated.json` written by CI to main. Dedupes by
+ * `tool:sessionId` — when the same session appears in both, the own copy
+ * wins (it carries the latest local sourceSha256 / mtime).
+ *
+ * Filtered + sorted newest-first. Caller (CLI handler) prints as a table.
  */
-export async function listSessionsCmd(opts: ListSessionsOptions): Promise<IndexEntry[]> {
+export async function listSessionsCmd(opts: ListSessionsOptions): Promise<ListedSession[]> {
   const cfg = readConfig();
-  const idx = loadIndex(cfg.repoPath);
+  const ownIdx = loadIndex(cfg.repoPath);
+  const aggIdx = loadAggregatedIndex();
+
+  const merged = new Map<string, ListedSession>();
+  for (const e of Object.values(ownIdx.entries)) {
+    merged.set(`${e.tool}:${e.sessionId}`, { ...e, isOwn: true });
+  }
+  for (const e of Object.values(aggIdx?.entries ?? {})) {
+    const k = `${e.tool}:${e.sessionId}`;
+    if (!merged.has(k)) merged.set(k, { ...e, isOwn: false });
+  }
 
   const cutoffMs = parseSince(opts.since);
-  const result: IndexEntry[] = [];
+  const result: ListedSession[] = [];
 
-  for (const entry of Object.values(idx.entries)) {
+  for (const entry of merged.values()) {
     if (opts.project && entry.project !== opts.project) continue;
     if (cutoffMs !== null && Date.parse(entry.endedAt) < cutoffMs) continue;
     if (opts.device) {
-      // IndexEntry doesn't have device field directly; accepted but not
-      // filtered. Marker for v0.6.0 follow-up.
+      const entryDevice = (entry as IndexEntry & { originDevice?: string }).originDevice;
+      const isOwnFromThisDevice = entry.isOwn && cfg.deviceBranch === opts.device;
+      if (!isOwnFromThisDevice && entryDevice !== opts.device) continue;
     }
     result.push(entry);
   }
