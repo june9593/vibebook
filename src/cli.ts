@@ -71,6 +71,14 @@ export async function run(argv: string[]) {
       await doctorCmd();
     });
   program
+    .command("prune")
+    .description("Find raw_sessions/*.md files on disk that are not referenced by .vibebook/index.json (orphans from earlier extractor bugs) and optionally delete them. Dry-run by default.")
+    .option("--apply", "actually delete the orphan files (default is dry-run)")
+    .action(async (opts: { apply?: boolean }) => {
+      const { pruneCmd } = await import("./commands/prune.js");
+      await pruneCmd({ apply: opts.apply });
+    });
+  program
     .command("workflow")
     .description("Manage the GitHub Action that aggregates device branches into main")
     .addCommand(

@@ -28,9 +28,21 @@ export class VSCodeCopilotAdapter implements SourceAdapter {
       const wsDir = join(this.root, w.name);
       const wsPath = readWorkspacePath(join(wsDir, "workspace.json"));
 
+      // Within a single workspace, the SAME conversation can land in BOTH
+      // `chatSessions/<id>.jsonl` (the rolling-window state log, schema fixed
+      // in 0.7.0) and `GitHub.copilot-chat/transcripts/<id>.jsonl` (an
+      // older event-stream format). Letting both through produces twin .md
+      // files at different paths because the two formats extract different
+      // first-user prompts and different startedAt timestamps — same
+      // sessionId, two filenames, only one of them indexed (audit on Yue's
+      // 2026-05-23 sync surfaced 83 orphan files repo-wide). Prefer
+      // chatSessions/ as the authoritative source; transcripts/ runs only
+      // as a fallback when chatSessions/ doesn't have the id.
+      const chatDir = join(wsDir, "chatSessions");
+      const chatSessionIds = new Set<string>();
+
       // Legacy format (pre-2026-04): workspaceStorage/<hash>/chatSessions/<id>.json
       // Newer append-log format (2026-03+): workspaceStorage/<hash>/chatSessions/<id>.jsonl
-      const chatDir = join(wsDir, "chatSessions");
       if (existsSync(chatDir)) {
         let files: Dirent[] = [];
         try { files = readdirSync(chatDir, { withFileTypes: true }); } catch { files = []; }
@@ -42,6 +54,7 @@ export class VSCodeCopilotAdapter implements SourceAdapter {
           const p = join(chatDir, f.name);
           const st = statSync(p);
           if (st.size === 0) continue;
+          chatSessionIds.add(basename(f.name, isJsonl ? ".jsonl" : ".json"));
           const buf = readFileSync(p);
           const sha = createHash("sha256").update(buf).digest("hex");
           yield {
@@ -62,6 +75,8 @@ export class VSCodeCopilotAdapter implements SourceAdapter {
         try { tfiles = readdirSync(transcriptsDir, { withFileTypes: true }); } catch { tfiles = []; }
         for (const f of tfiles) {
           if (!f.isFile() || !f.name.endsWith(".jsonl")) continue;
+          const id = basename(f.name, ".jsonl");
+          if (chatSessionIds.has(id)) continue; // chatSessions/ wins for same workspace+sessionId
           const p = join(transcriptsDir, f.name);
           const st = statSync(p);
           if (st.size === 0) continue;

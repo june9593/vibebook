@@ -101,4 +101,32 @@ describe("runSync — extract + raw push only (v0.2: no LLM)", () => {
     expect(existsSync(join(repo, "book"))).toBe(false);
     expect(existsSync(join(repo, ".vibebook/index.book.json"))).toBe(false);
   });
+
+  it("skips empty-shell sessions (0 messages) without writing files or indexing", async () => {
+    // Plant a Copilot empty-shell chatSessions file alongside the existing
+    // fixtures. VS Code creates these for every chat tab opened — even
+    // ones the user immediately closes.
+    const emptyWs = join(vscodeRoot, "hashEmpty");
+    mkdirSync(join(emptyWs, "chatSessions"), { recursive: true });
+    cpSync(
+      join(fixturesDir, "copilot", "workspace.json"),
+      join(emptyWs, "workspace.json"),
+    );
+    // kind=0 init + kind=1 patch, no requests = empty shell. Mirrors the
+    // shape we found across 142 such files on Yue's machine.
+    const shell = [
+      JSON.stringify({ kind: 0, v: { version: 3, sessionId: "empty-shell-cccc", requests: [] } }),
+      JSON.stringify({ kind: 1, k: ["responderUsername"], v: "GitHub Copilot" }),
+    ].join("\n") + "\n";
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(emptyWs, "chatSessions", "empty-shell-cccc.jsonl"), shell);
+
+    const result = await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+    // 1 real claude session written, 1 empty shell skipped
+    expect(result.newCount).toBe(1);
+    expect(result.skippedCount).toBeGreaterThanOrEqual(1);
+
+    // No 1970-01-01 directory created for the empty shell
+    expect(existsSync(join(repo, "raw_sessions/copilot"))).toBe(false);
+  });
 });
