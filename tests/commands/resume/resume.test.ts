@@ -118,4 +118,42 @@ describe("resumeCmd (0.6 — context-as-prompt)", () => {
     const r = await resumeCmd({ idOrPrefix: "abc12345", cwd, print: true });
     expect(r.mdPath).toMatch(/\.md$/);
   });
+
+  it("uses full-embed for sub-50KB md (0.8.5 size gate) even with manifest_version", async () => {
+    // Plant a tiny md with manifest_version:1 — small enough that chunked
+    // mode is overkill. The prompt should EMBED the body, not point Claude
+    // at the on-disk path.
+    const tinyMd = "---\nmanifest_version: 1\nuser_turns: 1\n---\n\n# Table of Contents\n\n## User\n\nhi\n";
+    writeFileSync(join(repoPath, "raw_sessions/claude/my-app/2026-05-10/fix__abc12345.md"), tinyMd);
+
+    const { resumeCmd } = await import("../../../src/commands/resume/resume.js");
+    const cwd = `${fakeHome}/code/my-app`;
+    mkdirSync(cwd, { recursive: true });
+    const r = await resumeCmd({ idOrPrefix: "abc12345", cwd, print: true });
+    // Full-embed mode embeds the literal body, NOT the "Read offset" instructions
+    expect(r.invocation[1]).toContain("## User");
+    expect(r.invocation[1]).not.toContain("→L<number>");
+    expect(r.invocation[1]).not.toContain("offset:<number>");
+  });
+
+  it("uses chunked mode when md is >= 50KB AND has manifest_version", async () => {
+    // Inflate the md past CHUNKED_THRESHOLD_BYTES (50 KB) but keep the
+    // manifest_version: 1 marker so the header extractor still triggers.
+    const padding = "x".repeat(60 * 1024); // 60 KB of filler
+    const bigMd =
+      "---\nmanifest_version: 1\nuser_turns: 1\n---\n\n# Table of Contents\n\n## User\n\n" +
+      padding +
+      "\n";
+    writeFileSync(join(repoPath, "raw_sessions/claude/my-app/2026-05-10/fix__abc12345.md"), bigMd);
+
+    const { resumeCmd } = await import("../../../src/commands/resume/resume.js");
+    const cwd = `${fakeHome}/code/my-app`;
+    mkdirSync(cwd, { recursive: true });
+    const r = await resumeCmd({ idOrPrefix: "abc12345", cwd, print: true });
+    // Chunked mode references the on-disk path + the Read offset pattern,
+    // and does NOT include the 60 KB body inline.
+    expect(r.invocation[1]).toContain("The full transcript lives on disk at:");
+    expect(r.invocation[1]).toContain("→L<number>");
+    expect(r.invocation[1]).not.toContain(padding);
+  });
 });
