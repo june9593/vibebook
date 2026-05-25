@@ -72,14 +72,14 @@ export function renderResumePromptChunked(
   fullMdBytes: number,
   ctx: PromptCtx = {},
 ): string {
-  const sizeMb = (fullMdBytes / (1024 * 1024)).toFixed(1);
+  const sizeStr = formatSize(fullMdBytes);
   return [
     `I had a coding session on another machine that I'd like to continue.`,
     `The full transcript lives on disk at:`,
     ``,
     `  ${mdPath}`,
     ``,
-    `It is ${sizeMb} MB — large enough that you should NOT Read the whole`,
+    `It is ${sizeStr} — large enough that you should NOT Read the whole`,
     `file at once. The header below has a manifest (mechanical facts about`,
     `what was worked on) and a Table of Contents. Use them to navigate:`,
     ``,
@@ -119,4 +119,21 @@ export function chooseInvocation(prompt: string, shortId: string): string[] {
   const tmpPath = join(tmpdir(), `.vibebook-resume-${shortId}.md`);
   writeFileSync(tmpPath, prompt, "utf8");
   return ["claude", `Read ${tmpPath} and act on the instructions there.`];
+}
+
+/** 0.8.5: below this, resume uses full-embed mode (the whole md goes
+ *  inline). Above it, chunked mode (header inline + on-disk Read).
+ *  5000 tokens-ish — fits comfortably even in 200K context models,
+ *  and saves Claude 1-2 round-trips on small sessions where chunked
+ *  navigation buys nothing. */
+export const CHUNKED_THRESHOLD_BYTES = 50 * 1024;
+
+/** Adaptive byte → human size. Sub-MB shows KB; otherwise MB with one
+ *  decimal. Pre-0.8.5 we always printed MB.toFixed(1), which rendered
+ *  33 KB as `"0.0 MB"` — technically true, totally misleading next to
+ *  "large enough that you should NOT Read the whole file at once". */
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

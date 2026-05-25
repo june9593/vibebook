@@ -138,4 +138,17 @@ describe("renderResumePromptChunked", () => {
     expect(prompt).toContain("macmini");
     expect(prompt).toContain("Trace memory leak");
   });
+
+  it("formats size as KB (not '0.0 MB') for sub-MB files (0.8.5 cosmetic fix)", () => {
+    const header = "---\nmanifest_version: 1\n---\n";
+    const prompt = renderResumePromptChunked(entry, "/tmp/foo.md", header, 33_817);
+    expect(prompt).toContain("33.0 KB");
+    expect(prompt).not.toContain("0.0 MB");
+  });
+
+  it("formats size as bytes for tiny files", () => {
+    const header = "---\nmanifest_version: 1\n---\n";
+    const prompt = renderResumePromptChunked(entry, "/tmp/foo.md", header, 512);
+    expect(prompt).toContain("512 B");
+  });
 });

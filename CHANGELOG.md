@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.8.5 — 2026-05-25
+
+### `vibebook resume` — size-adaptive prompt construction
+
+Two related cosmetic + UX fixes caught during 2026-05-25 dogfood of
+the first cross-device resume:
+
+**1. Adaptive size formatting.** Pre-0.8.5 the prompt always reported
+file size as `MB.toFixed(1)`, so a 33 KB file rendered as
+`"It is 0.0 MB — large enough that you should NOT Read the whole
+file at once"` — self-contradictory and confusing. Now formats as
+`B` / `KB` / `MB` adaptively.
+
+**2. Skip chunked navigation for sub-50KB files.** Chunked mode
+(header inline + on-disk Read) is overhead for small files — it
+costs 1-2 extra `Read` tool round-trips for no benefit when the
+whole md fits in one prompt. Pre-0.8.5 the chunked-vs-embed switch
+was purely on `manifest_version: 1` presence; now also requires
+`size >= CHUNKED_THRESHOLD_BYTES` (= 50 KB). Below that, full-embed
+mode pastes the whole md into the prompt for one-shot context.
+
+The threshold is generous (50 KB ≈ 5000 tokens, comfortable even in
+200 K context models). 5 MB+ sessions still go chunked.
+
+### Tests
+
+- 4 new cases: size as KB (not "0.0 MB"), size as bytes for tiny
+  files, full-embed for sub-50KB md with manifest_version, chunked
+  for ≥50KB md.
+- 252/252 vitest passing (was 248 in 0.8.4; +4 new).
+
 ## 0.8.4 — 2026-05-25
 
 ### `vibebook doctor` — multi-install detection
