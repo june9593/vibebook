@@ -130,6 +130,23 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     }
   }
 
+  // 0.8.4: prune orphan index entries — entries whose source jsonl no
+  // longer exists on disk AND whose rendered .md is also gone. Pre-0.8.4,
+  // a session deleted from ~/.claude/projects/ (or its workspaceStorage
+  // counterpart) left its index entry forever; CI aggregate then logged
+  // "missing despite spool index; skipping" for each, eating noise but
+  // also losing the chance to clean up stale aggregated state on main.
+  let prunedIndex = 0;
+  for (const [key, e] of Object.entries(idx.entries)) {
+    if (!existsSync(e.sourcePath) && !existsSync(join(opts.repoPath, e.relativePath))) {
+      delete idx.entries[key];
+      prunedIndex++;
+    }
+  }
+  if (prunedIndex > 0) {
+    console.log(chalk.gray(`  pruned ${prunedIndex} index entr${prunedIndex === 1 ? "y" : "ies"} (source jsonl gone)`));
+  }
+
   saveIndex(opts.repoPath, idx);
 
   // Self-heal: encryption is on but the repo is missing .vibebook/repo-salt.json

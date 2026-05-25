@@ -264,3 +264,61 @@ describe("runSync — workflow file inheritance from main (P1, 0.8.1)", () => {
     expect(existsSync(join(freshClone, ".github/workflows/vibebook-aggregate.yml"))).toBe(false);
   }, 30_000);
 });
+
+describe("runSync — orphan index prune (0.8.4)", () => {
+  let repo: string;
+  let claudeRoot: string;
+  let vscodeRoot: string;
+
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), "vb-orphan-repo-"));
+    claudeRoot = mkdtempSync(join(tmpdir(), "vb-orphan-claude-"));
+    vscodeRoot = mkdtempSync(join(tmpdir(), "vb-orphan-vscode-"));
+  });
+
+  it("removes index entries whose source jsonl is gone AND whose rendered md is gone", async () => {
+    // First sync: plant a session, get an index entry written.
+    const proj = join(claudeRoot, "-Users-me-edge-memvc");
+    mkdirSync(proj, { recursive: true });
+    cpSync(join(fixturesDir, "claude", "claude-session.jsonl"), join(proj, "abc12345.jsonl"));
+    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+
+    // Sanity: 1 indexed entry, 1 rendered md
+    let idx = loadIndex(repo);
+    expect(Object.keys(idx.entries).length).toBe(1);
+    const onlyEntry = Object.values(idx.entries)[0]!;
+    expect(existsSync(join(repo, onlyEntry.relativePath))).toBe(true);
+
+    // Simulate the orphan condition: delete BOTH the source jsonl (= user
+    // wiped ~/.claude/projects/) AND the rendered md (= manual cleanup or
+    // historic 0.6-era artifact whose source has long been gone).
+    const { rmSync, unlinkSync } = await import("node:fs");
+    unlinkSync(join(proj, "abc12345.jsonl"));
+    rmSync(join(repo, onlyEntry.relativePath));
+
+    // Second sync: the prune pass should clean the orphan entry.
+    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+
+    idx = loadIndex(repo);
+    expect(Object.keys(idx.entries).length).toBe(0);
+  });
+
+  it("keeps entries whose md still exists even if source jsonl is gone", async () => {
+    // Common during cross-device aggregation: the source jsonl was on
+    // another machine; this clone only has the rendered md. Don't prune
+    // those — they're still useful for `resume` consumption.
+    const proj = join(claudeRoot, "-Users-me-edge-memvc");
+    mkdirSync(proj, { recursive: true });
+    cpSync(join(fixturesDir, "claude", "claude-session.jsonl"), join(proj, "abc12345.jsonl"));
+    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+
+    // Delete the source jsonl but KEEP the rendered md
+    const { unlinkSync } = await import("node:fs");
+    unlinkSync(join(proj, "abc12345.jsonl"));
+
+    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+
+    const idx = loadIndex(repo);
+    expect(Object.keys(idx.entries).length).toBe(1);
+  });
+});
