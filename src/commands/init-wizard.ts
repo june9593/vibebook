@@ -68,29 +68,28 @@ export async function runWizard(): Promise<WizardAnswers> {
     );
     localPath = resolve(expandHome(rawPath));
 
-    // Q3: encrypt
-    encrypt = await promptYesNo(
-      chalk.cyan("Q3") + " Encrypt raw session files before commit?",
-      true,
-    );
-
-    // Q4: passphrase (only if encrypt)
-    if (encrypt) {
-      for (;;) {
-        const pp = await promptHidden(chalk.cyan("Q4") + " Passphrase (will be saved to ~/.vibebook/passphrase, mode 0600)");
-        if (!pp) {
-          const skip = await promptYesNo("  Skip storing? You'll need to set VIBEBOOK_PASSPHRASE before sync", false);
-          if (skip) break;
-          continue;
-        }
-        const pp2 = await promptHidden("  Confirm passphrase");
-        if (pp === pp2) {
-          passphraseEntered = pp;
-          break;
-        }
-        console.log(chalk.yellow("  passphrases didn't match, try again"));
-      }
-    }
+    // Q3 (encrypt) and Q4 (passphrase) DROPPED in 0.8.2.
+    //
+    // Rationale: the file-body encryption was half-baked anyway — filenames
+    // (= first ~100 chars of the user's prompt) and `.vibebook/index.json`
+    // (full `displayName` per session) always leaked in plaintext to the
+    // remote, so an attacker reading the repo could already reconstruct the
+    // conversation topics. The threat model "GitHub itself or someone with
+    // repo read access sees content" wasn't actually addressed.
+    //
+    // The REAL risk — accidentally pasting an API key into a session and
+    // pushing it — is covered by GitHub's secret-scanning push protection
+    // (free, on private repos as of 2024-09): AWS keys, GitHub PATs, OpenAI
+    // `sk-*`, Anthropic `sk-ant-*`, and ~40 other partner patterns get
+    // rejected at push time with GH013. The body-encryption layer didn't
+    // help with that either.
+    //
+    // Power users who want encryption can still pass `--encrypt` on the
+    // non-interactive `vibebook init` path, or flip
+    // `~/.vibebook/config.json`'s `encrypt: true` and re-run sync. To turn
+    // off encryption on an existing encrypted repo, use
+    // `vibebook config --encrypt false`.
+    encrypt = false;
   } else {
     console.log(chalk.gray("  local-only mode: no remote URL, no encryption, no push."));
   }

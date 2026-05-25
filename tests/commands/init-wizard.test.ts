@@ -116,9 +116,6 @@ describe("runWizard end-to-end transcript", () => {
       "y",                             // Q0 sync to remote
       "git@github.com:you/repo.git",  // Q1 repo URL
       "",                              // Q2 path → default
-      "y",                             // Q3 encrypt
-      "secret123",                     // Q4 passphrase
-      "secret123",                     // Q4 confirm
       "mini2",                         // Q6 stable device name (override hostname default)
     ];
     const stdin = new Readable({ read() {} }) as Readable & { isTTY?: boolean };
@@ -144,8 +141,10 @@ describe("runWizard end-to-end transcript", () => {
     const a = await m.runWizard();
     closePrompts();
     expect(a.repoUrl).toBe("git@github.com:you/repo.git");
-    expect(a.encrypt).toBe(true);
-    expect(a.passphraseEntered).toBe("secret123");
+    // 0.8.2: Q3 (encrypt) + Q4 (passphrase) dropped. Encryption opt-in via
+    // `--encrypt` flag on non-interactive init, or `vibebook config --encrypt true`.
+    expect(a.encrypt).toBe(false);
+    expect(a.passphraseEntered).toBeUndefined();
     // 0.6.1: Q6 dropped — enableAggregateCI auto-set true for sync-to-remote
     expect(a.enableAggregateCI).toBe(true);
     expect(a.deviceBranch).toBe("mini2");
