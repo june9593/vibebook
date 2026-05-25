@@ -173,7 +173,8 @@ export async function run(argv: string[]) {
     .description("Inspect or modify ~/.vibebook/config.json.")
     .option("--map-path <FROM=TO>", "add a cross-device path mapping (e.g. /Users/yueA=/Users/yueB) for `vibebook resume`")
     .option("--device <name>", "set a stable device branch name (e.g. 'mini2') — overrides the volatile hostname() default")
-    .action(async (opts: { mapPath?: string; device?: string }) => {
+    .option("--encrypt <bool>", "enable or disable raw_sessions encryption (deinit git crypt filter when 'false'). Use 'true' or 'false'.")
+    .action(async (opts: { mapPath?: string; device?: string; encrypt?: string }) => {
       if (opts.mapPath) {
         const { setMapPath } = await import("./commands/resume/config-pathmap.js");
         setMapPath(opts.mapPath);
@@ -193,6 +194,11 @@ export async function run(argv: string[]) {
             `  git push origin --delete '${previous}' 2>/dev/null`,
           );
         }
+        return;
+      }
+      if (opts.encrypt !== undefined) {
+        const { setEncryptMode } = await import("./commands/config-encrypt.js");
+        await setEncryptMode(opts.encrypt);
         return;
       }
       // No flags: print current config

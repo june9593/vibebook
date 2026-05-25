@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.8.2 — 2026-05-25
+
+### Encryption is no longer the default
+
+The interactive `vibebook init` wizard no longer asks "Encrypt raw
+session files before commit?" (Q3) or "Passphrase?" (Q4). New repos
+default to **plaintext storage**.
+
+Why: the body-encryption layer was half-baked. Filenames (= the first
+~100 chars of each user prompt, derived by `deriveSlug`) and
+`.vibebook/index.json` (full `displayName` per session) always leaked
+to the remote in plaintext, so an attacker with repo read access could
+already reconstruct the conversation topic. The threat model "GitHub
+or someone with read access sees content" wasn't actually addressed.
+
+The REAL risk — accidentally pasting an API key into a session and
+pushing it — is covered by GitHub's secret-scanning push protection
+(free on private repos as of 2024-09): AWS keys, GitHub PATs, OpenAI
+`sk-*`, Anthropic `sk-ant-*`, and ~40 other partner patterns get
+rejected at push time with `GH013`. The body-encryption layer didn't
+help with that either.
+
+### Opt-in paths preserved
+
+Power users who want encryption can still enable it explicitly:
+
+- **At init**: `vibebook init <url> --encrypt --passphrase <pp>`
+  (non-interactive flag, unchanged from 0.5.x)
+- **On an existing repo**: `vibebook config --encrypt true` — flips
+  config + re-wires the git crypt filter. Force-encrypt of already-
+  plaintext blobs requires `rm -rf raw_sessions && vibebook sync`.
+
+### New: `vibebook config --encrypt false`
+
+Opt out of encryption on a previously-encrypted repo. Flips
+`~/.vibebook/config.json`'s `encrypt: false`, removes the per-clone
+git crypt filter from `.git/config`, strips the
+`raw_sessions/** filter=vibebook` line from `.gitattributes` (leaving
+other user-added lines intact), and refreshes the working tree.
+
+Existing already-encrypted blobs on the remote stay encrypted until
+their source jsonl changes triggers a re-sync. To force-decrypt
+everything now: `rm -rf raw_sessions && vibebook sync`.
+
+Idempotent: running `--encrypt false` on a non-encrypted repo prints
+"nothing to change" and exits.
+
+### Tests
+
+- 5 new `config-encrypt.test.ts` cases covering: false-flip filter
+  teardown, .gitattributes line-precise strip (preserves user-added
+  lines), idempotent no-op, true-flip filter re-wire, input validation.
+- 245/245 vitest passing (was 240 in 0.8.1; +5 new).
+
 ## 0.8.1 — 2026-05-25
 
 ### Bug fix

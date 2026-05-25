@@ -167,6 +167,72 @@ export function ensureCryptFilter(repoPath: string): CryptInitResult {
   return { wired: true, wroteAttrs };
 }
 
+export interface CryptUninstallResult {
+  removedFilter: boolean;
+  removedAttrs: boolean;
+  refreshed: boolean;
+}
+
+/**
+ * Undo what `configureGitFilter` did — `vibebook config --encrypt false`
+ * calls this when the user opts out of encryption (0.8.2). Removes the
+ * git-config filter entries + the `raw_sessions/** filter=vibebook` line
+ * from `.gitattributes`, then refreshes the working tree so files
+ * previously decrypted via the smudge filter get re-checked-out as
+ * whatever they were (already-decrypted plaintext stays plaintext;
+ * already-ciphertext on disk would stay ciphertext, but that case is
+ * rare since the working tree was always plaintext under encryption).
+ *
+ * Existing already-encrypted blobs on the REMOTE stay encrypted until
+ * a future `vibebook sync` re-renders them as plaintext .md.
+ */
+export function removeCryptFilter(repoPath: string): CryptUninstallResult {
+  if (!existsSync(join(repoPath, ".git"))) {
+    return { removedFilter: false, removedAttrs: false, refreshed: false };
+  }
+  // git config --unset-all <key> — non-zero exit if key wasn't present;
+  // swallow so first-time-disabling on a non-encrypted repo is a no-op.
+  let removedFilter = false;
+  for (const key of [`filter.${FILTER_NAME}.clean`, `filter.${FILTER_NAME}.smudge`, `filter.${FILTER_NAME}.required`, `diff.${FILTER_NAME}.textconv`]) {
+    try {
+      execSync(`git -C ${shell(repoPath)} config --unset-all ${key}`, { stdio: "ignore" });
+      removedFilter = true;
+    } catch { /* not set; ok */ }
+  }
+
+  // Strip our line from .gitattributes. Leave other (user-added) lines alone.
+  let removedAttrs = false;
+  const attrAbs = join(repoPath, ATTR_REL);
+  if (existsSync(attrAbs)) {
+    const existing = readFileSync(attrAbs, "utf8");
+    const cleaned = existing
+      .split("\n")
+      .filter((l) => l !== ATTR_LINE && l !== ATTR_HEADER)
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/^\n+/, "");
+    if (cleaned !== existing) {
+      // If only our block was in there, the file becomes empty — delete it.
+      if (cleaned.trim() === "") {
+        execSync(`rm -f ${shell(attrAbs)}`);
+      } else {
+        writeFileSync(attrAbs, cleaned);
+      }
+      removedAttrs = true;
+    }
+  }
+
+  // Re-checkout so any files that the smudge filter had decrypted are
+  // re-read fresh (with no filter, the on-disk blob is whatever git stored).
+  let refreshed = false;
+  try {
+    refreshWorkingTree(repoPath);
+    refreshed = true;
+  } catch { /* best-effort */ }
+
+  return { removedFilter, removedAttrs, refreshed };
+}
+
 /** CLI dispatcher: `vibebook crypt {clean,smudge,init,status}`. */
 export async function cryptCmd(action: string): Promise<void> {
   switch (action) {
