@@ -106,26 +106,28 @@ Install it as shown at the top of this README. Your existing
 `~/.vibebook/session-repo/` data is unchanged; the plugin reads it and
 writes its own additions there.
 
-### Note for v0.4.x upgraders: spool format adds original jsonl
+### Note for v0.4.x upgraders: spool format is single-`.md`-per-session
 
-Sync now preserves the original `.jsonl` from `~/.claude/projects/`
-into the spool alongside `.md` + `.raw.json`. This is required by
-`vibebook resume`. Existing pre-0.5 sessions in your spool only have
-`.md` + `.raw.json` — those cannot be resumed across machines. To
-enable resume retroactively:
+Starting in 0.6.0, sync writes a **single `.md` per session** under
+`raw_sessions/<tool>/<project>/<date>/` — no `.raw.json` or `.jsonl`
+sibling. The `.md` carries everything via YAML frontmatter (commits,
+files_touched, tools_used, candidate_decisions) plus a `# Table of
+Contents` block with `→L<line>` jump offsets and the body. `vibebook
+resume` reads this `.md` directly; for sessions larger than ~200 KB it
+embeds only the manifest + TOC inline and points Claude at the on-disk
+file (chunked mode, 0.7.0+).
+
+If you have a pre-0.6 spool with old `.raw.json` / `.jsonl` siblings
+sitting around, the cleanest path is to wipe and re-sync:
 
 ```sh
 rm -rf ~/.vibebook/session-repo/raw_sessions
 vibebook sync
 ```
 
-This re-renders all your local sessions and now also preserves their
-original `.jsonl`. Bookmarks (the `book/` directory written by the
-plugin) are unaffected and stay intact.
-
-If you don't care about resuming pre-0.5 sessions, do nothing — new
-sessions sync'd after the upgrade work for resume; old ones trigger a
-`vibebook doctor` warning but otherwise behave normally.
+If your repo also accumulated duplicate `.md` files or `1970-01-01/`
+empty-shell dirs from the 0.5–0.7.0 Copilot extractor bugs, run
+`vibebook prune` (added 0.7.1) to clean orphans first.
 
 See [CHANGELOG](./CHANGELOG.md) for the full breaking-change list.
 

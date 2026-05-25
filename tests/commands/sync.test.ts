@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, existsSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -129,4 +129,138 @@ describe("runSync — extract + raw push only (v0.2: no LLM)", () => {
     // No 1970-01-01 directory created for the empty shell
     expect(existsSync(join(repo, "raw_sessions/copilot"))).toBe(false);
   });
+});
+
+describe("runSync — workflow file inheritance from main (P1, 0.8.1)", () => {
+  let bareRemote: string;
+  let workRepo: string;
+  let tmpHome: string;
+  let claudeRoot: string;
+  let vscodeRoot: string;
+
+  beforeEach(async () => {
+    const { writeFileSync } = await import("node:fs");
+    const { simpleGit } = await import("simple-git");
+
+    tmpHome = mkdtempSync(join(tmpdir(), "vb-wfsync-home-"));
+    vi.stubEnv("HOME", tmpHome);
+
+    bareRemote = mkdtempSync(join(tmpdir(), "vb-wfsync-bare-"));
+    await simpleGit().cwd(bareRemote).raw(["init", "--bare", "-b", "main"]);
+
+    // Plant `.github/workflows/vibebook-aggregate.yml` on the bare's main.
+    const seed = mkdtempSync(join(tmpdir(), "vb-wfsync-seed-"));
+    const sg = simpleGit(seed);
+    await sg.raw(["init", "-b", "main"]);
+    await sg.addConfig("user.email", "t@t");
+    await sg.addConfig("user.name", "t");
+    mkdirSync(join(seed, ".github", "workflows"), { recursive: true });
+    writeFileSync(
+      join(seed, ".github/workflows/vibebook-aggregate.yml"),
+      "name: vibebook aggregate book\non: { push: { branches-ignore: [main] } }\njobs: { aggregate: { runs-on: ubuntu-latest, steps: [{ run: 'echo hi' }] } }\n",
+    );
+    await sg.add(".");
+    await sg.commit("seed main with aggregate workflow");
+    await sg.addRemote("origin", bareRemote);
+    await sg.push("origin", "main");
+
+    // Now set up the user's workRepo cloning from bare and switching to a
+    // fresh device branch (no .github/ in the working tree yet).
+    workRepo = mkdtempSync(join(tmpdir(), "vb-wfsync-clone-"));
+    await simpleGit().clone(bareRemote, workRepo);
+    const wg = simpleGit(workRepo);
+    await wg.addConfig("user.email", "u@u");
+    await wg.addConfig("user.name", "u");
+    // Branch off main and DELETE .github/ to simulate the "fresh device
+    // after wipe+reinit" state where the device branch starts empty.
+    await wg.checkoutLocalBranch("mini-fresh");
+    await wg.raw(["rm", "-rf", ".github"]);
+    await wg.commit("wipe", ["--allow-empty"]);
+
+    claudeRoot = mkdtempSync(join(tmpdir(), "vb-wfsync-claude-"));
+    const proj = join(claudeRoot, "-Users-me-edge-memvc");
+    mkdirSync(proj, { recursive: true });
+    cpSync(join(fixturesDir, "claude", "claude-session.jsonl"), join(proj, "abc12345.jsonl"));
+    vscodeRoot = mkdtempSync(join(tmpdir(), "vb-wfsync-vscode-"));
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("first push of a fresh device branch picks up .github/workflows/vibebook-aggregate.yml from main, commits and pushes it", async () => {
+    await runSync({
+      repoPath: workRepo, claudeRoot, vscodeRoot,
+      encrypt: false,
+      push: true,
+      repoUrl: bareRemote,
+      deviceBranch: "mini-fresh",
+    });
+
+    const { simpleGit } = await import("simple-git");
+    // The file should now exist on the LOCAL device branch's working tree.
+    expect(existsSync(join(workRepo, ".github/workflows/vibebook-aggregate.yml"))).toBe(true);
+
+    // …and the bare remote's mini-fresh branch should also have it (= CI will now trigger on future pushes).
+    const tip = await simpleGit(bareRemote).raw(["ls-tree", "-r", "mini-fresh"]);
+    expect(tip).toContain(".github/workflows/vibebook-aggregate.yml");
+  }, 30_000);
+
+  it("no-op when device branch already has an identical workflow file", async () => {
+    const { writeFileSync, readFileSync } = await import("node:fs");
+    const { simpleGit } = await import("simple-git");
+    // Plant the same workflow content locally first
+    mkdirSync(join(workRepo, ".github/workflows"), { recursive: true });
+    const wfContent = "name: vibebook aggregate book\non: { push: { branches-ignore: [main] } }\njobs: { aggregate: { runs-on: ubuntu-latest, steps: [{ run: 'echo hi' }] } }\n";
+    writeFileSync(join(workRepo, ".github/workflows/vibebook-aggregate.yml"), wfContent);
+    await simpleGit(workRepo).add(".github/workflows/vibebook-aggregate.yml");
+    await simpleGit(workRepo).commit("pre-seed workflow on device branch");
+
+    await runSync({
+      repoPath: workRepo, claudeRoot, vscodeRoot,
+      encrypt: false,
+      push: true,
+      repoUrl: bareRemote,
+      deviceBranch: "mini-fresh",
+    });
+
+    // File still present (untouched)
+    expect(readFileSync(join(workRepo, ".github/workflows/vibebook-aggregate.yml"), "utf8")).toBe(wfContent);
+  }, 30_000);
+
+  it("silently skips when main has no workflow file (fresh-remote, pre-`workflow init` case)", async () => {
+    // Reset bare to one with no .github/
+    const { writeFileSync } = await import("node:fs");
+    const { simpleGit } = await import("simple-git");
+    const freshBare = mkdtempSync(join(tmpdir(), "vb-wfsync-bare2-"));
+    await simpleGit().cwd(freshBare).raw(["init", "--bare", "-b", "main"]);
+    const seed = mkdtempSync(join(tmpdir(), "vb-wfsync-seed2-"));
+    const sg = simpleGit(seed);
+    await sg.raw(["init", "-b", "main"]);
+    await sg.addConfig("user.email", "t@t");
+    await sg.addConfig("user.name", "t");
+    writeFileSync(join(seed, "README.md"), "no workflow yet\n");
+    await sg.add(".");
+    await sg.commit("seed no-workflow main");
+    await sg.addRemote("origin", freshBare);
+    await sg.push("origin", "main");
+
+    const freshClone = mkdtempSync(join(tmpdir(), "vb-wfsync-clone2-"));
+    await simpleGit().clone(freshBare, freshClone);
+    const wg = simpleGit(freshClone);
+    await wg.addConfig("user.email", "u@u");
+    await wg.addConfig("user.name", "u");
+    await wg.checkoutLocalBranch("mini-fresh2");
+
+    await runSync({
+      repoPath: freshClone, claudeRoot, vscodeRoot,
+      encrypt: false,
+      push: true,
+      repoUrl: freshBare,
+      deviceBranch: "mini-fresh2",
+    });
+
+    // Workflow file should NOT have been created — main has none to copy.
+    expect(existsSync(join(freshClone, ".github/workflows/vibebook-aggregate.yml"))).toBe(false);
+  }, 30_000);
 });

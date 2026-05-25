@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import chalk from "chalk";
 import { ClaudeCodeAdapter } from "../sources/claude-code.js";
@@ -177,6 +177,16 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     if (dataDirMig.migrated && dataDirMig.viaGit) {
       for (const p of migratedDataDirPaths(opts.repoPath)) all.push(p);
     }
+    // P1 (0.8.1): make sure this device branch carries a copy of
+    // `.github/workflows/vibebook-aggregate.yml`. GitHub Actions on `push`
+    // events reads the workflow definition from THE PUSHED BRANCH (not
+    // from the default branch), so without this the CI never triggers on
+    // freshly-init'd devices and main never gets aggregated. The file
+    // itself is identical to what `vibebook workflow init` planted on
+    // main; we just clone-in the latest copy on every sync so device
+    // branches stay in sync with workflow updates too.
+    const workflowAdded = await ensureWorkflowFileFromMain(opts.repoPath, git);
+    if (workflowAdded) all.push(".github/workflows/vibebook-aggregate.yml");
     console.log(chalk.gray(`Staging ${all.length} paths and committing...`));
     const commitMsg = newCount > 0
       ? `vibebook sync: +${newCount} sessions${dataDirMig.migrated ? " (+ rename .memvc/→.vibebook/)" : ""}`
@@ -227,6 +237,48 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
   }
 
   return { newCount, skippedCount, pathsWritten, committed, pushed };
+}
+
+/**
+ * Ensure `.github/workflows/vibebook-aggregate.yml` exists in the device
+ * branch's working tree. GitHub Actions on `push` events reads the
+ * workflow file from the pushed branch — not from the default branch —
+ * so a device branch without this file silently never triggers CI. The
+ * "fresh init never aggregated" symptom on macmini 2026-05-25 was this
+ * exact path: `vibebook workflow init` (0.5.3+) only writes the file to
+ * main, but the new device branch had no `.github/` directory at all.
+ *
+ * Strategy: best-effort fetch + restore-from-main on every sync. If main
+ * doesn't have the file yet (first push on a brand-new remote), silently
+ * skip — the user just needs to run `vibebook workflow init` once.
+ *
+ * Returns true when the working tree file was created OR refreshed (the
+ * caller should stage it). Returns false when nothing to do or main has
+ * no workflow yet.
+ */
+async function ensureWorkflowFileFromMain(
+  repoPath: string,
+  git: import("simple-git").SimpleGit,
+): Promise<boolean> {
+  const wfRel = ".github/workflows/vibebook-aggregate.yml";
+  const wfAbs = join(repoPath, wfRel);
+  let mainContent: string;
+  try {
+    await git.fetch("origin", "main");
+    mainContent = await git.show([`origin/main:${wfRel}`]);
+  } catch (err) {
+    if (process.env.VIBEBOOK_DEBUG) {
+      console.log(chalk.gray(`  (workflow file: skip — ${(err as Error).message?.split("\n")[0]})`));
+    }
+    return false;
+  }
+  if (existsSync(wfAbs)) {
+    const localContent = readFileSync(wfAbs, "utf8");
+    if (localContent === mainContent) return false; // already up to date
+  }
+  mkdirSync(join(repoPath, ".github", "workflows"), { recursive: true });
+  writeFileSync(wfAbs, mainContent);
+  return true;
 }
 
 /**
