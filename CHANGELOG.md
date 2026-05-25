@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.8.1 — 2026-05-25
+
+### Bug fix
+
+- **Device branches now inherit `.github/workflows/vibebook-aggregate.yml`
+  from main on every sync.** GitHub Actions on `push` events reads the
+  workflow definition from THE PUSHED BRANCH (not from the default
+  branch), so a device branch without `.github/workflows/` silently
+  never triggers CI — and the user sees a fresh `vibebook sync` push
+  with no aggregate run.
+
+  Symptom: today's Mac-mini-2 push (sha `4b807114`, "+67 sessions",
+  2026-05-25 08:41) triggered no CI run because Mac-mini-2's tree on
+  remote had no `.github/`. Stale aggregate state on main: 4 days
+  behind reality, main hadn't received an aggregate commit since
+  2026-05-21.
+
+  Root cause: `vibebook workflow init` (0.5.3+) writes the yml to
+  main correctly, but never seeds new device branches with it. Fresh
+  device branches were the dead zone.
+
+  Fix: in `src/commands/sync.ts`, before staging, fetch `origin/main`
+  and `git show origin/main:.github/workflows/vibebook-aggregate.yml`
+  into the device branch's working tree. Stage it alongside
+  raw_sessions/ + index. Idempotent: skipped when content already
+  matches; silently no-ops when main has no workflow yet (pre-`workflow
+  init` brand-new remote).
+
+### Tests
+
+- 3 new sync cases covering: fresh-branch inheritance, no-op when
+  identical, silent skip when main has no workflow.
+- 240/240 vitest passing (was 237 in 0.8.0; +3 new).
+
 ## 0.8.0 — 2026-05-23
 
 P7 from the roadmap (locked Option A on 2026-05-22): **cross-device
