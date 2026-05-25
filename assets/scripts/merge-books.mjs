@@ -123,15 +123,17 @@ function main() {
   for (const { ref, device } of branches) {
     const bookIndex = loadBookIndexFromBranch(ref);
     if (!bookIndex) {
-      console.log(`  skip ${device}: no v2 .vibebook/index.book.json`);
+      console.log(`  ${device}: no v2 .vibebook/index.book.json (book aggregation skipped for this device; raw_sessions still aggregated below)`);
       continue;
     }
     perDevice.push({ ref, device, bookIndex });
   }
-  if (perDevice.length === 0) {
-    console.log("no device branch had a v2 BookIndex — nothing to aggregate");
-    return;
-  }
+  // 0.8.3: don't early-return when no device has a BookIndex — the
+  // raw_sessions aggregation pass below works off `.vibebook/index.json`
+  // (the spool index, separate from index.book.json) and is useful
+  // even before any device has run /vibebook digest. Pre-0.8.3 this
+  // gated raw_sessions on books existing, so cross-device resume was
+  // silently disabled until someone ran /vibebook.
 
   // -------- chronicles: dedup by threadId, latest updatedAt wins --------
   const chronicleByThread = new Map(); // threadId -> { ref, device, entry }
@@ -202,7 +204,10 @@ function main() {
   // and we write ciphertext to main. Decryption happens on each device's
   // local checkout via the smudge filter wired in `vibebook crypt init`.
   const rawByKey = new Map(); // "tool:sessionId" -> { ref, device, entry }
-  for (const { ref, device } of perDevice) {
+  // 0.8.3: iterate `branches` (ALL device branches) instead of `perDevice`
+  // (only those with v2 BookIndex). raw_sessions doesn't require book/ to
+  // exist — both indices are independent.
+  for (const { ref, device } of branches) {
     const spoolIdx = loadSpoolIndexFromBranch(ref);
     if (!spoolIdx) {
       console.log(`  ${device}: no v1 .vibebook/index.json — no raw_sessions to aggregate`);
@@ -229,7 +234,7 @@ function main() {
     keptRawPaths.push(entry.relativePath);
     aggregatedEntries[k] = { ...entry, originDevice: device };
   }
-  console.log(`raw_sessions: kept ${keptRawPaths.length} unique sessions from ${perDevice.length} device(s)`);
+  console.log(`raw_sessions: kept ${keptRawPaths.length} unique sessions from ${branches.length} device branch(es)`);
 
   // Write the union index ONLY when at least one device had spool data.
   // Skipping the file on book-only repos (no `vibebook sync` ever run yet)
@@ -246,31 +251,42 @@ function main() {
   pruneRawSessions(keptRawPaths);
 
   // -------- regen catalog --------
-  const catalogPaths = regenCatalog({
-    chronicles: [...chronicleByThread.values()].map((x) => x.entry),
-    topics: [...perDevice.flatMap(({ device, bookIndex }) =>
-      Object.values(bookIndex.topics).map((t) => ({ ...t, device }))
-    )],
-    cards: [...cardByKey.values()].map((x) => x.entry),
-    devices: perDevice.map((x) => x.device),
-  });
-  console.log(`catalog: wrote ${catalogPaths.length} files`);
+  // Skip when no books were aggregated — otherwise an empty book/index.md
+  // gets written and the "no v2 BookIndex anywhere" test fails on a stray
+  // book/ directory.
+  let catalogPaths = [];
+  if (perDevice.length > 0) {
+    catalogPaths = regenCatalog({
+      chronicles: [...chronicleByThread.values()].map((x) => x.entry),
+      topics: [...perDevice.flatMap(({ device, bookIndex }) =>
+        Object.values(bookIndex.topics).map((t) => ({ ...t, device }))
+      )],
+      cards: [...cardByKey.values()].map((x) => x.entry),
+      devices: perDevice.map((x) => x.device),
+    });
+    console.log(`catalog: wrote ${catalogPaths.length} files`);
+  }
 
   // -------- commit --------
-  // Build add list dynamically: raw_sessions/ + .vibebook/index.aggregated.json
-  // only exist when at least one device had a v1 spool index. Skipping the
-  // dynamic check would fail `git add` on book-only repos (= fresh installs
-  // before anyone has run vibebook sync).
-  const addPaths = ["book/"];
+  // Build add list dynamically: book/, raw_sessions/, and
+  // .vibebook/index.aggregated.json each only exist when at least one
+  // device contributed to the corresponding aggregation. `git add` on a
+  // non-existent path is a hard error, so we gate per-path.
+  const addPaths = [];
+  if (existsSync(join(REPO_ROOT, "book"))) addPaths.push("book/");
   if (existsSync(join(REPO_ROOT, "raw_sessions"))) addPaths.push("raw_sessions/");
   if (existsSync(join(REPO_ROOT, AGGREGATED_INDEX_PATH))) addPaths.push(AGGREGATED_INDEX_PATH);
+  if (addPaths.length === 0) {
+    console.log("nothing to aggregate (no books, no raw_sessions)");
+    return;
+  }
   sh("git", ["add", ...addPaths]);
   const status = sh("git", ["status", "--porcelain"]);
   if (!status.trim()) {
     console.log("no changes to commit");
     return;
   }
-  const msg = `vibebook aggregate: ${chronicleByThread.size} chronicles, ${keptTopicPaths.length} topic-versions, ${cardByKey.size} cards, ${keptRawPaths.length} raw_sessions across ${perDevice.length} device(s)`;
+  const msg = `vibebook aggregate: ${chronicleByThread.size} chronicles, ${keptTopicPaths.length} topic-versions, ${cardByKey.size} cards, ${keptRawPaths.length} raw_sessions across ${branches.length} device(s)`;
   sh("git", ["commit", "-m", JSON.stringify(msg)]);
   console.log(`committed: ${msg}`);
 }

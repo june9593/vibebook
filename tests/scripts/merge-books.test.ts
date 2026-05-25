@@ -546,4 +546,28 @@ describe("merge-books.mjs (v2 schema)", () => {
     // chronicle still aggregated normally
     expect(existsSync(join(workspace, "book/p/chronicle/2026-04-20__t1__t1.md"))).toBe(true);
   }, T);
+
+  it("aggregates raw_sessions even when NO device has a v2 BookIndex (0.8.3 fix)", async () => {
+    // Devices have only raw_sessions (no /vibebook digest has been run
+    // anywhere yet). Pre-0.8.3 the script early-returned on empty
+    // perDevice and raw_sessions aggregation was silently skipped.
+    await setupBranch({
+      device: "Mac.lan",
+      rawSessions: [{
+        sessionId: "sess-only-raw", tool: "claude", project: "edge-src",
+        startedAt: "2026-04-20T10:00:00.000Z", sourceMtimeMs: 1_000_000,
+        body: "# md from a device that never ran /vibebook digest\n",
+      }],
+    });
+
+    await runMerge();
+
+    // raw_sessions IS aggregated even without books
+    expect(existsSync(join(workspace, "raw_sessions/claude/edge-src/2026-04-20/seed__sess-onl.md"))).toBe(true);
+    const agg = JSON.parse(readFileSync(join(workspace, ".vibebook/index.aggregated.json"), "utf8"));
+    expect(Object.keys(agg.entries)).toEqual(["claude:sess-only-raw"]);
+    // book/index.md may exist (the test helper plants an empty BookIndex
+    // unconditionally) but no chronicle files were aggregated
+    expect(existsSync(join(workspace, "book/edge-src"))).toBe(false);
+  }, T);
 });

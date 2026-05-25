@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.8.3 — 2026-05-25
+
+### Bug fix — raw_sessions aggregation now runs even without books
+
+`assets/scripts/merge-books.mjs` early-returned when no device branch
+had `.vibebook/index.book.json`. The P7 raw_sessions aggregation
+pass (0.8.0) sat below that gate, so on a setup where users have
+synced raw_sessions but no one has run `/vibebook` digest yet,
+**`raw_sessions/` + `.vibebook/index.aggregated.json` were never
+written to main**.
+
+Symptom (caught 2026-05-25 after Yue's two-device fresh sync): CI ran
+4 times all `success`, but main's tree only had `.github/`, `scripts/`,
+and `.gitignore`. Logs showed `no device branch had a v2 BookIndex —
+nothing to aggregate`. The cross-device resume overlay had nothing
+to mirror because main had nothing to mirror from.
+
+Fix: book and raw_sessions aggregation are now fully independent.
+The book early-return was removed; the raw_sessions loop iterates
+ALL device branches (was `perDevice` which required v2 BookIndex,
+now `branches`); the commit phase gates each path's `git add` on
+existence.
+
+Behavior on each combination:
+
+| Devices have books? | Devices have raw_sessions? | Result |
+|---|---|---|
+| yes | yes | both aggregated (unchanged) |
+| no  | yes | raw_sessions only aggregated (**fix**) |
+| yes | no  | books only (unchanged) |
+| no  | no  | `nothing to aggregate` exits cleanly |
+
+### Tests
+
+- 1 new merge-books case: "raw_sessions aggregated when NO device has v2 BookIndex"
+- 246/246 vitest passing (was 245 in 0.8.2; +1 new).
+
 ## 0.8.2 — 2026-05-25
 
 ### Encryption is no longer the default
