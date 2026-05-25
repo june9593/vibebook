@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.8.4 — 2026-05-25
+
+### `vibebook doctor` — multi-install detection
+
+A user can end up with `vibebook` installed simultaneously to multiple
+npm prefixes (Homebrew's `/opt/homebrew/lib/node_modules/` AND nvm's
+`~/.nvm/versions/node/<v>/lib/node_modules/`). `vibebook upgrade` lands
+in whichever `npm` runs first, but the shell resolves `vibebook` by
+PATH order — so users routinely upgrade one install while continuing
+to run the other. Bit Yue twice on 2026-05-25 alone.
+
+`doctor` now walks every `PATH` directory, lists every `vibebook`
+binary found with its `--version`, and marks the first (= what the
+shell picks) with `→`. When ≥2 distinct installs exist, it warns
+and prints a one-line uninstall fix targeted at the losing prefixes.
+
+### `vibebook sync` — orphan index entry prune
+
+Pre-0.8.4, deleting a session from `~/.claude/projects/` (or its
+Copilot equivalent) left its `.vibebook/index.json` entry in place
+forever. CI aggregate (0.8.0+) then logged `missing despite spool
+index; skipping` for each stale entry, eating log noise and never
+cleaning up its aggregated mirror on main.
+
+Fix: after the discover/extract loop, walk `idx.entries` and remove
+any entry whose `sourcePath` no longer exists AND whose
+`relativePath` (the rendered md) is also gone. Keeps cross-device
+aggregated entries safe — those have no local sourcePath but their md
+exists in the aggregated worktree, so the second condition protects
+them.
+
+### `vibebook sync` — refresh aggregated worktree even when nothing was pushed
+
+Pre-0.8.4, the cross-device overlay refresh was gated on
+`pushed && opts.repoUrl`. If THIS device's sync had nothing new to
+push, the overlay never refreshed — so a CI aggregate that ran AFTER
+this device's last push wasn't visible to `list-sessions` / `resume`
+until the next push happened.
+
+Caught on 2026-05-25 dogfood: yueliuMacBook's `~/.vibebook/aggregated/`
+stayed stuck on pre-CI state for hours; manual `git pull` was needed
+inside the worktree to see today's aggregate.
+
+Fix: ungate the refresh to just `opts.repoUrl`. The function is
+already best-effort (try/catch wrapped) so the worst case on a fresh
+remote with no main yet is a silent debug log.
+
+### Tests
+
+- 2 new sync cases: orphan-prunes-when-both-gone, retain-when-md-still-exists
+- 248/248 vitest passing (was 246 in 0.8.3; +2 new). No new doctor test — that one runs against real PATH and is better validated by Yue's eyeball.
+
 ## 0.8.3 — 2026-05-25
 
 ### Bug fix — raw_sessions aggregation now runs even without books

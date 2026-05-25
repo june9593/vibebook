@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, type Dirent } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync, type Dirent } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -48,6 +48,33 @@ export async function doctorCmd(): Promise<void> {
       name: "CLI on PATH", status: "fail",
       detail: "vibebook --version did not respond",
       fix: "npm install -g vibebook@latest",
+    });
+  }
+
+  // 1b. Multi-install footgun (0.8.4): a user can have `vibebook` installed
+  // to both Homebrew's npm prefix AND nvm's prefix at the same time. `vibebook
+  // upgrade` lands in whichever npm runs first, but shell `vibebook` resolves
+  // by PATH order — so users routinely upgrade one install while continuing
+  // to run the other. Tell them which one wins and which to nuke.
+  const allInstalls = listAllPathInstalls();
+  if (allInstalls.length > 1) {
+    const lines = allInstalls
+      .map((i, idx) => `    ${idx === 0 ? "→" : " "} ${i.path} (${i.version ?? "?"})`)
+      .join("\n");
+    const losers = allInstalls.slice(1);
+    const fixCmd = losers
+      .map((i) => {
+        // Infer the npm prefix from the install path and recommend that
+        // npm to uninstall, so the user doesn't accidentally uninstall
+        // the one they wanted to keep.
+        const prefix = i.path.replace(/\/bin\/vibebook$/, "");
+        return `${prefix}/bin/npm uninstall -g vibebook`;
+      })
+      .join(" && ") + " && hash -r";
+    checks.push({
+      name: "PATH conflicts", status: "warn",
+      detail: `${allInstalls.length} vibebook installs on PATH (shell uses the → marked one):\n${lines}`,
+      fix: fixCmd,
     });
   }
 
@@ -256,6 +283,39 @@ function readPathCliVersion(): string | null {
     if (r.status === 0) return r.stdout.trim();
   }
   return null;
+}
+
+/**
+ * Walk every PATH directory and return each `vibebook` binary found plus its
+ * --version output. Multi-install footgun: a user can have npm installed
+ * to both Homebrew's npm prefix (/opt/homebrew/lib/node_modules/) AND nvm's
+ * (~/.nvm/versions/node/<v>/lib/node_modules/) at the same time. `vibebook
+ * upgrade` installs to whichever npm is on PATH first, but the shell
+ * resolves `vibebook` by PATH order — so users routinely upgrade one
+ * install while continuing to run the other. Bit Yue twice on 2026-05-25.
+ */
+function listAllPathInstalls(): { path: string; version: string | null }[] {
+  const pathDirs = (process.env.PATH ?? "").split(":").filter(Boolean);
+  const seen = new Set<string>();
+  const out: { path: string; version: string | null }[] = [];
+  for (const dir of pathDirs) {
+    const abs = join(dir, "vibebook");
+    if (seen.has(abs) || !existsSync(abs)) continue;
+    seen.add(abs);
+    // Resolve symlink target so two PATH entries pointing at the same
+    // physical binary collapse into one row.
+    let real = abs;
+    try {
+      real = realpathSync(abs);
+    } catch { /* fall through */ }
+    if (seen.has(real)) continue;
+    seen.add(real);
+    const r = spawnSync(abs, ["--version"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 3000,
+    });
+    out.push({ path: abs, version: r.status === 0 ? r.stdout.trim() : null });
+  }
+  return out;
 }
 
 function readNpmLatestVersion(): string | null {
