@@ -42,6 +42,7 @@ const REPO_ROOT = process.cwd();
 const BOOK_INDEX_PATH = ".vibebook/index.book.json";
 const SPOOL_INDEX_PATH = ".vibebook/index.json";
 const AGGREGATED_INDEX_PATH = ".vibebook/index.aggregated.json";
+const MEMORY_INDEX_PATH = ".vibebook/index.memory.json";
 
 function sh(cmd, args) {
   return execSync([cmd, ...args].join(" "), { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -98,6 +99,20 @@ function loadSpoolIndexFromBranch(ref) {
     const parsed = JSON.parse(content);
     if (parsed.version !== 1 || !parsed.entries) return null;
     return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Read the device-side memory index (.vibebook/index.memory.json).
+ *  Added in 0.9.0 to union typed memory entries across devices. */
+function loadMemoryIndexFromBranch(ref) {
+  const content = readFileFromBranch(ref, MEMORY_INDEX_PATH);
+  if (content === null) return null;
+  try {
+    const idx = JSON.parse(content);
+    if (!idx || idx.version !== 1 || !idx.entries) return null;
+    return idx;
   } catch {
     return null;
   }
@@ -246,6 +261,33 @@ function main() {
     );
   }
 
+  // -------- memory: union by id, latest updatedAt wins (0.9) --------
+  const memByKey = new Map(); // id -> { ref, device, entry }
+  for (const { ref, device } of branches) {
+    const memIdx = loadMemoryIndexFromBranch(ref);
+    if (!memIdx) continue;
+    for (const e of Object.values(memIdx.entries)) {
+      if (!e || !e.id || !e.path) continue;
+      const existing = memByKey.get(e.id);
+      if (!existing || (e.updatedAt ?? "") > (existing.entry.updatedAt ?? "")) {
+        memByKey.set(e.id, { ref, device, entry: e });
+      }
+    }
+  }
+  const keptMemoryPaths = [];
+  const aggregatedMemory = {};
+  for (const [id, { ref, device, entry }] of memByKey.entries()) {
+    const body = readFileFromBranch(ref, entry.path);
+    if (body === null) continue;
+    writeRel(entry.path, body);
+    keptMemoryPaths.push(entry.path);
+    aggregatedMemory[id] = { ...entry, originDevice: device };
+  }
+  if (keptMemoryPaths.length > 0) {
+    writeRel(MEMORY_INDEX_PATH, JSON.stringify({ version: 1, entries: aggregatedMemory }, null, 2) + "\n");
+  }
+  console.log(`memory: kept ${keptMemoryPaths.length} entries from ${branches.length} device branch(es)`);
+
   // -------- prune --------
   pruneStale(keptChroniclePaths, keptTopicPaths, keptCardPaths, perDevice);
   pruneRawSessions(keptRawPaths);
@@ -276,6 +318,8 @@ function main() {
   if (existsSync(join(REPO_ROOT, "book"))) addPaths.push("book/");
   if (existsSync(join(REPO_ROOT, "raw_sessions"))) addPaths.push("raw_sessions/");
   if (existsSync(join(REPO_ROOT, AGGREGATED_INDEX_PATH))) addPaths.push(AGGREGATED_INDEX_PATH);
+  if (existsSync(join(REPO_ROOT, "memory"))) addPaths.push("memory/");
+  if (existsSync(join(REPO_ROOT, MEMORY_INDEX_PATH))) addPaths.push(MEMORY_INDEX_PATH);
   if (addPaths.length === 0) {
     console.log("nothing to aggregate (no books, no raw_sessions)");
     return;

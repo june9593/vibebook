@@ -52,6 +52,15 @@ interface RawSessionSeed {
   body: string;
 }
 
+interface MemorySeed {
+  id: string;
+  type: string;
+  project: string | null;
+  updatedAt: string;
+  title: string;
+  body: string;
+}
+
 interface BranchSeed {
   device: string;
   /** project → chronicles[] */
@@ -62,6 +71,8 @@ interface BranchSeed {
   cards?: Record<string, CardSeed[]>;
   /** raw_sessions to plant + register in .vibebook/index.json (P7) */
   rawSessions?: RawSessionSeed[];
+  /** typed memory entries to plant + register in .vibebook/index.memory.json (0.9) */
+  memories?: MemorySeed[];
 }
 
 let bareRemote: string;
@@ -176,6 +187,29 @@ async function setupBranch(seed: BranchSeed): Promise<void> {
       };
     }
     writeFileSync(join(dir, ".vibebook", "index.json"), JSON.stringify(spoolIndex, null, 2));
+  }
+
+  // memories: plant .md files + .vibebook/index.memory.json (0.9)
+  if (seed.memories && seed.memories.length > 0) {
+    const entries: Record<string, unknown> = {};
+    for (const m of seed.memories) {
+      const scope = m.project ?? "_global";
+      const slug = m.id.split("/").pop()!;
+      const rel = `memory/${m.type}/${scope}/${slug}.md`;
+      const mdContent = `---\nid: ${m.id}\ntype: ${m.type}\nupdatedAt: ${m.updatedAt}\ntitle: ${m.title}\n---\n\n${m.body}`;
+      writeFileTo(dir, rel, mdContent);
+      entries[m.id] = {
+        id: m.id,
+        type: m.type,
+        project: m.project,
+        updatedAt: m.updatedAt,
+        title: m.title,
+        path: rel,
+        status: "active",
+        originDevice: null,
+      };
+    }
+    writeFileSync(join(dir, ".vibebook", "index.memory.json"), JSON.stringify({ version: 1, entries }, null, 2));
   }
 
   await g.add(".");
@@ -569,5 +603,39 @@ describe("merge-books.mjs (v2 schema)", () => {
     // book/index.md may exist (the test helper plants an empty BookIndex
     // unconditionally) but no chronicle files were aggregated
     expect(existsSync(join(workspace, "book/edge-src"))).toBe(false);
+  }, T);
+
+  it("aggregates memory/ + index.memory.json across devices, union by id, latest wins (0.9 memory)", async () => {
+    await setupBranch({
+      device: "Mac.lan",
+      memories: [
+        { id: "semantic/edge-src/a", type: "semantic", project: "edge-src",
+          updatedAt: "2026-06-01", body: "older", title: "fact A" },
+        { id: "core/_global/rule", type: "core", project: null,
+          updatedAt: "2026-06-01", body: "never publish", title: "rule" },
+      ],
+    });
+    await setupBranch({
+      device: "Mac-mini",
+      memories: [
+        { id: "semantic/edge-src/a", type: "semantic", project: "edge-src",
+          updatedAt: "2026-06-09", body: "NEWER wins", title: "fact A" },
+        { id: "procedural/edge-src/b", type: "procedural", project: "edge-src",
+          updatedAt: "2026-06-09", body: "how-to", title: "playbook B" },
+      ],
+    });
+
+    await runMerge();
+
+    const aMd = readFileSync(join(workspace, "memory/semantic/edge-src/a.md"), "utf8");
+    expect(aMd).toContain("NEWER wins");
+    expect(existsSync(join(workspace, "memory/core/_global/rule.md"))).toBe(true);
+    expect(existsSync(join(workspace, "memory/procedural/edge-src/b.md"))).toBe(true);
+
+    const idx = JSON.parse(readFileSync(join(workspace, ".vibebook/index.memory.json"), "utf8"));
+    expect(Object.keys(idx.entries).sort()).toEqual([
+      "core/_global/rule", "procedural/edge-src/b", "semantic/edge-src/a",
+    ]);
+    expect(idx.entries["semantic/edge-src/a"].originDevice).toBe("Mac-mini");
   }, T);
 });
