@@ -3,6 +3,7 @@ import { join } from "node:path";
 import chalk from "chalk";
 import { ClaudeCodeAdapter } from "../sources/claude-code.js";
 import { VSCodeCopilotAdapter } from "../sources/vscode-copilot.js";
+import { CodexAdapter } from "../sources/codex.js";
 import type { SourceAdapter } from "../sources/base.js";
 import { loadIndex, saveIndex, hasUnchanged, upsertEntry } from "../index-store.js";
 import type { IndexEntry } from "../types.js";
@@ -31,6 +32,7 @@ export interface SyncOptions {
   repoPath: string;
   claudeRoot?: string;
   vscodeRoot?: string;
+  codexRoot?: string;
   /** Whether the configured repo wants encryption. Drives whether we wire
    *  the git filter; never used to encrypt files in-process. */
   encrypt: boolean;
@@ -75,6 +77,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
   const adapters: SourceAdapter[] = [
     new ClaudeCodeAdapter(opts.claudeRoot),
     new VSCodeCopilotAdapter(opts.vscodeRoot),
+    new CodexAdapter(opts.codexRoot),
   ];
 
   const idx = loadIndex(opts.repoPath);
