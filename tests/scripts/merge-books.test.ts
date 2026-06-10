@@ -59,6 +59,8 @@ interface MemorySeed {
   updatedAt: string;
   title: string;
   body: string;
+  /** Override the path stored in index.memory.json (for traversal tests). */
+  path?: string;
 }
 
 interface BranchSeed {
@@ -198,13 +200,15 @@ async function setupBranch(seed: BranchSeed): Promise<void> {
       const rel = `memory/${m.type}/${scope}/${slug}.md`;
       const mdContent = `---\nid: ${m.id}\ntype: ${m.type}\nupdatedAt: ${m.updatedAt}\ntitle: ${m.title}\n---\n\n${m.body}`;
       writeFileTo(dir, rel, mdContent);
+      // Use explicit path override when provided (e.g. for path-traversal tests)
+      const indexedPath = m.path !== undefined ? m.path : rel;
       entries[m.id] = {
         id: m.id,
         type: m.type,
         project: m.project,
         updatedAt: m.updatedAt,
         title: m.title,
-        path: rel,
+        path: indexedPath,
         status: "active",
         originDevice: null,
       };
@@ -637,5 +641,88 @@ describe("merge-books.mjs (v2 schema)", () => {
       "core/_global/rule", "procedural/edge-src/b", "semantic/edge-src/a",
     ]);
     expect(idx.entries["semantic/edge-src/a"].originDevice).toBe("Mac-mini");
+  }, T);
+
+  it("skips memory entries with unsafe paths (path traversal guard)", async () => {
+    await setupBranch({
+      device: "Mac.lan",
+      memories: [
+        // Safe entry — should be aggregated normally
+        { id: "semantic/edge-src/safe", type: "semantic", project: "edge-src",
+          updatedAt: "2026-06-01", body: "safe content", title: "safe entry" },
+        // Malicious entry: path points outside memory/ via ../
+        { id: "evil/traversal/id", type: "semantic", project: null,
+          updatedAt: "2026-06-01", body: "should be ignored", title: "evil",
+          path: "../../evil.md" },
+        // Malicious entry: absolute path
+        { id: "evil/absolute/id", type: "semantic", project: null,
+          updatedAt: "2026-06-01", body: "should be ignored", title: "evil2",
+          path: "/etc/passwd" },
+        // Malicious entry: outside memory/ but relative
+        { id: "evil/github/id", type: "semantic", project: null,
+          updatedAt: "2026-06-01", body: "should be ignored", title: "evil3",
+          path: ".github/workflows/x.yml" },
+      ],
+    });
+
+    await runMerge();
+
+    // Safe entry was written
+    expect(existsSync(join(workspace, "memory/semantic/edge-src/safe.md"))).toBe(true);
+
+    // Traversal attempts were NOT written outside memory/
+    expect(existsSync(join(workspace, "evil.md"))).toBe(false);
+    // Parent-directory traversal: workspace/../evil.md must not exist
+    const parentEvil = join(workspace, "..", "evil.md");
+    expect(existsSync(parentEvil)).toBe(false);
+
+    // The aggregated index must not contain malicious ids
+    const idx = JSON.parse(readFileSync(join(workspace, ".vibebook/index.memory.json"), "utf8"));
+    expect(Object.keys(idx.entries)).not.toContain("evil/traversal/id");
+    expect(Object.keys(idx.entries)).not.toContain("evil/absolute/id");
+    expect(Object.keys(idx.entries)).not.toContain("evil/github/id");
+    // Only safe entry survives
+    expect(Object.keys(idx.entries)).toEqual(["semantic/edge-src/safe"]);
+  }, T);
+
+  it("prunes stale aggregated memory md when entries are removed on all devices", async () => {
+    // Plant a stale memory file directly on main (simulates a prior merge
+    // that included entry y, which has since been removed on all devices).
+    // runMerge clones the remote fresh, so we pre-place it in the workspace
+    // dir after the clone but before the script runs. To do that cleanly,
+    // use a custom runMerge flow: clone, plant stale file, then run script.
+    await setupBranch({
+      device: "Mac.lan",
+      memories: [
+        // Only entry x exists — y was removed
+        { id: "semantic/edge-src/x", type: "semantic", project: "edge-src",
+          updatedAt: "2026-06-01", body: "entry x", title: "X" },
+      ],
+    });
+
+    // Clone workspace + plant the stale y.md before running the script
+    await simpleGit().clone(bareRemote, workspace);
+    const g = simpleGit(workspace);
+    await g.addConfig("user.email", "bot@example.com");
+    await g.addConfig("user.name", "vibebook-bot");
+    await g.checkout("main");
+
+    // Plant the orphan stale file that should be pruned
+    const staleAbs = join(workspace, "memory/semantic/edge-src/y.md");
+    mkdirSync(dirname(staleAbs), { recursive: true });
+    writeFileSync(staleAbs, "# stale entry y — should be pruned\n");
+
+    // Run the script directly (bypass runMerge to reuse the already-cloned workspace)
+    execSync(`node ${SCRIPT_PATH}`, { cwd: workspace, stdio: "pipe", env: process.env });
+
+    // entry x was aggregated
+    expect(existsSync(join(workspace, "memory/semantic/edge-src/x.md"))).toBe(true);
+    // stale entry y.md was pruned
+    expect(existsSync(staleAbs)).toBe(false);
+
+    // Aggregated index reflects current state (only x)
+    const idx = JSON.parse(readFileSync(join(workspace, ".vibebook/index.memory.json"), "utf8"));
+    expect(Object.keys(idx.entries)).toEqual(["semantic/edge-src/x"]);
+    expect(Object.keys(idx.entries)).not.toContain("semantic/edge-src/y");
   }, T);
 });
