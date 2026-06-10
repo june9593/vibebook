@@ -35,13 +35,32 @@
 // The caller (yaml step) takes care of `git push`.
 
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync, readdirSync, statSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, writeFileSync, readdirSync, statSync, rmSync, unlinkSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 
 const REPO_ROOT = process.cwd();
 const BOOK_INDEX_PATH = ".vibebook/index.book.json";
 const SPOOL_INDEX_PATH = ".vibebook/index.json";
 const AGGREGATED_INDEX_PATH = ".vibebook/index.aggregated.json";
+const MEMORY_INDEX_PATH = ".vibebook/index.memory.json";
+
+/**
+ * Guard against path-traversal attacks in memory entry paths.
+ * A device's index.memory.json could (if malicious or corrupted) point
+ * entry.path outside memory/ (e.g. ".github/workflows/foo.yml", "../../x").
+ * Only allow relative paths that start with "memory/" and contain no ".."
+ * segments or absolute-path markers.
+ */
+function isSafeMemoryPath(p) {
+  if (typeof p !== "string" || p.length === 0) return false;
+  if (p.includes("\0")) return false;
+  // must be a relative path under memory/, no traversal
+  const norm = p.split("\\").join("/");
+  if (norm.startsWith("/")) return false;
+  if (!norm.startsWith("memory/")) return false;
+  if (norm.split("/").some((seg) => seg === "..")) return false;
+  return true;
+}
 
 function sh(cmd, args) {
   return execSync([cmd, ...args].join(" "), { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -98,6 +117,20 @@ function loadSpoolIndexFromBranch(ref) {
     const parsed = JSON.parse(content);
     if (parsed.version !== 1 || !parsed.entries) return null;
     return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Read the device-side memory index (.vibebook/index.memory.json).
+ *  Added in 0.8.6 to union typed memory entries across devices. */
+function loadMemoryIndexFromBranch(ref) {
+  const content = readFileFromBranch(ref, MEMORY_INDEX_PATH);
+  if (content === null) return null;
+  try {
+    const idx = JSON.parse(content);
+    if (!idx || idx.version !== 1 || !idx.entries) return null;
+    return idx;
   } catch {
     return null;
   }
@@ -246,6 +279,63 @@ function main() {
     );
   }
 
+  // -------- memory: union by id, latest updatedAt wins (0.8.6) --------
+  const memByKey = new Map(); // id -> { ref, device, entry }
+  let anyMemoryIndexSeen = false;
+  for (const { ref, device } of branches) {
+    const memIdx = loadMemoryIndexFromBranch(ref);
+    if (!memIdx) continue;
+    anyMemoryIndexSeen = true;
+    for (const e of Object.values(memIdx.entries)) {
+      if (!e || !e.id || !e.path) continue;
+      if (!isSafeMemoryPath(e.path)) {
+        console.log(`memory: skipping entry ${e.id} with unsafe path ${JSON.stringify(e.path)}`);
+        continue;
+      }
+      const existing = memByKey.get(e.id);
+      if (!existing || (e.updatedAt ?? "") > (existing.entry.updatedAt ?? "")) {
+        memByKey.set(e.id, { ref, device, entry: e });
+      }
+    }
+  }
+  const keptMemoryPaths = [];
+  const aggregatedMemory = {};
+  for (const [id, { ref, device, entry }] of memByKey.entries()) {
+    const body = readFileFromBranch(ref, entry.path);
+    if (body === null) continue;
+    writeRel(entry.path, body);
+    keptMemoryPaths.push(entry.path);
+    aggregatedMemory[id] = { ...entry, originDevice: device };
+  }
+
+  // prune stale aggregated memory md (entries removed on all devices)
+  const keptSet = new Set(keptMemoryPaths);
+  const memDir = join(REPO_ROOT, "memory");
+  if (existsSync(memDir)) {
+    const stack = [memDir];
+    while (stack.length) {
+      const cur = stack.pop();
+      let ents;
+      try { ents = readdirSync(cur, { withFileTypes: true }); } catch { continue; }
+      for (const d of ents) {
+        const abs = join(cur, d.name);
+        if (d.isDirectory()) { stack.push(abs); continue; }
+        if (!d.name.endsWith(".md")) continue;
+        const rel = relative(REPO_ROOT, abs).split("\\").join("/");
+        // never prune generated primers; only prune indexed memory md
+        if (rel.startsWith("memory/_primer/")) continue;
+        if (!keptSet.has(rel)) { try { unlinkSync(abs); } catch {} }
+      }
+    }
+  }
+
+  // Always rewrite the index when at least one device had a memory index,
+  // so a fully-removed entry set produces an empty index rather than a stale one.
+  if (anyMemoryIndexSeen) {
+    writeRel(MEMORY_INDEX_PATH, JSON.stringify({ version: 1, entries: aggregatedMemory }, null, 2) + "\n");
+  }
+  console.log(`memory: kept ${keptMemoryPaths.length} entries from ${branches.length} device branch(es)`);
+
   // -------- prune --------
   pruneStale(keptChroniclePaths, keptTopicPaths, keptCardPaths, perDevice);
   pruneRawSessions(keptRawPaths);
@@ -276,6 +366,8 @@ function main() {
   if (existsSync(join(REPO_ROOT, "book"))) addPaths.push("book/");
   if (existsSync(join(REPO_ROOT, "raw_sessions"))) addPaths.push("raw_sessions/");
   if (existsSync(join(REPO_ROOT, AGGREGATED_INDEX_PATH))) addPaths.push(AGGREGATED_INDEX_PATH);
+  if (existsSync(join(REPO_ROOT, "memory"))) addPaths.push("memory/");
+  if (existsSync(join(REPO_ROOT, MEMORY_INDEX_PATH))) addPaths.push(MEMORY_INDEX_PATH);
   if (addPaths.length === 0) {
     console.log("nothing to aggregate (no books, no raw_sessions)");
     return;

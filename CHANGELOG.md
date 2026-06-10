@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.8.6 — 2026-06-10
+
+### Cross-device typed memory (vibebook Memory OS v1)
+
+The vibebook **plugin** 0.3.0 introduces a typed-memory layer: durable
+`memory/<type>/<scope>/<slug>.md` files + a `.vibebook/index.memory.json`
+index, so a new session in a project starts already familiar with it. This
+npm release adds the transport + aggregation half so that memory flows
+cross-device just like `raw_sessions/` and `book/`.
+
+**1. `sync` stages `memory/`.** The plugin's `memory-write` writes the
+typed-memory layer into the working tree but doesn't push. `vibebook sync`
+now also stages `memory/` + `.vibebook/index.memory.json` onto the device
+branch (alongside `raw_sessions/`), so the memory reaches the branch CI
+aggregates. `commitAndPush` no-ops when nothing changed, so this is free
+when there's no memory.
+
+**2. `merge-books` aggregates memory across devices.** The CI aggregator
+unions each device branch's `memory/` + `index.memory.json` into `main`:
+**union by `id`, latest `updatedAt` wins**, stamping `originDevice` with the
+winning device. Mirrors the existing `raw_sessions/` aggregation pass —
+tool-agnostic, no schema coupling.
+
 ## 0.8.5 — 2026-05-25
 
 ### `vibebook resume` — size-adaptive prompt construction

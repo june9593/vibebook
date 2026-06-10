@@ -265,6 +265,104 @@ describe("runSync — workflow file inheritance from main (P1, 0.8.1)", () => {
   }, 30_000);
 });
 
+describe("runSync — memory/ staging (0.8.6)", () => {
+  let bareRemote: string;
+  let workRepo: string;
+  let tmpHome: string;
+  let claudeRoot: string;
+  let vscodeRoot: string;
+
+  beforeEach(async () => {
+    const { writeFileSync } = await import("node:fs");
+    const { simpleGit } = await import("simple-git");
+
+    tmpHome = mkdtempSync(join(tmpdir(), "vb-memsync-home-"));
+    vi.stubEnv("HOME", tmpHome);
+
+    bareRemote = mkdtempSync(join(tmpdir(), "vb-memsync-bare-"));
+    await simpleGit().cwd(bareRemote).raw(["init", "--bare", "-b", "main"]);
+
+    // Seed main with a minimal commit so the remote exists and has a main ref.
+    const seed = mkdtempSync(join(tmpdir(), "vb-memsync-seed-"));
+    const sg = simpleGit(seed);
+    await sg.raw(["init", "-b", "main"]);
+    await sg.addConfig("user.email", "t@t");
+    await sg.addConfig("user.name", "t");
+    writeFileSync(join(seed, "README.md"), "seed\n");
+    await sg.add(".");
+    await sg.commit("seed main");
+    await sg.addRemote("origin", bareRemote);
+    await sg.push("origin", "main");
+
+    // Clone and switch to a device branch.
+    workRepo = mkdtempSync(join(tmpdir(), "vb-memsync-clone-"));
+    await simpleGit().clone(bareRemote, workRepo);
+    const wg = simpleGit(workRepo);
+    await wg.addConfig("user.email", "u@u");
+    await wg.addConfig("user.name", "u");
+    await wg.checkoutLocalBranch("memsync-device");
+
+    claudeRoot = mkdtempSync(join(tmpdir(), "vb-memsync-claude-"));
+    const proj = join(claudeRoot, "-Users-me-edge-memvc");
+    mkdirSync(proj, { recursive: true });
+    cpSync(join(fixturesDir, "claude", "claude-session.jsonl"), join(proj, "abc12345.jsonl"));
+    vscodeRoot = mkdtempSync(join(tmpdir(), "vb-memsync-vscode-"));
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("stages and commits memory/ + .vibebook/index.memory.json when memory-write has produced them", async () => {
+    const { writeFileSync } = await import("node:fs");
+    const { simpleGit } = await import("simple-git");
+
+    // Simulate what memory-write produces: a typed-memory file + the memory index.
+    mkdirSync(join(workRepo, "memory", "semantic", "edge-src"), { recursive: true });
+    writeFileSync(
+      join(workRepo, "memory", "semantic", "edge-src", "fact.md"),
+      "---\ntype: semantic\nscope: edge-src\nslug: fact\n---\n# fact\nsome remembered fact\n",
+    );
+    mkdirSync(join(workRepo, ".vibebook"), { recursive: true });
+    writeFileSync(
+      join(workRepo, ".vibebook", "index.memory.json"),
+      JSON.stringify({ version: 1, entries: [{ type: "semantic", scope: "edge-src", slug: "fact", path: "memory/semantic/edge-src/fact.md" }] }),
+    );
+
+    await runSync({
+      repoPath: workRepo, claudeRoot, vscodeRoot,
+      encrypt: false,
+      push: true,
+      repoUrl: bareRemote,
+      deviceBranch: "memsync-device",
+    });
+
+    // Both files should now be tracked on the bare remote's device branch.
+    const tip = await simpleGit(bareRemote).raw(["ls-tree", "-r", "memsync-device"]);
+    expect(tip).toContain("memory/semantic/edge-src/fact.md");
+    expect(tip).toContain(".vibebook/index.memory.json");
+  }, 30_000);
+
+  it("no-ops cleanly when no memory/ directory exists (no empty commit)", async () => {
+    const { simpleGit } = await import("simple-git");
+
+    // No memory/ written — sync should still succeed without error.
+    const result = await runSync({
+      repoPath: workRepo, claudeRoot, vscodeRoot,
+      encrypt: false,
+      push: true,
+      repoUrl: bareRemote,
+      deviceBranch: "memsync-device",
+    });
+
+    expect(result.newCount).toBeGreaterThanOrEqual(1);
+
+    // memory/ should not appear in the committed tree.
+    const tip = await simpleGit(bareRemote).raw(["ls-tree", "-r", "memsync-device"]);
+    expect(tip).not.toContain("memory/");
+  }, 30_000);
+});
+
 describe("runSync — orphan index prune (0.8.4)", () => {
   let repo: string;
   let claudeRoot: string;

@@ -204,6 +204,15 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     // branches stay in sync with workflow updates too.
     const workflowAdded = await ensureWorkflowFileFromMain(opts.repoPath, git);
     if (workflowAdded) all.push(".github/workflows/vibebook-aggregate.yml");
+    // memory/ (typed-memory layer, 0.8.6): the plugin's `memory-write` writes
+    // memory/<type>/... + .vibebook/index.memory.json into the working tree but
+    // doesn't push. Stage them here so they reach the device branch and CI's
+    // merge-books can aggregate memory cross-device. commitAndPush() no-ops if
+    // nothing actually changed.
+    if (existsSync(join(opts.repoPath, "memory"))) all.push("memory");
+    if (existsSync(join(opts.repoPath, ".vibebook", "index.memory.json"))) {
+      all.push(".vibebook/index.memory.json");
+    }
     console.log(chalk.gray(`Staging ${all.length} paths and committing...`));
     const commitMsg = newCount > 0
       ? `vibebook sync: +${newCount} sessions${dataDirMig.migrated ? " (+ rename .memvc/→.vibebook/)" : ""}`
