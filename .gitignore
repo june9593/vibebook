@@ -6,6 +6,8 @@ dist
 .memvc-local
 docs/
 tmp/
+# AGENTS.md is generated locally by Codex (copy of CLAUDE.md); keep it untracked
+AGENTS.md
 
 # OS
 .DS_Store
