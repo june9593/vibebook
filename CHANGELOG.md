@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.1 — 2026-06-10
+
+### `vibebook prune --rescan`
+
+`prune` gains a `--rescan` mode for stale index *entries* (the inverse of the
+default orphan-*file* mode). Re-discovers every source adapter and removes
+index entries whose session is no longer produced — e.g. pre-0.7.1 Copilot
+empty-shell sessions that left a `1970-01-01/untitled__<id>.md` + an index
+entry, or sessions deduped away by newer extractor logic — deleting both the
+index entry and its `.md`.
+
+Safe by design: dry-run by default (lists what it would remove; pass
+`--apply` to act), and a missing/unreadable source is never grounds for
+deletion — only entries whose tool was *successfully* re-scanned are eligible,
+so a temporarily-absent `~/.claude` / `~/.codex` can't wipe valid entries.
+
 ## 0.9.0 — 2026-06-10
 
 ### Codex source adapter (third session source)

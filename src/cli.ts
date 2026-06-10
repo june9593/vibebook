@@ -74,9 +74,10 @@ export async function run(argv: string[]) {
     .command("prune")
     .description("Find raw_sessions/*.md files on disk that are not referenced by .vibebook/index.json (orphans from earlier extractor bugs) and optionally delete them. Dry-run by default.")
     .option("--apply", "actually delete the orphan files (default is dry-run)")
-    .action(async (opts: { apply?: boolean }) => {
+    .option("--rescan", "re-discover sources and remove stale index entries (deduped/empty-shell) + their md")
+    .action(async (opts: { apply?: boolean; rescan?: boolean }) => {
       const { pruneCmd } = await import("./commands/prune.js");
-      await pruneCmd({ apply: opts.apply });
+      await pruneCmd({ apply: opts.apply, rescan: opts.rescan });
     });
   program
     .command("workflow")
