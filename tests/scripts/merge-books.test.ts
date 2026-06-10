@@ -63,6 +63,19 @@ interface MemorySeed {
   path?: string;
 }
 
+interface EntitySeed {
+  id: string;
+  updatedAt: string;
+  title: string;
+  body: string;
+  /** slug determines the filename; defaults to last segment of id */
+  slug?: string;
+  /** project/namespace under memory/entities/; defaults to "_global" */
+  project?: string;
+  /** Override the path stored in index.entity.json (for traversal tests). */
+  path?: string;
+}
+
 interface BranchSeed {
   device: string;
   /** project → chronicles[] */
@@ -75,6 +88,8 @@ interface BranchSeed {
   rawSessions?: RawSessionSeed[];
   /** typed memory entries to plant + register in .vibebook/index.memory.json (0.9) */
   memories?: MemorySeed[];
+  /** entity wiki pages to plant + register in .vibebook/index.entity.json */
+  entities?: EntitySeed[];
 }
 
 let bareRemote: string;
@@ -214,6 +229,27 @@ async function setupBranch(seed: BranchSeed): Promise<void> {
       };
     }
     writeFileSync(join(dir, ".vibebook", "index.memory.json"), JSON.stringify({ version: 1, entries }, null, 2));
+  }
+
+  // entities: plant .md files + .vibebook/index.entity.json
+  if (seed.entities && seed.entities.length > 0) {
+    const entityEntries: Record<string, unknown> = {};
+    for (const e of seed.entities) {
+      const scope = e.project ?? "_global";
+      const slug = e.slug ?? e.id.split("/").pop()!;
+      const rel = `memory/entities/${scope}/${slug}.md`;
+      const mdContent = `---\nid: ${e.id}\nupdatedAt: ${e.updatedAt}\ntitle: ${e.title}\n---\n\n${e.body}`;
+      writeFileTo(dir, rel, mdContent);
+      const indexedPath = e.path !== undefined ? e.path : rel;
+      entityEntries[e.id] = {
+        id: e.id,
+        path: indexedPath,
+        updatedAt: e.updatedAt,
+        title: e.title,
+        originDevice: null,
+      };
+    }
+    writeFileSync(join(dir, ".vibebook", "index.entity.json"), JSON.stringify({ version: 1, entries: entityEntries }, null, 2));
   }
 
   await g.add(".");
@@ -724,5 +760,123 @@ describe("merge-books.mjs (v2 schema)", () => {
     const idx = JSON.parse(readFileSync(join(workspace, ".vibebook/index.memory.json"), "utf8"));
     expect(Object.keys(idx.entries)).toEqual(["semantic/edge-src/x"]);
     expect(Object.keys(idx.entries)).not.toContain("semantic/edge-src/y");
+  }, T);
+
+  it("aggregates memory/entities/ + index.entity.json across devices, union by id, latest wins", async () => {
+    await setupBranch({
+      device: "Mac.lan",
+      entities: [
+        { id: "edge-src/Tab", project: "edge-src", updatedAt: "2026-06-01T10:00:00.000Z",
+          title: "Tab", body: "older body for Tab" },
+        { id: "_global/Chromium", project: "_global", updatedAt: "2026-06-01T10:00:00.000Z",
+          title: "Chromium", body: "browser engine" },
+      ],
+    });
+    await setupBranch({
+      device: "Mac-mini",
+      entities: [
+        // Same id, newer updatedAt — should win
+        { id: "edge-src/Tab", project: "edge-src", updatedAt: "2026-06-09T10:00:00.000Z",
+          title: "Tab", body: "NEWER body for Tab" },
+        // Distinct id — should be merged in
+        { id: "edge-src/WebContents", project: "edge-src", updatedAt: "2026-06-09T11:00:00.000Z",
+          title: "WebContents", body: "web contents entry" },
+      ],
+    });
+
+    await runMerge();
+
+    // Newer body wins for the shared id
+    const tabMd = readFileSync(join(workspace, "memory/entities/edge-src/Tab.md"), "utf8");
+    expect(tabMd).toContain("NEWER body for Tab");
+
+    // Distinct ids from both devices survive
+    expect(existsSync(join(workspace, "memory/entities/_global/Chromium.md"))).toBe(true);
+    expect(existsSync(join(workspace, "memory/entities/edge-src/WebContents.md"))).toBe(true);
+
+    // index.entity.json written with all three entries
+    const idx = JSON.parse(readFileSync(join(workspace, ".vibebook/index.entity.json"), "utf8"));
+    expect(idx.version).toBe(1);
+    expect(Object.keys(idx.entries).sort()).toEqual([
+      "_global/Chromium", "edge-src/Tab", "edge-src/WebContents",
+    ]);
+    // originDevice stamped from the winning branch for the collision
+    expect(idx.entries["edge-src/Tab"].originDevice).toBe("Mac-mini");
+    expect(idx.entries["_global/Chromium"].originDevice).toBe("Mac.lan");
+  }, T);
+
+  it("skips entity entries with unsafe paths (path traversal guard)", async () => {
+    await setupBranch({
+      device: "Mac.lan",
+      entities: [
+        // Safe entry — should be aggregated
+        { id: "edge-src/SafeEntity", project: "edge-src", updatedAt: "2026-06-01T00:00:00.000Z",
+          title: "Safe", body: "safe entity" },
+        // Traversal via ..
+        { id: "evil/traversal", project: "_global", updatedAt: "2026-06-01T00:00:00.000Z",
+          title: "evil", body: "should be skipped", path: "../../evil.md" },
+        // Absolute path
+        { id: "evil/absolute", project: "_global", updatedAt: "2026-06-01T00:00:00.000Z",
+          title: "evil2", body: "should be skipped", path: "/etc/passwd" },
+        // Outside memory/entities/ but still under memory/ (wrong subtree)
+        { id: "evil/wrong-subtree", project: "_global", updatedAt: "2026-06-01T00:00:00.000Z",
+          title: "evil3", body: "should be skipped", path: "memory/core/x.md" },
+      ],
+    });
+
+    await runMerge();
+
+    // Safe entry written
+    expect(existsSync(join(workspace, "memory/entities/edge-src/SafeEntity.md"))).toBe(true);
+
+    // Malicious paths must not have been written
+    expect(existsSync(join(workspace, "evil.md"))).toBe(false);
+    expect(existsSync(join(workspace, "..", "evil.md"))).toBe(false);
+    expect(existsSync(join(workspace, "memory/core/x.md"))).toBe(false);
+
+    // index.entity.json must contain only the safe entry
+    const idx = JSON.parse(readFileSync(join(workspace, ".vibebook/index.entity.json"), "utf8"));
+    expect(Object.keys(idx.entries)).toEqual(["edge-src/SafeEntity"]);
+    expect(Object.keys(idx.entries)).not.toContain("evil/traversal");
+    expect(Object.keys(idx.entries)).not.toContain("evil/absolute");
+    expect(Object.keys(idx.entries)).not.toContain("evil/wrong-subtree");
+  }, T);
+
+  it("memory prune does NOT delete entity files; entity prune only touches memory/entities/", async () => {
+    // Plant both a memory entry and an entity entry from a device branch.
+    // Also pre-plant a stale entity file on main (simulates a prior merge).
+    // After merge: memory prune must leave entity files alone; entity prune
+    // removes the stale entity file but leaves memory files intact.
+    await setupBranch({
+      device: "Mac.lan",
+      memories: [
+        { id: "semantic/edge-src/memEntry", type: "semantic", project: "edge-src",
+          updatedAt: "2026-06-01T00:00:00.000Z", body: "memory body", title: "mem" },
+      ],
+      entities: [
+        { id: "edge-src/LiveEntity", project: "edge-src", updatedAt: "2026-06-01T00:00:00.000Z",
+          title: "LiveEntity", body: "live entity" },
+      ],
+    });
+
+    // Clone and pre-plant a stale entity file that should be pruned
+    await simpleGit().clone(bareRemote, workspace);
+    const g = simpleGit(workspace);
+    await g.addConfig("user.email", "bot@example.com");
+    await g.addConfig("user.name", "vibebook-bot");
+    await g.checkout("main");
+
+    const staleEntityAbs = join(workspace, "memory/entities/edge-src/StaleEntity.md");
+    mkdirSync(dirname(staleEntityAbs), { recursive: true });
+    writeFileSync(staleEntityAbs, "# stale entity — should be pruned\n");
+
+    execSync(`node ${SCRIPT_PATH}`, { cwd: workspace, stdio: "pipe", env: process.env });
+
+    // Memory entry survived
+    expect(existsSync(join(workspace, "memory/semantic/edge-src/memEntry.md"))).toBe(true);
+    // Live entity survived
+    expect(existsSync(join(workspace, "memory/entities/edge-src/LiveEntity.md"))).toBe(true);
+    // Stale entity pruned by entity pass
+    expect(existsSync(staleEntityAbs)).toBe(false);
   }, T);
 });
