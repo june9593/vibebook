@@ -334,11 +334,12 @@ function main() {
   const keptMemoryPaths = [];
   const aggregatedMemory = {};
   for (const [id, { ref, device, entry }] of memByKey.entries()) {
-    const body = readFileFromBranch(ref, entry.path);
+    const relPath = entry.path.split("\\").join("/");
+    const body = readFileFromBranch(ref, relPath);
     if (body === null) continue;
-    writeRel(entry.path, body);
-    keptMemoryPaths.push(entry.path);
-    aggregatedMemory[id] = { ...entry, originDevice: device };
+    writeRel(relPath, body);
+    keptMemoryPaths.push(relPath);
+    aggregatedMemory[id] = { ...entry, path: relPath, originDevice: device };
   }
 
   // prune stale aggregated memory md (entries removed on all devices)
@@ -403,11 +404,12 @@ function main() {
   const keptEntityPaths = [];
   const aggregatedEntities = {};
   for (const [id, { ref, device, entry }] of entityByKey.entries()) {
-    const body = readFileFromBranch(ref, entry.path);
+    const relPath = entry.path.split("\\").join("/");
+    const body = readFileFromBranch(ref, relPath);
     if (body === null) continue;
-    writeRel(entry.path, body);
-    keptEntityPaths.push(entry.path);
-    aggregatedEntities[id] = { ...entry, originDevice: device };
+    writeRel(relPath, body);
+    keptEntityPaths.push(relPath);
+    aggregatedEntities[id] = { ...entry, path: relPath, originDevice: device };
   }
 
   // prune stale entity md (entries removed on all devices)

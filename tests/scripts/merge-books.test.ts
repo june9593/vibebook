@@ -852,6 +852,72 @@ describe("merge-books.mjs (v2 schema)", () => {
     expect(Object.keys(idx.entries)).not.toContain("evil/txt");
   }, T);
 
+  it("entity pass: backslash paths in index are normalized so read/write use forward slashes", async () => {
+    // Reproduces the GitHub Copilot review finding: a device's index.entity.json
+    // stores a Windows-style backslash path. isSafeEntityPath accepts it
+    // (it normalizes internally), but prior to the fix the downstream
+    // readFileFromBranch / writeRel / keptEntityPaths / index all used the
+    // original backslash value, causing a silent drop (git show with backslash
+    // path fails) and a mismatched index entry.
+    //
+    // setupBranch always writes the actual .md file at the forward-slash path;
+    // we override `path` in the entity index to the backslash form.
+    await setupBranch({
+      device: "Win-device",
+      entities: [
+        {
+          id: "edge-src/x",
+          project: "edge-src",
+          updatedAt: "2026-06-09T10:00:00.000Z",
+          title: "X",
+          body: "backslash path entity",
+          // Real file is at memory/entities/edge-src/x.md (forward slashes).
+          // Index entry records the Windows backslash form to trigger the bug.
+          path: "memory\\entities\\edge-src\\x.md",
+        },
+      ],
+    });
+
+    await runMerge();
+
+    // The entity MUST have been aggregated at the normalized forward-slash path.
+    const entityMd = join(workspace, "memory/entities/edge-src/x.md");
+    expect(existsSync(entityMd)).toBe(true);
+    expect(readFileSync(entityMd, "utf8")).toContain("backslash path entity");
+
+    // The written index.entity.json must store the normalized (forward-slash) path.
+    const idx = JSON.parse(readFileSync(join(workspace, ".vibebook/index.entity.json"), "utf8"));
+    expect(idx.entries["edge-src/x"].path).toBe("memory/entities/edge-src/x.md");
+  }, T);
+
+  it("memory pass: backslash paths in index are normalized so read/write use forward slashes", async () => {
+    // Same latent issue for the memory pass.
+    await setupBranch({
+      device: "Win-device",
+      memories: [
+        {
+          id: "semantic/edge-src/y",
+          type: "semantic",
+          project: "edge-src",
+          updatedAt: "2026-06-09T10:00:00.000Z",
+          title: "Y",
+          body: "backslash path memory",
+          // Real file is at memory/semantic/edge-src/y.md; index uses backslashes.
+          path: "memory\\semantic\\edge-src\\y.md",
+        },
+      ],
+    });
+
+    await runMerge();
+
+    const memMd = join(workspace, "memory/semantic/edge-src/y.md");
+    expect(existsSync(memMd)).toBe(true);
+    expect(readFileSync(memMd, "utf8")).toContain("backslash path memory");
+
+    const idx = JSON.parse(readFileSync(join(workspace, ".vibebook/index.memory.json"), "utf8"));
+    expect(idx.entries["semantic/edge-src/y"].path).toBe("memory/semantic/edge-src/y.md");
+  }, T);
+
   it("memory prune does NOT delete entity files; entity prune only touches memory/entities/", async () => {
     // Plant both a memory entry and an entity entry from a device branch.
     // Also pre-plant a stale entity file on main (simulates a prior merge).
