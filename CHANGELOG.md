@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.9.0 — 2026-06-10
+
+### Codex source adapter (third session source)
+
+vibebook now extracts **OpenAI Codex** sessions (Codex CLI + Codex Desktop)
+alongside Claude Code and VS Code Copilot Chat. The codebase was already
+tool-agnostic, so this is purely additive: a new `CodexAdapter`, the `Tool`
+union gains `"codex"`, and `sync` runs it in the adapter sequence.
+
+**What it reads:** `~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl` +
+`~/.codex/archived_sessions/`, with titles from `~/.codex/session_index.jsonl`
+(`thread_name`). Each line is `{timestamp, type, payload}`; only
+`response_item` lines are parsed (user `input_text`, assistant `output_text`,
+`function_call`/`function_call_output` → tool_use/tool_result), `event_msg`
+and encrypted `reasoning` are dropped.
+
+**Filtering + hardening (from real-data dogfood over 73 local sessions):**
+- Skips `codex_exec` automation spawns and `~/Documents/Codex/` desktop
+  scratch sessions (they sync as empty, same as Copilot shells).
+- Strips injected `# AGENTS.md` / `<environment_context>` / `<permissions>`
+  leading blocks and the usual `<command-name>`/`<local-command-stdout>` noise.
+- Rejects command-noise `thread_name`s (Codex auto-names threads from the
+  first message, which is sometimes a CLI wrapper) and derives the title from
+  the first meaningful user message instead.
+- **UUIDv7 shortId fix:** Codex session IDs are UUIDv7 (timestamp-prefixed),
+  so `shortId = id.slice(0,8)` collided for sessions created in the same
+  second and silently overwrote each other's `.md`. shortId now uses the
+  random UUID tail — 54 real sessions → 54 distinct files, 0 collisions.
+
+`vibebook list --tool codex` filters to them; they flow through the same
+resume / list-sessions / merge-books aggregation unchanged.
+
 ## 0.8.6 — 2026-06-10
 
 ### Cross-device typed memory (vibebook Memory OS v1)
