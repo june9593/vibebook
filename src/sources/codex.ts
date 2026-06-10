@@ -171,7 +171,7 @@ export function parseCodexJsonl(
     return {
       tool: "codex",
       sessionId,
-      shortId: sessionId.slice(0, 8),
+      shortId: sessionId.replace(/-/g, "").slice(-8),
       project: projectSlugFromPath(cwd),
       projectRaw: cwd,
       startedAt: startedAt || new Date(0).toISOString(),
@@ -329,7 +329,7 @@ export function parseCodexJsonl(
   const nameSlug = derived.slug;
   const displayName = derived.display;
 
-  const shortId = sessionId.slice(0, 8);
+  const shortId = sessionId.replace(/-/g, "").slice(-8);
   const project = projectSlugFromPath(cwd);
 
   return {
@@ -352,7 +352,7 @@ function emptySession(sourcePath: string, _titleMap: Map<string, string>): Norma
   return {
     tool: "codex",
     sessionId,
-    shortId: sessionId.slice(0, 8),
+    shortId: sessionId.replace(/-/g, "").slice(-8),
     project: "root",
     projectRaw: "",
     startedAt: new Date(0).toISOString(),

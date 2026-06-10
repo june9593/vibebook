@@ -33,13 +33,15 @@ describe("CodexAdapter — discover", () => {
     const adapter = new CodexAdapter(fixturesDir);
     const found = [];
     for await (const d of adapter.discover()) found.push(d);
-    // Should find rollout-sample, rollout-exec, rollout-noindex, rollout-cmdnoise
-    expect(found.length).toBe(4);
+    // Should find rollout-sample, rollout-exec, rollout-noindex, rollout-cmdnoise, rollout-uuidv7-a, rollout-uuidv7-b
+    expect(found.length).toBe(6);
     const paths = found.map((d) => d.sourcePath);
     expect(paths.some((p) => p.includes("rollout-sample"))).toBe(true);
     expect(paths.some((p) => p.includes("rollout-exec"))).toBe(true);
     expect(paths.some((p) => p.includes("rollout-noindex"))).toBe(true);
     expect(paths.some((p) => p.includes("rollout-cmdnoise"))).toBe(true);
+    expect(paths.some((p) => p.includes("rollout-uuidv7-a"))).toBe(true);
+    expect(paths.some((p) => p.includes("rollout-uuidv7-b"))).toBe(true);
   });
 });
 
@@ -57,8 +59,9 @@ describe("CodexAdapter — parseCodexJsonl: rollout-sample", () => {
     expect(session.sessionId).toBe("sess-abc12345-cbf6-41f0-ab88-5cb425caba57");
   });
 
-  it("shortId is first 8 chars of sessionId", () => {
-    expect(session.shortId).toBe("sess-abc");
+  it("shortId is last 8 hex chars of dash-stripped sessionId (UUIDv7 random tail)", () => {
+    // "sess-abc12345-cbf6-41f0-ab88-5cb425caba57".replace(/-/g,"").slice(-8) = "25caba57"
+    expect(session.shortId).toBe("25caba57");
   });
 
   it("project derived from cwd /Users/yueliu/edge/edge-src", () => {
@@ -219,5 +222,44 @@ describe("CodexAdapter — parseCodexJsonl: rollout-cmdnoise (command-noise thre
   it("does not emit a raw command-wrapper string as displayName", () => {
     // Regression guard: displayName must not start with a < tag
     expect(session.displayName.trimStart()).not.toMatch(/^</);
+  });
+});
+
+describe("CodexAdapter — UUIDv7 shortId collision fix", () => {
+  // Two real-world UUIDv7 IDs from the same millisecond — first 8 hex chars of the
+  // timestamp portion are identical ("019e8c77"), but the random tail differs.
+  // Before the fix: both → shortId "019e8c77" → filenames collide, sessions overwrite.
+  // After the fix:  each → last 8 hex of dash-stripped id → distinct shortIds.
+  const titleMap = new Map<string, string>();
+
+  const pathA = join(fixturesDir, "sessions", "2026", "05", "10", "rollout-uuidv7-a.jsonl");
+  const pathB = join(fixturesDir, "sessions", "2026", "05", "10", "rollout-uuidv7-b.jsonl");
+  const contentA = readFileSync(pathA, "utf8");
+  const contentB = readFileSync(pathB, "utf8");
+  const sessionA = parseCodexJsonl(pathA, contentA, titleMap);
+  const sessionB = parseCodexJsonl(pathB, contentB, titleMap);
+
+  it("sessionA shortId is last 8 hex of dash-stripped UUIDv7 (not timestamp prefix)", () => {
+    // "019e8c77-4665-7303-a4ef-1c2f584b8055".replace(/-/g,"").slice(-8) = "584b8055"
+    expect(sessionA.shortId).toBe("584b8055");
+    expect(sessionA.shortId).not.toBe("019e8c77");
+  });
+
+  it("sessionB shortId is last 8 hex of dash-stripped UUIDv7 (not timestamp prefix)", () => {
+    // "019e8c77-5369-7c22-9a8d-00e9288aa62b".replace(/-/g,"").slice(-8) = "288aa62b"
+    expect(sessionB.shortId).toBe("288aa62b");
+    expect(sessionB.shortId).not.toBe("019e8c77");
+  });
+
+  it("two same-second UUIDv7 sessions get DISTINCT shortIds (no collision)", () => {
+    expect(sessionA.shortId).not.toBe(sessionB.shortId);
+  });
+
+  it("distinct shortIds yield distinct rendered filenames", () => {
+    // Simulate the filename pattern: <nameSlug>__<shortId>.md
+    const filenameA = `${sessionA.nameSlug}__${sessionA.shortId}.md`;
+    const filenameB = `${sessionB.nameSlug}__${sessionB.shortId}.md`;
+    // shortIds differ, so even with same slug the filenames differ
+    expect(filenameA).not.toBe(filenameB);
   });
 });
