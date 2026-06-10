@@ -889,4 +889,81 @@ describe("merge-books.mjs (v2 schema)", () => {
     // Stale entity pruned by entity pass
     expect(existsSync(staleEntityAbs)).toBe(false);
   }, T);
+
+  it("entity prune is SKIPPED when no device has an entity index (no-index-no-prune)", async () => {
+    // Reproduces the data-loss bug: main has pre-existing entity pages from
+    // a prior merge, but this run's device branches have NO index.entity.json
+    // (e.g. the device hasn't upgraded yet). Without the guard, keptEntityPaths
+    // would be [] and the prune walk would delete all memory/entities/**/*.md.
+    //
+    // Device branch: books + raw_sessions but NO entities key.
+    await setupBranch({
+      device: "Mac.lan",
+      chronicles: { "edge-src": [{
+        threadId: "t-no-entity", title: "No entity index",
+        updatedAt: "2026-06-01T00:00:00.000Z", body: "# chronicle only\n",
+      }] },
+      // No `entities` field → no .vibebook/index.entity.json on this device
+    });
+
+    // Clone main and pre-plant entity pages that must survive
+    await simpleGit().clone(bareRemote, workspace);
+    const g = simpleGit(workspace);
+    await g.addConfig("user.email", "bot@example.com");
+    await g.addConfig("user.name", "vibebook-bot");
+    await g.checkout("main");
+
+    const prePlantedA = join(workspace, "memory/entities/edge-src/Tab.md");
+    const prePlantedB = join(workspace, "memory/entities/_global/Chromium.md");
+    mkdirSync(dirname(prePlantedA), { recursive: true });
+    mkdirSync(dirname(prePlantedB), { recursive: true });
+    writeFileSync(prePlantedA, "# Tab — pre-existing entity page\n");
+    writeFileSync(prePlantedB, "# Chromium — pre-existing entity page\n");
+
+    // Run the merge (no entity index on any device branch)
+    execSync(`node ${SCRIPT_PATH}`, { cwd: workspace, stdio: "pipe", env: process.env });
+
+    // Pre-planted entity pages must still exist — the prune must NOT have run
+    expect(existsSync(prePlantedA)).toBe(true);
+    expect(readFileSync(prePlantedA, "utf8")).toContain("Tab — pre-existing");
+    expect(existsSync(prePlantedB)).toBe(true);
+    expect(readFileSync(prePlantedB, "utf8")).toContain("Chromium — pre-existing");
+
+    // index.entity.json must NOT have been written (anyEntityIndexSeen is false)
+    expect(existsSync(join(workspace, ".vibebook/index.entity.json"))).toBe(false);
+  }, T);
+
+  it("memory prune is SKIPPED when no device has a memory index (no-index-no-prune)", async () => {
+    // Same latent bug for the memory pass: if no device has index.memory.json,
+    // the prune must not run and must not wipe pre-existing memory/**/*.md
+    // (excluding memory/entities/, which is the entity pass's territory).
+    await setupBranch({
+      device: "Mac.lan",
+      chronicles: { "edge-src": [{
+        threadId: "t-no-memory", title: "No memory index",
+        updatedAt: "2026-06-01T00:00:00.000Z", body: "# chronicle only\n",
+      }] },
+      // No `memories` field → no .vibebook/index.memory.json on this device
+    });
+
+    // Clone main and pre-plant a memory md that must survive
+    await simpleGit().clone(bareRemote, workspace);
+    const g = simpleGit(workspace);
+    await g.addConfig("user.email", "bot@example.com");
+    await g.addConfig("user.name", "vibebook-bot");
+    await g.checkout("main");
+
+    const prePlanted = join(workspace, "memory/semantic/edge-src/oldFact.md");
+    mkdirSync(dirname(prePlanted), { recursive: true });
+    writeFileSync(prePlanted, "# oldFact — pre-existing memory page\n");
+
+    execSync(`node ${SCRIPT_PATH}`, { cwd: workspace, stdio: "pipe", env: process.env });
+
+    // Pre-planted memory page must survive — the prune must NOT have run
+    expect(existsSync(prePlanted)).toBe(true);
+    expect(readFileSync(prePlanted, "utf8")).toContain("oldFact — pre-existing");
+
+    // index.memory.json must NOT have been written (anyMemoryIndexSeen is false)
+    expect(existsSync(join(workspace, ".vibebook/index.memory.json"))).toBe(false);
+  }, T);
 });

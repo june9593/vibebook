@@ -344,24 +344,30 @@ function main() {
   // prune stale aggregated memory md (entries removed on all devices)
   // Scoped to memory/ but skips memory/_primer/ (generated, not indexed)
   // and memory/entities/ (managed by the entity pass below).
-  const keptSet = new Set(keptMemoryPaths);
-  const memDir = join(REPO_ROOT, "memory");
-  if (existsSync(memDir)) {
-    const stack = [memDir];
-    while (stack.length) {
-      const cur = stack.pop();
-      let ents;
-      try { ents = readdirSync(cur, { withFileTypes: true }); } catch { continue; }
-      for (const d of ents) {
-        const abs = join(cur, d.name);
-        if (d.isDirectory()) { stack.push(abs); continue; }
-        if (!d.name.endsWith(".md")) continue;
-        const rel = relative(REPO_ROOT, abs).split("\\").join("/");
-        // never prune generated primers; only prune indexed memory md
-        if (rel.startsWith("memory/_primer/")) continue;
-        // entity files are managed exclusively by the entity pass below
-        if (rel.startsWith("memory/entities/")) continue;
-        if (!keptSet.has(rel)) { try { unlinkSync(abs); } catch {} }
+  // GUARD: only run the prune when at least one device contributed a memory
+  // index this run. If anyMemoryIndexSeen is false we have no authoritative
+  // view of what should exist, so wiping main's memory/ would be data loss
+  // (e.g. a device that hasn't upgraded yet has no index.memory.json).
+  if (anyMemoryIndexSeen) {
+    const keptSet = new Set(keptMemoryPaths);
+    const memDir = join(REPO_ROOT, "memory");
+    if (existsSync(memDir)) {
+      const stack = [memDir];
+      while (stack.length) {
+        const cur = stack.pop();
+        let ents;
+        try { ents = readdirSync(cur, { withFileTypes: true }); } catch { continue; }
+        for (const d of ents) {
+          const abs = join(cur, d.name);
+          if (d.isDirectory()) { stack.push(abs); continue; }
+          if (!d.name.endsWith(".md")) continue;
+          const rel = relative(REPO_ROOT, abs).split("\\").join("/");
+          // never prune generated primers; only prune indexed memory md
+          if (rel.startsWith("memory/_primer/")) continue;
+          // entity files are managed exclusively by the entity pass below
+          if (rel.startsWith("memory/entities/")) continue;
+          if (!keptSet.has(rel)) { try { unlinkSync(abs); } catch {} }
+        }
       }
     }
   }
@@ -406,20 +412,26 @@ function main() {
 
   // prune stale entity md (entries removed on all devices)
   // Scoped exclusively to memory/entities/ — the memory pass above never touches this subtree.
-  const keptEntitySet = new Set(keptEntityPaths);
-  const entityDir = join(REPO_ROOT, "memory", "entities");
-  if (existsSync(entityDir)) {
-    const stack = [entityDir];
-    while (stack.length) {
-      const cur = stack.pop();
-      let ents;
-      try { ents = readdirSync(cur, { withFileTypes: true }); } catch { continue; }
-      for (const d of ents) {
-        const abs = join(cur, d.name);
-        if (d.isDirectory()) { stack.push(abs); continue; }
-        if (!d.name.endsWith(".md")) continue;
-        const rel = relative(REPO_ROOT, abs).split("\\").join("/");
-        if (!keptEntitySet.has(rel)) { try { unlinkSync(abs); } catch {} }
+  // GUARD: only run the prune when at least one device contributed an entity
+  // index this run. If anyEntityIndexSeen is false, keptEntityPaths is empty
+  // and running the prune would wipe ALL of main's memory/entities/ — data loss
+  // (e.g. a device that hasn't upgraded yet has no index.entity.json).
+  if (anyEntityIndexSeen) {
+    const keptEntitySet = new Set(keptEntityPaths);
+    const entityDir = join(REPO_ROOT, "memory", "entities");
+    if (existsSync(entityDir)) {
+      const stack = [entityDir];
+      while (stack.length) {
+        const cur = stack.pop();
+        let ents;
+        try { ents = readdirSync(cur, { withFileTypes: true }); } catch { continue; }
+        for (const d of ents) {
+          const abs = join(cur, d.name);
+          if (d.isDirectory()) { stack.push(abs); continue; }
+          if (!d.name.endsWith(".md")) continue;
+          const rel = relative(REPO_ROOT, abs).split("\\").join("/");
+          if (!keptEntitySet.has(rel)) { try { unlinkSync(abs); } catch {} }
+        }
       }
     }
   }
