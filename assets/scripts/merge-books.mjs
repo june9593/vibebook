@@ -43,6 +43,7 @@ const BOOK_INDEX_PATH = ".vibebook/index.book.json";
 const SPOOL_INDEX_PATH = ".vibebook/index.json";
 const AGGREGATED_INDEX_PATH = ".vibebook/index.aggregated.json";
 const MEMORY_INDEX_PATH = ".vibebook/index.memory.json";
+const ENTITY_INDEX_PATH = ".vibebook/index.entity.json";
 
 /**
  * Guard against path-traversal attacks in memory entry paths.
@@ -59,6 +60,24 @@ function isSafeMemoryPath(p) {
   if (norm.startsWith("/")) return false;
   if (!norm.startsWith("memory/")) return false;
   if (norm.split("/").some((seg) => seg === "..")) return false;
+  return true;
+}
+
+/**
+ * Guard against path-traversal attacks in entity entry paths.
+ * Identical logic to isSafeMemoryPath but restricted to memory/entities/,
+ * and further requires a .md suffix (entity prune only deletes *.md, so a
+ * non-md file would persist). Entries that fail this check are logged and
+ * skipped.
+ */
+function isSafeEntityPath(p) {
+  if (typeof p !== "string" || p.length === 0) return false;
+  if (p.includes("\0")) return false;
+  const norm = p.split("\\").join("/");
+  if (norm.startsWith("/")) return false;
+  if (!norm.startsWith("memory/entities/")) return false;
+  if (norm.split("/").some((seg) => seg === "..")) return false;
+  if (!norm.endsWith(".md")) return false;
   return true;
 }
 
@@ -126,6 +145,20 @@ function loadSpoolIndexFromBranch(ref) {
  *  Added in 0.8.6 to union typed memory entries across devices. */
 function loadMemoryIndexFromBranch(ref) {
   const content = readFileFromBranch(ref, MEMORY_INDEX_PATH);
+  if (content === null) return null;
+  try {
+    const idx = JSON.parse(content);
+    if (!idx || idx.version !== 1 || !idx.entries) return null;
+    return idx;
+  } catch {
+    return null;
+  }
+}
+
+/** Read the device-side entity index (.vibebook/index.entity.json).
+ *  Mirrors loadMemoryIndexFromBranch — unions entity wiki pages across devices. */
+function loadEntityIndexFromBranch(ref) {
+  const content = readFileFromBranch(ref, ENTITY_INDEX_PATH);
   if (content === null) return null;
   try {
     const idx = JSON.parse(content);
@@ -292,6 +325,8 @@ function main() {
         console.log(`memory: skipping entry ${e.id} with unsafe path ${JSON.stringify(e.path)}`);
         continue;
       }
+      const relPath = e.path.split("\\").join("/");
+      if (relPath.startsWith("memory/entities/")) continue;   // entity pass owns this subtree
       const existing = memByKey.get(e.id);
       if (!existing || (e.updatedAt ?? "") > (existing.entry.updatedAt ?? "")) {
         memByKey.set(e.id, { ref, device, entry: e });
@@ -301,30 +336,41 @@ function main() {
   const keptMemoryPaths = [];
   const aggregatedMemory = {};
   for (const [id, { ref, device, entry }] of memByKey.entries()) {
-    const body = readFileFromBranch(ref, entry.path);
+    const relPath = entry.path.split("\\").join("/");
+    const body = readFileFromBranch(ref, relPath);
     if (body === null) continue;
-    writeRel(entry.path, body);
-    keptMemoryPaths.push(entry.path);
-    aggregatedMemory[id] = { ...entry, originDevice: device };
+    writeRel(relPath, body);
+    keptMemoryPaths.push(relPath);
+    aggregatedMemory[id] = { ...entry, path: relPath, originDevice: device };
   }
 
   // prune stale aggregated memory md (entries removed on all devices)
-  const keptSet = new Set(keptMemoryPaths);
-  const memDir = join(REPO_ROOT, "memory");
-  if (existsSync(memDir)) {
-    const stack = [memDir];
-    while (stack.length) {
-      const cur = stack.pop();
-      let ents;
-      try { ents = readdirSync(cur, { withFileTypes: true }); } catch { continue; }
-      for (const d of ents) {
-        const abs = join(cur, d.name);
-        if (d.isDirectory()) { stack.push(abs); continue; }
-        if (!d.name.endsWith(".md")) continue;
-        const rel = relative(REPO_ROOT, abs).split("\\").join("/");
-        // never prune generated primers; only prune indexed memory md
-        if (rel.startsWith("memory/_primer/")) continue;
-        if (!keptSet.has(rel)) { try { unlinkSync(abs); } catch {} }
+  // Scoped to memory/ but skips memory/_primer/ (generated, not indexed)
+  // and memory/entities/ (managed by the entity pass below).
+  // GUARD: only run the prune when at least one device contributed a memory
+  // index this run. If anyMemoryIndexSeen is false we have no authoritative
+  // view of what should exist, so wiping main's memory/ would be data loss
+  // (e.g. a device that hasn't upgraded yet has no index.memory.json).
+  if (anyMemoryIndexSeen) {
+    const keptSet = new Set(keptMemoryPaths);
+    const memDir = join(REPO_ROOT, "memory");
+    if (existsSync(memDir)) {
+      const stack = [memDir];
+      while (stack.length) {
+        const cur = stack.pop();
+        let ents;
+        try { ents = readdirSync(cur, { withFileTypes: true }); } catch { continue; }
+        for (const d of ents) {
+          const abs = join(cur, d.name);
+          if (d.isDirectory()) { stack.push(abs); continue; }
+          if (!d.name.endsWith(".md")) continue;
+          const rel = relative(REPO_ROOT, abs).split("\\").join("/");
+          // never prune generated primers; only prune indexed memory md
+          if (rel.startsWith("memory/_primer/")) continue;
+          // entity files are managed exclusively by the entity pass below
+          if (rel.startsWith("memory/entities/")) continue;
+          if (!keptSet.has(rel)) { try { unlinkSync(abs); } catch {} }
+        }
       }
     }
   }
@@ -335,6 +381,70 @@ function main() {
     writeRel(MEMORY_INDEX_PATH, JSON.stringify({ version: 1, entries: aggregatedMemory }, null, 2) + "\n");
   }
   console.log(`memory: kept ${keptMemoryPaths.length} entries from ${branches.length} device branch(es)`);
+
+  // -------- entities: union by id, latest updatedAt wins --------
+  // Mirrors the memory pass 1:1 but scoped to memory/entities/ and
+  // reading from .vibebook/index.entity.json on each device branch.
+  const entityByKey = new Map(); // id -> { ref, device, entry }
+  let anyEntityIndexSeen = false;
+  for (const { ref, device } of branches) {
+    const entityIdx = loadEntityIndexFromBranch(ref);
+    if (!entityIdx) continue;
+    anyEntityIndexSeen = true;
+    for (const e of Object.values(entityIdx.entries)) {
+      if (!e || !e.id || !e.path) continue;
+      if (!isSafeEntityPath(e.path)) {
+        console.log(`entities: skipping entry ${e.id} with unsafe path ${JSON.stringify(e.path)}`);
+        continue;
+      }
+      const existing = entityByKey.get(e.id);
+      if (!existing || (e.updatedAt ?? "") > (existing.entry.updatedAt ?? "")) {
+        entityByKey.set(e.id, { ref, device, entry: e });
+      }
+    }
+  }
+  const keptEntityPaths = [];
+  const aggregatedEntities = {};
+  for (const [id, { ref, device, entry }] of entityByKey.entries()) {
+    const relPath = entry.path.split("\\").join("/");
+    const body = readFileFromBranch(ref, relPath);
+    if (body === null) continue;
+    writeRel(relPath, body);
+    keptEntityPaths.push(relPath);
+    aggregatedEntities[id] = { ...entry, path: relPath, originDevice: device };
+  }
+
+  // prune stale entity md (entries removed on all devices)
+  // Scoped exclusively to memory/entities/ — the memory pass above never touches this subtree.
+  // GUARD: only run the prune when at least one device contributed an entity
+  // index this run. If anyEntityIndexSeen is false, keptEntityPaths is empty
+  // and running the prune would wipe ALL of main's memory/entities/ — data loss
+  // (e.g. a device that hasn't upgraded yet has no index.entity.json).
+  if (anyEntityIndexSeen) {
+    const keptEntitySet = new Set(keptEntityPaths);
+    const entityDir = join(REPO_ROOT, "memory", "entities");
+    if (existsSync(entityDir)) {
+      const stack = [entityDir];
+      while (stack.length) {
+        const cur = stack.pop();
+        let ents;
+        try { ents = readdirSync(cur, { withFileTypes: true }); } catch { continue; }
+        for (const d of ents) {
+          const abs = join(cur, d.name);
+          if (d.isDirectory()) { stack.push(abs); continue; }
+          if (!d.name.endsWith(".md")) continue;
+          const rel = relative(REPO_ROOT, abs).split("\\").join("/");
+          if (!keptEntitySet.has(rel)) { try { unlinkSync(abs); } catch {} }
+        }
+      }
+    }
+  }
+
+  // Always rewrite the index when at least one device had an entity index.
+  if (anyEntityIndexSeen) {
+    writeRel(ENTITY_INDEX_PATH, JSON.stringify({ version: 1, entries: aggregatedEntities }, null, 2) + "\n");
+  }
+  console.log(`entities: kept ${keptEntityPaths.length} entries from ${branches.length} device branch(es)`);
 
   // -------- prune --------
   pruneStale(keptChroniclePaths, keptTopicPaths, keptCardPaths, perDevice);
@@ -368,6 +478,7 @@ function main() {
   if (existsSync(join(REPO_ROOT, AGGREGATED_INDEX_PATH))) addPaths.push(AGGREGATED_INDEX_PATH);
   if (existsSync(join(REPO_ROOT, "memory"))) addPaths.push("memory/");
   if (existsSync(join(REPO_ROOT, MEMORY_INDEX_PATH))) addPaths.push(MEMORY_INDEX_PATH);
+  if (existsSync(join(REPO_ROOT, ENTITY_INDEX_PATH))) addPaths.push(ENTITY_INDEX_PATH);
   if (addPaths.length === 0) {
     console.log("nothing to aggregate (no books, no raw_sessions)");
     return;
@@ -378,7 +489,7 @@ function main() {
     console.log("no changes to commit");
     return;
   }
-  const msg = `vibebook aggregate: ${chronicleByThread.size} chronicles, ${keptTopicPaths.length} topic-versions, ${cardByKey.size} cards, ${keptRawPaths.length} raw_sessions across ${branches.length} device(s)`;
+  const msg = `vibebook aggregate: ${chronicleByThread.size} chronicles, ${keptTopicPaths.length} topic-versions, ${cardByKey.size} cards, ${keptRawPaths.length} raw_sessions, +${keptMemoryPaths.length} memory, +${keptEntityPaths.length} entities across ${branches.length} device(s)`;
   sh("git", ["commit", "-m", JSON.stringify(msg)]);
   console.log(`committed: ${msg}`);
 }
