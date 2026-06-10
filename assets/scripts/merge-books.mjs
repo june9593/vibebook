@@ -325,6 +325,8 @@ function main() {
         console.log(`memory: skipping entry ${e.id} with unsafe path ${JSON.stringify(e.path)}`);
         continue;
       }
+      const relPath = e.path.split("\\").join("/");
+      if (relPath.startsWith("memory/entities/")) continue;   // entity pass owns this subtree
       const existing = memByKey.get(e.id);
       if (!existing || (e.updatedAt ?? "") > (existing.entry.updatedAt ?? "")) {
         memByKey.set(e.id, { ref, device, entry: e });

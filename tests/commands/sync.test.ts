@@ -362,7 +362,7 @@ describe("runSync — memory/ staging (0.8.6)", () => {
     expect(tip).not.toContain("memory/");
   }, 30_000);
 
-  it("stages and commits .vibebook/index.entity.json when entity-write has produced it (0.8.7)", async () => {
+  it("stages and commits .vibebook/index.entity.json when entity-write has produced it", async () => {
     const { writeFileSync } = await import("node:fs");
     const { simpleGit } = await import("simple-git");
 

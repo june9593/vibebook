@@ -721,6 +721,39 @@ describe("merge-books.mjs (v2 schema)", () => {
     expect(Object.keys(idx.entries)).toEqual(["semantic/edge-src/safe"]);
   }, T);
 
+  it("memory pass skips entries whose path falls under memory/entities/ (subtree isolation)", async () => {
+    // A corrupted/malicious index.memory.json could list an entry whose path
+    // is memory/entities/... — the memory UNION pass must skip it even though
+    // isSafeMemoryPath() accepts it (memory/entities/ is a valid memory/ prefix).
+    // The entity pass must remain the sole writer of that subtree.
+    await setupBranch({
+      device: "Mac.lan",
+      memories: [
+        // Normal memory entry — should be aggregated
+        { id: "semantic/edge-src/normalFact", type: "semantic", project: "edge-src",
+          updatedAt: "2026-06-01", body: "safe memory body", title: "normal" },
+        // Entry whose path sneaks into memory/entities/; isSafeMemoryPath passes
+        // it but the memory pass must skip it
+        { id: "entity/sneaky/id", type: "semantic", project: null,
+          updatedAt: "2026-06-01", body: "should not be written by memory pass", title: "sneaky",
+          path: "memory/entities/edge-src/x.md" },
+      ],
+    });
+
+    await runMerge();
+
+    // Normal memory entry was written
+    expect(existsSync(join(workspace, "memory/semantic/edge-src/normalFact.md"))).toBe(true);
+
+    // The sneaky entity-subtree path must NOT have been written by the memory pass
+    expect(existsSync(join(workspace, "memory/entities/edge-src/x.md"))).toBe(false);
+
+    // And it must not appear in the aggregated memory index
+    const idx = JSON.parse(readFileSync(join(workspace, ".vibebook/index.memory.json"), "utf8"));
+    expect(Object.keys(idx.entries)).not.toContain("entity/sneaky/id");
+    expect(Object.keys(idx.entries)).toEqual(["semantic/edge-src/normalFact"]);
+  }, T);
+
   it("prunes stale aggregated memory md when entries are removed on all devices", async () => {
     // Plant a stale memory file directly on main (simulates a prior merge
     // that included entry y, which has since been removed on all devices).

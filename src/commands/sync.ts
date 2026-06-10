@@ -213,7 +213,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     if (existsSync(join(opts.repoPath, ".vibebook", "index.memory.json"))) {
       all.push(".vibebook/index.memory.json");
     }
-    // entity index (0.8.7): memory/entities/ is already covered by staging
+    // entity index: memory/entities/ is already covered by staging
     // "memory/" above; we just need to also push the entity index so that
     // merge-books' anyEntityIndexSeen check fires on CI.
     if (existsSync(join(opts.repoPath, ".vibebook", "index.entity.json"))) {
