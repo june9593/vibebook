@@ -33,12 +33,13 @@ describe("CodexAdapter — discover", () => {
     const adapter = new CodexAdapter(fixturesDir);
     const found = [];
     for await (const d of adapter.discover()) found.push(d);
-    // Should find rollout-sample, rollout-exec, rollout-noindex
-    expect(found.length).toBe(3);
+    // Should find rollout-sample, rollout-exec, rollout-noindex, rollout-cmdnoise
+    expect(found.length).toBe(4);
     const paths = found.map((d) => d.sourcePath);
     expect(paths.some((p) => p.includes("rollout-sample"))).toBe(true);
     expect(paths.some((p) => p.includes("rollout-exec"))).toBe(true);
     expect(paths.some((p) => p.includes("rollout-noindex"))).toBe(true);
+    expect(paths.some((p) => p.includes("rollout-cmdnoise"))).toBe(true);
   });
 });
 
@@ -187,5 +188,36 @@ describe("CodexAdapter — parseCodexJsonl: rollout-noindex (no session_index en
 
   it("has expected messages", () => {
     expect(session.messages.length).toBe(2); // 1 user + 1 assistant
+  });
+});
+
+describe("CodexAdapter — parseCodexJsonl: rollout-cmdnoise (command-noise thread_name + first user msg)", () => {
+  const titleMap = loadTitleMap(fixturesDir);
+  const cmdnoisePath = join(fixturesDir, "sessions", "2026", "05", "10", "rollout-cmdnoise.jsonl");
+  const content = readFileSync(cmdnoisePath, "utf8");
+  const session = parseCodexJsonl(cmdnoisePath, content, titleMap);
+
+  it("ignores command-noise thread_name from session_index", () => {
+    // The index entry for this session has thread_name = "<command-message>foo</command-message>"
+    // — it must NOT appear in displayName or nameSlug.
+    expect(session.displayName).not.toMatch(/^<(command|local-command)/);
+    expect(session.nameSlug).not.toMatch(/^command-message|^local-command/);
+  });
+
+  it("ignores first user message that is pure command noise", () => {
+    // First user message is "<command-name>/clear</command-name>" — must not be used as title.
+    expect(session.displayName).not.toContain("/clear");
+    expect(session.nameSlug).not.toContain("clear");
+  });
+
+  it("derives displayName from the second (real) user message", () => {
+    // Second user message is "我们已经把sprint 2给做完了，接下来我们来规划sprint 3"
+    expect(session.displayName).toContain("sprint");
+    expect(session.nameSlug).toMatch(/sprint/);
+  });
+
+  it("does not emit a raw command-wrapper string as displayName", () => {
+    // Regression guard: displayName must not start with a < tag
+    expect(session.displayName.trimStart()).not.toMatch(/^</);
   });
 });

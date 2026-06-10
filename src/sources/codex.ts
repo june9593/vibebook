@@ -122,6 +122,18 @@ function stripLeadingInjectedBlock(text: string): string {
   return text;
 }
 
+/**
+ * Return true when the string looks like a Claude-CLI command wrapper tag,
+ * e.g. "<command-name>/clear</command-name>", "<command-message>...",
+ * "<local-command-stdout>...", "<local-command-caveat>...".
+ * These appear as Codex auto-generated thread_name values and as first user
+ * messages when Codex auto-named the thread from a CLI boilerplate turn.
+ */
+function looksLikeCommandNoise(s: string): boolean {
+  const t = s.trimStart();
+  return /^<(command-name|command-message|local-command-stdout|local-command-caveat)\b/.test(t);
+}
+
 export function parseCodexJsonl(
   sourcePath: string,
   content: string,
@@ -287,19 +299,35 @@ export function parseCodexJsonl(
   }
 
   // Derive nameSlug + displayName
+  // Only trust the session_index thread_name when it isn't command noise.
   const threadName = titleMap.get(sessionId);
-  let nameSlug: string;
-  let displayName: string;
-  if (threadName) {
-    const derived = deriveSlug(threadName);
-    nameSlug = derived.slug;
-    displayName = derived.display;
+  const useThreadName =
+    typeof threadName === "string" &&
+    threadName.trim().length > 0 &&
+    !looksLikeCommandNoise(threadName);
+
+  let titleSource = "";
+  if (useThreadName) {
+    titleSource = threadName!;
   } else {
-    const firstUserText = messages.find((m) => m.role === "user" && m.text)?.text ?? "";
-    const derived = deriveSlug(firstUserText);
-    nameSlug = derived.slug;
-    displayName = derived.display;
+    // Walk user messages in order; pick the first whose sanitized text is
+    // non-empty AND not command noise. The injected-block stripping already
+    // happened when building messages[], so m.text is already clean for
+    // AGENTS.md / environment_context blocks — but the sanitized text could
+    // still be command noise if the entire user turn was a command wrapper.
+    for (const m of messages) {
+      if (m.role !== "user" || !m.text) continue;
+      if (looksLikeCommandNoise(m.text)) continue;
+      titleSource = m.text;
+      break;
+    }
+    // If nothing qualifies, fall back to the shortId so we never emit raw noise.
+    if (!titleSource) titleSource = sessionId.slice(0, 8);
   }
+
+  const derived = deriveSlug(titleSource);
+  const nameSlug = derived.slug;
+  const displayName = derived.display;
 
   const shortId = sessionId.slice(0, 8);
   const project = projectSlugFromPath(cwd);
