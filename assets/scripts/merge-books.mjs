@@ -65,9 +65,10 @@ function isSafeMemoryPath(p) {
 
 /**
  * Guard against path-traversal attacks in entity entry paths.
- * Identical logic to isSafeMemoryPath but restricted to memory/entities/.
- * Entries that escape this subtree (e.g. pointing at memory/core/ or
- * ../../evil.md) are silently skipped.
+ * Identical logic to isSafeMemoryPath but restricted to memory/entities/,
+ * and further requires a .md suffix (entity prune only deletes *.md, so a
+ * non-md file would persist). Entries that fail this check are logged and
+ * skipped.
  */
 function isSafeEntityPath(p) {
   if (typeof p !== "string" || p.length === 0) return false;
@@ -76,6 +77,7 @@ function isSafeEntityPath(p) {
   if (norm.startsWith("/")) return false;
   if (!norm.startsWith("memory/entities/")) return false;
   if (norm.split("/").some((seg) => seg === "..")) return false;
+  if (!norm.endsWith(".md")) return false;
   return true;
 }
 
@@ -471,7 +473,7 @@ function main() {
     console.log("no changes to commit");
     return;
   }
-  const msg = `vibebook aggregate: ${chronicleByThread.size} chronicles, ${keptTopicPaths.length} topic-versions, ${cardByKey.size} cards, ${keptRawPaths.length} raw_sessions across ${branches.length} device(s)`;
+  const msg = `vibebook aggregate: ${chronicleByThread.size} chronicles, ${keptTopicPaths.length} topic-versions, ${cardByKey.size} cards, ${keptRawPaths.length} raw_sessions, +${keptMemoryPaths.length} memory, +${keptEntityPaths.length} entities across ${branches.length} device(s)`;
   sh("git", ["commit", "-m", JSON.stringify(msg)]);
   console.log(`committed: ${msg}`);
 }

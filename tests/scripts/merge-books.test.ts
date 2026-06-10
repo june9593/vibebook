@@ -821,6 +821,12 @@ describe("merge-books.mjs (v2 schema)", () => {
         // Outside memory/entities/ but still under memory/ (wrong subtree)
         { id: "evil/wrong-subtree", project: "_global", updatedAt: "2026-06-01T00:00:00.000Z",
           title: "evil3", body: "should be skipped", path: "memory/core/x.md" },
+        // Non-.md file inside memory/entities/ — entity prune only deletes *.md
+        // so a non-md file would persist; the guard must reject it.
+        { id: "evil/non-md", project: "_global", updatedAt: "2026-06-01T00:00:00.000Z",
+          title: "evil4", body: "should be skipped", path: "memory/entities/_global/.gitignore" },
+        { id: "evil/txt", project: "_global", updatedAt: "2026-06-01T00:00:00.000Z",
+          title: "evil5", body: "should be skipped", path: "memory/entities/_global/x.txt" },
       ],
     });
 
@@ -833,6 +839,8 @@ describe("merge-books.mjs (v2 schema)", () => {
     expect(existsSync(join(workspace, "evil.md"))).toBe(false);
     expect(existsSync(join(workspace, "..", "evil.md"))).toBe(false);
     expect(existsSync(join(workspace, "memory/core/x.md"))).toBe(false);
+    expect(existsSync(join(workspace, "memory/entities/_global/.gitignore"))).toBe(false);
+    expect(existsSync(join(workspace, "memory/entities/_global/x.txt"))).toBe(false);
 
     // index.entity.json must contain only the safe entry
     const idx = JSON.parse(readFileSync(join(workspace, ".vibebook/index.entity.json"), "utf8"));
@@ -840,6 +848,8 @@ describe("merge-books.mjs (v2 schema)", () => {
     expect(Object.keys(idx.entries)).not.toContain("evil/traversal");
     expect(Object.keys(idx.entries)).not.toContain("evil/absolute");
     expect(Object.keys(idx.entries)).not.toContain("evil/wrong-subtree");
+    expect(Object.keys(idx.entries)).not.toContain("evil/non-md");
+    expect(Object.keys(idx.entries)).not.toContain("evil/txt");
   }, T);
 
   it("memory prune does NOT delete entity files; entity prune only touches memory/entities/", async () => {

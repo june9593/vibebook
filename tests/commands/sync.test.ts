@@ -361,6 +361,37 @@ describe("runSync — memory/ staging (0.8.6)", () => {
     const tip = await simpleGit(bareRemote).raw(["ls-tree", "-r", "memsync-device"]);
     expect(tip).not.toContain("memory/");
   }, 30_000);
+
+  it("stages and commits .vibebook/index.entity.json when entity-write has produced it (0.8.7)", async () => {
+    const { writeFileSync } = await import("node:fs");
+    const { simpleGit } = await import("simple-git");
+
+    // Simulate what entity-write produces: entity .md files under memory/entities/
+    // plus the entity index at .vibebook/index.entity.json.
+    mkdirSync(join(workRepo, "memory", "entities", "_global"), { recursive: true });
+    writeFileSync(
+      join(workRepo, "memory", "entities", "_global", "Tab.md"),
+      "---\nid: _global/Tab\ntitle: Tab\n---\n# Tab\nA browser tab.\n",
+    );
+    mkdirSync(join(workRepo, ".vibebook"), { recursive: true });
+    writeFileSync(
+      join(workRepo, ".vibebook", "index.entity.json"),
+      JSON.stringify({ version: 1, entries: { "_global/Tab": { id: "_global/Tab", title: "Tab", path: "memory/entities/_global/Tab.md", updatedAt: "2026-06-01T00:00:00.000Z" } } }),
+    );
+
+    await runSync({
+      repoPath: workRepo, claudeRoot, vscodeRoot,
+      encrypt: false,
+      push: true,
+      repoUrl: bareRemote,
+      deviceBranch: "memsync-device",
+    });
+
+    // Both the entity .md and the entity index should be on the device branch.
+    const tip = await simpleGit(bareRemote).raw(["ls-tree", "-r", "memsync-device"]);
+    expect(tip).toContain("memory/entities/_global/Tab.md");
+    expect(tip).toContain(".vibebook/index.entity.json");
+  }, 30_000);
 });
 
 describe("runSync — orphan index prune (0.8.4)", () => {
