@@ -1,4 +1,4 @@
-export type Tool = "claude" | "copilot";
+export type Tool = "claude" | "copilot" | "codex";
 
 /** A single rich content block from the source jsonl. Mirrors the
  *  Anthropic API content block shape so renderers can produce markdown
