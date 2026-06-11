@@ -105,9 +105,9 @@ export async function run(argv: string[]) {
   program
     .command("list")
     .description("List synced sessions")
-    .option("--tool <name>", "filter by claude|copilot")
+    .option("--tool <name>", "filter by claude|copilot|codex")
     .option("--project <name>", "filter by project")
-    .action(async (opts: { tool?: "claude"|"copilot"; project?: string }) => {
+    .action(async (opts: { tool?: "claude"|"copilot"|"codex"; project?: string }) => {
       const { listCmd } = await import("./commands/list.js");
       await listCmd(opts);
     });

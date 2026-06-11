@@ -1,0 +1,5 @@
+{"timestamp":"2026-05-10T17:00:00.000Z","type":"session_meta","payload":{"id":"sess-cmdnoise-1111-2222-3333-444444444444","timestamp":"2026-05-10T17:00:00.000Z","cwd":"/Users/yueliu/edge/memvc","originator":"Codex Desktop","cli_version":"1.2.3","source":"desktop","model_provider":"openai","base_instructions":""}}
+{"timestamp":"2026-05-10T17:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<command-name>/clear</command-name>"}]}}
+{"timestamp":"2026-05-10T17:00:10.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Session cleared."}]}}
+{"timestamp":"2026-05-10T17:01:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"我们已经把sprint 2给做完了，接下来我们来规划sprint 3"}]}}
+{"timestamp":"2026-05-10T17:02:00.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"好的，我们来规划sprint 3的任务吧。"}]}}

@@ -1,0 +1,3 @@
+{"timestamp":"2026-05-10T14:00:00.000Z","type":"session_meta","payload":{"id":"019e8c77-4665-7303-a4ef-1c2f584b8055","timestamp":"2026-05-10T14:00:00.000Z","cwd":"/Users/yueliu/edge/edge-src","originator":"Codex Desktop","cli_version":"1.2.3","source":"desktop","model_provider":"openai","base_instructions":"You are a helpful assistant."}}
+{"timestamp":"2026-05-10T14:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"First session — same timestamp prefix as sibling."}]}}
+{"timestamp":"2026-05-10T14:00:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Acknowledged."}]}}

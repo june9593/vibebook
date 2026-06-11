@@ -65,6 +65,7 @@ describe("runSync — extract + raw push only (v0.2: no LLM)", () => {
   let repo: string;
   let claudeRoot: string;
   let vscodeRoot: string;
+  let codexRoot: string;
   beforeEach(() => {
     repo = mkdtempSync(join(tmpdir(), "memvc-repo-"));
     claudeRoot = mkdtempSync(join(tmpdir(), "vibebook-test-claude-fixture-"));
@@ -72,11 +73,12 @@ describe("runSync — extract + raw push only (v0.2: no LLM)", () => {
     mkdirSync(proj, { recursive: true });
     cpSync(join(fixturesDir, "claude", "claude-session.jsonl"), join(proj, "abc12345.jsonl"));
     vscodeRoot = mkdtempSync(join(tmpdir(), "memvc-vscode-"));
+    codexRoot = mkdtempSync(join(tmpdir(), "memvc-codex-"));
   });
 
   it("extracts new sessions, writes files, updates index", async () => {
     const result = await runSync({
-      repoPath: repo, claudeRoot, vscodeRoot, encrypt: false,
+      repoPath: repo, claudeRoot, vscodeRoot, codexRoot, encrypt: false,
     });
     expect(result.newCount).toBe(1);
     expect(result.skippedCount).toBe(0);
@@ -90,14 +92,14 @@ describe("runSync — extract + raw push only (v0.2: no LLM)", () => {
   });
 
   it("skips unchanged sessions on second run", async () => {
-    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
-    const result2 = await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, codexRoot, encrypt: false });
+    const result2 = await runSync({ repoPath: repo, claudeRoot, vscodeRoot, codexRoot, encrypt: false });
     expect(result2.newCount).toBe(0);
     expect(result2.skippedCount).toBe(1);
   });
 
   it("never creates book/ — that's /vibebook's job, not sync's", async () => {
-    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, codexRoot, encrypt: false });
     expect(existsSync(join(repo, "book"))).toBe(false);
     expect(existsSync(join(repo, ".vibebook/index.book.json"))).toBe(false);
   });
@@ -121,7 +123,7 @@ describe("runSync — extract + raw push only (v0.2: no LLM)", () => {
     const { writeFileSync } = await import("node:fs");
     writeFileSync(join(emptyWs, "chatSessions", "empty-shell-cccc.jsonl"), shell);
 
-    const result = await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+    const result = await runSync({ repoPath: repo, claudeRoot, vscodeRoot, codexRoot, encrypt: false });
     // 1 real claude session written, 1 empty shell skipped
     expect(result.newCount).toBe(1);
     expect(result.skippedCount).toBeGreaterThanOrEqual(1);
@@ -137,6 +139,7 @@ describe("runSync — workflow file inheritance from main (P1, 0.8.1)", () => {
   let tmpHome: string;
   let claudeRoot: string;
   let vscodeRoot: string;
+  let codexRoot: string;
 
   beforeEach(async () => {
     const { writeFileSync } = await import("node:fs");
@@ -182,6 +185,7 @@ describe("runSync — workflow file inheritance from main (P1, 0.8.1)", () => {
     mkdirSync(proj, { recursive: true });
     cpSync(join(fixturesDir, "claude", "claude-session.jsonl"), join(proj, "abc12345.jsonl"));
     vscodeRoot = mkdtempSync(join(tmpdir(), "vb-wfsync-vscode-"));
+    codexRoot = mkdtempSync(join(tmpdir(), "vb-wfsync-codex-"));
   });
 
   afterEach(() => {
@@ -190,7 +194,7 @@ describe("runSync — workflow file inheritance from main (P1, 0.8.1)", () => {
 
   it("first push of a fresh device branch picks up .github/workflows/vibebook-aggregate.yml from main, commits and pushes it", async () => {
     await runSync({
-      repoPath: workRepo, claudeRoot, vscodeRoot,
+      repoPath: workRepo, claudeRoot, vscodeRoot, codexRoot,
       encrypt: false,
       push: true,
       repoUrl: bareRemote,
@@ -217,7 +221,7 @@ describe("runSync — workflow file inheritance from main (P1, 0.8.1)", () => {
     await simpleGit(workRepo).commit("pre-seed workflow on device branch");
 
     await runSync({
-      repoPath: workRepo, claudeRoot, vscodeRoot,
+      repoPath: workRepo, claudeRoot, vscodeRoot, codexRoot,
       encrypt: false,
       push: true,
       repoUrl: bareRemote,
@@ -253,7 +257,7 @@ describe("runSync — workflow file inheritance from main (P1, 0.8.1)", () => {
     await wg.checkoutLocalBranch("mini-fresh2");
 
     await runSync({
-      repoPath: freshClone, claudeRoot, vscodeRoot,
+      repoPath: freshClone, claudeRoot, vscodeRoot, codexRoot,
       encrypt: false,
       push: true,
       repoUrl: freshBare,
@@ -271,6 +275,7 @@ describe("runSync — memory/ staging (0.8.6)", () => {
   let tmpHome: string;
   let claudeRoot: string;
   let vscodeRoot: string;
+  let codexRoot: string;
 
   beforeEach(async () => {
     const { writeFileSync } = await import("node:fs");
@@ -307,6 +312,7 @@ describe("runSync — memory/ staging (0.8.6)", () => {
     mkdirSync(proj, { recursive: true });
     cpSync(join(fixturesDir, "claude", "claude-session.jsonl"), join(proj, "abc12345.jsonl"));
     vscodeRoot = mkdtempSync(join(tmpdir(), "vb-memsync-vscode-"));
+    codexRoot = mkdtempSync(join(tmpdir(), "vb-memsync-codex-"));
   });
 
   afterEach(() => {
@@ -330,7 +336,7 @@ describe("runSync — memory/ staging (0.8.6)", () => {
     );
 
     await runSync({
-      repoPath: workRepo, claudeRoot, vscodeRoot,
+      repoPath: workRepo, claudeRoot, vscodeRoot, codexRoot,
       encrypt: false,
       push: true,
       repoUrl: bareRemote,
@@ -348,7 +354,7 @@ describe("runSync — memory/ staging (0.8.6)", () => {
 
     // No memory/ written — sync should still succeed without error.
     const result = await runSync({
-      repoPath: workRepo, claudeRoot, vscodeRoot,
+      repoPath: workRepo, claudeRoot, vscodeRoot, codexRoot,
       encrypt: false,
       push: true,
       repoUrl: bareRemote,
@@ -398,11 +404,13 @@ describe("runSync — orphan index prune (0.8.4)", () => {
   let repo: string;
   let claudeRoot: string;
   let vscodeRoot: string;
+  let codexRoot: string;
 
   beforeEach(() => {
     repo = mkdtempSync(join(tmpdir(), "vb-orphan-repo-"));
     claudeRoot = mkdtempSync(join(tmpdir(), "vb-orphan-claude-"));
     vscodeRoot = mkdtempSync(join(tmpdir(), "vb-orphan-vscode-"));
+    codexRoot = mkdtempSync(join(tmpdir(), "vb-orphan-codex-"));
   });
 
   it("removes index entries whose source jsonl is gone AND whose rendered md is gone", async () => {
@@ -410,7 +418,7 @@ describe("runSync — orphan index prune (0.8.4)", () => {
     const proj = join(claudeRoot, "-Users-me-edge-memvc");
     mkdirSync(proj, { recursive: true });
     cpSync(join(fixturesDir, "claude", "claude-session.jsonl"), join(proj, "abc12345.jsonl"));
-    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, codexRoot, encrypt: false });
 
     // Sanity: 1 indexed entry, 1 rendered md
     let idx = loadIndex(repo);
@@ -426,7 +434,7 @@ describe("runSync — orphan index prune (0.8.4)", () => {
     rmSync(join(repo, onlyEntry.relativePath));
 
     // Second sync: the prune pass should clean the orphan entry.
-    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, codexRoot, encrypt: false });
 
     idx = loadIndex(repo);
     expect(Object.keys(idx.entries).length).toBe(0);
@@ -439,13 +447,13 @@ describe("runSync — orphan index prune (0.8.4)", () => {
     const proj = join(claudeRoot, "-Users-me-edge-memvc");
     mkdirSync(proj, { recursive: true });
     cpSync(join(fixturesDir, "claude", "claude-session.jsonl"), join(proj, "abc12345.jsonl"));
-    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, codexRoot, encrypt: false });
 
     // Delete the source jsonl but KEEP the rendered md
     const { unlinkSync } = await import("node:fs");
     unlinkSync(join(proj, "abc12345.jsonl"));
 
-    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, codexRoot, encrypt: false });
 
     const idx = loadIndex(repo);
     expect(Object.keys(idx.entries).length).toBe(1);
