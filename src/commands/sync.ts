@@ -219,7 +219,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     if (existsSync(join(opts.repoPath, ".vibebook", "index.entity.json"))) {
       all.push(".vibebook/index.entity.json");
     }
-    // qa index: memory/qa/ is already covered by staging "memory/" above; we just
+    // qa index: memory/qa/ is already covered by staging "memory" above; we just
     // need to also push the qa index so cross-device merge-books can union it.
     if (existsSync(join(opts.repoPath, ".vibebook", "index.qa.json"))) {
       all.push(".vibebook/index.qa.json");
