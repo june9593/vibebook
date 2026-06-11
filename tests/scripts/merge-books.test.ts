@@ -1162,4 +1162,47 @@ describe("merge-books.mjs (v2 schema)", () => {
     expect(readFileSync(prePlanted, "utf8")).toContain("pre-existing");
     expect(existsSync(join(workspace, ".vibebook/index.qa.json"))).toBe(false);
   }, T);
+
+  it("skips qa entries with unsafe paths (path traversal guard)", async () => {
+    await setupBranch({
+      device: "Mac.lan",
+      qa: [
+        // Safe entry — should be aggregated
+        { id: "qa/edge-src/safe-aaaa1111", project: "edge-src", updatedAt: "2026-06-09T10:00:00.000Z",
+          question: "Safe?", answerSummary: "yes", body: "safe body" },
+        // Traversal via ..
+        { id: "qa/evil/traversal", project: "_global", updatedAt: "2026-06-09T10:00:00.000Z",
+          question: "Evil?", answerSummary: "no", body: "should be skipped", path: "../../etc/escape.md" },
+        // Absolute path
+        { id: "qa/evil/absolute", project: "_global", updatedAt: "2026-06-09T10:00:00.000Z",
+          question: "Evil2?", answerSummary: "no", body: "should be skipped", path: "/etc/passwd.md" },
+        // Outside memory/qa/ but still under memory/ (wrong subtree)
+        { id: "qa/evil/wrong-subtree", project: "_global", updatedAt: "2026-06-09T10:00:00.000Z",
+          question: "Evil3?", answerSummary: "no", body: "should be skipped", path: "memory/entities/_global/x.md" },
+        // Non-.md file inside memory/qa/ — qa prune only deletes *.md
+        // so a non-md file would persist; the guard must reject it.
+        { id: "qa/evil/non-md", project: "_global", updatedAt: "2026-06-09T10:00:00.000Z",
+          question: "Evil4?", answerSummary: "no", body: "should be skipped", path: "memory/qa/_global/evil.txt" },
+      ],
+    });
+
+    await runMerge();
+
+    // Safe entry written
+    expect(existsSync(join(workspace, "memory/qa/edge-src/safe-aaaa1111.md"))).toBe(true);
+
+    // Malicious paths must not have been written
+    expect(existsSync(join(workspace, "etc/escape.md"))).toBe(false);
+    expect(existsSync(join(workspace, "..", "etc/escape.md"))).toBe(false);
+    expect(existsSync(join(workspace, "memory/entities/_global/x.md"))).toBe(false);
+    expect(existsSync(join(workspace, "memory/qa/_global/evil.txt"))).toBe(false);
+
+    // index.qa.json must contain only the safe entry
+    const idx = JSON.parse(readFileSync(join(workspace, ".vibebook/index.qa.json"), "utf8"));
+    expect(Object.keys(idx.entries)).toEqual(["qa/edge-src/safe-aaaa1111"]);
+    expect(Object.keys(idx.entries)).not.toContain("qa/evil/traversal");
+    expect(Object.keys(idx.entries)).not.toContain("qa/evil/absolute");
+    expect(Object.keys(idx.entries)).not.toContain("qa/evil/wrong-subtree");
+    expect(Object.keys(idx.entries)).not.toContain("qa/evil/non-md");
+  }, T);
 });
