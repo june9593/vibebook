@@ -392,6 +392,34 @@ describe("runSync — memory/ staging (0.8.6)", () => {
     expect(tip).toContain("memory/entities/_global/Tab.md");
     expect(tip).toContain(".vibebook/index.entity.json");
   }, 30_000);
+
+  it("stages and commits .vibebook/index.qa.json when qa-write has produced it", async () => {
+    const { writeFileSync } = await import("node:fs");
+    const { simpleGit } = await import("simple-git");
+
+    mkdirSync(join(workRepo, "memory", "qa", "_global"), { recursive: true });
+    writeFileSync(
+      join(workRepo, "memory", "qa", "_global", "how-to-build-aaaa1111.md"),
+      "---\nid: qa/_global/how-to-build-aaaa1111\nquestion: How do I build?\nanswerSummary: npm build\n---\n# How do I build?\nRun npm run build.\n",
+    );
+    mkdirSync(join(workRepo, ".vibebook"), { recursive: true });
+    writeFileSync(
+      join(workRepo, ".vibebook", "index.qa.json"),
+      JSON.stringify({ version: 1, entries: { "qa/_global/how-to-build-aaaa1111": { id: "qa/_global/how-to-build-aaaa1111", question: "How do I build?", answerSummary: "npm build", path: "memory/qa/_global/how-to-build-aaaa1111.md", updatedAt: "2026-06-11T00:00:00.000Z" } } }),
+    );
+
+    await runSync({
+      repoPath: workRepo, claudeRoot, vscodeRoot,
+      encrypt: false,
+      push: true,
+      repoUrl: bareRemote,
+      deviceBranch: "memsync-device",
+    });
+
+    const tip = await simpleGit(bareRemote).raw(["ls-tree", "-r", "memsync-device"]);
+    expect(tip).toContain("memory/qa/_global/how-to-build-aaaa1111.md");
+    expect(tip).toContain(".vibebook/index.qa.json");
+  }, 30_000);
 });
 
 describe("runSync — orphan index prune (0.8.4)", () => {

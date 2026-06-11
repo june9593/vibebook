@@ -44,6 +44,7 @@ const SPOOL_INDEX_PATH = ".vibebook/index.json";
 const AGGREGATED_INDEX_PATH = ".vibebook/index.aggregated.json";
 const MEMORY_INDEX_PATH = ".vibebook/index.memory.json";
 const ENTITY_INDEX_PATH = ".vibebook/index.entity.json";
+const QA_INDEX_PATH = ".vibebook/index.qa.json";
 
 /**
  * Guard against path-traversal attacks in memory entry paths.
@@ -76,6 +77,21 @@ function isSafeEntityPath(p) {
   const norm = p.split("\\").join("/");
   if (norm.startsWith("/")) return false;
   if (!norm.startsWith("memory/entities/")) return false;
+  if (norm.split("/").some((seg) => seg === "..")) return false;
+  if (!norm.endsWith(".md")) return false;
+  return true;
+}
+
+/**
+ * Guard against path-traversal in qa entry paths. Identical to isSafeEntityPath
+ * but restricted to memory/qa/ and requires a .md suffix (prune only deletes *.md).
+ */
+function isSafeQaPath(p) {
+  if (typeof p !== "string" || p.length === 0) return false;
+  if (p.includes("\0")) return false;
+  const norm = p.split("\\").join("/");
+  if (norm.startsWith("/")) return false;
+  if (!norm.startsWith("memory/qa/")) return false;
   if (norm.split("/").some((seg) => seg === "..")) return false;
   if (!norm.endsWith(".md")) return false;
   return true;
@@ -159,6 +175,20 @@ function loadMemoryIndexFromBranch(ref) {
  *  Mirrors loadMemoryIndexFromBranch — unions entity wiki pages across devices. */
 function loadEntityIndexFromBranch(ref) {
   const content = readFileFromBranch(ref, ENTITY_INDEX_PATH);
+  if (content === null) return null;
+  try {
+    const idx = JSON.parse(content);
+    if (!idx || idx.version !== 1 || !idx.entries) return null;
+    return idx;
+  } catch {
+    return null;
+  }
+}
+
+/** Read the device-side qa index (.vibebook/index.qa.json). Mirrors
+ *  loadEntityIndexFromBranch — unions distilled Q&A pages across devices. */
+function loadQaIndexFromBranch(ref) {
+  const content = readFileFromBranch(ref, QA_INDEX_PATH);
   if (content === null) return null;
   try {
     const idx = JSON.parse(content);
@@ -327,6 +357,7 @@ function main() {
       }
       const relPath = e.path.split("\\").join("/");
       if (relPath.startsWith("memory/entities/")) continue;   // entity pass owns this subtree
+      if (relPath.startsWith("memory/qa/")) continue;         // qa pass owns this subtree
       const existing = memByKey.get(e.id);
       if (!existing || (e.updatedAt ?? "") > (existing.entry.updatedAt ?? "")) {
         memByKey.set(e.id, { ref, device, entry: e });
@@ -369,6 +400,7 @@ function main() {
           if (rel.startsWith("memory/_primer/")) continue;
           // entity files are managed exclusively by the entity pass below
           if (rel.startsWith("memory/entities/")) continue;
+          if (rel.startsWith("memory/qa/")) continue;
           if (!keptSet.has(rel)) { try { unlinkSync(abs); } catch {} }
         }
       }
@@ -446,6 +478,63 @@ function main() {
   }
   console.log(`entities: kept ${keptEntityPaths.length} entries from ${branches.length} device branch(es)`);
 
+  // -------- qa: union by id, latest updatedAt wins --------
+  // Mirrors the entity pass 1:1 but scoped to memory/qa/ and reading from
+  // .vibebook/index.qa.json on each device branch.
+  const qaByKey = new Map(); // id -> { ref, device, entry }
+  let anyQaIndexSeen = false;
+  for (const { ref, device } of branches) {
+    const qaIdx = loadQaIndexFromBranch(ref);
+    if (!qaIdx) continue;
+    anyQaIndexSeen = true;
+    for (const e of Object.values(qaIdx.entries)) {
+      if (!e || !e.id || !e.path) continue;
+      if (!isSafeQaPath(e.path)) {
+        console.log(`qa: skipping entry ${e.id} with unsafe path ${JSON.stringify(e.path)}`);
+        continue;
+      }
+      const existing = qaByKey.get(e.id);
+      if (!existing || (e.updatedAt ?? "") > (existing.entry.updatedAt ?? "")) {
+        qaByKey.set(e.id, { ref, device, entry: e });
+      }
+    }
+  }
+  const keptQaPaths = [];
+  const aggregatedQa = {};
+  for (const [id, { ref, device, entry }] of qaByKey.entries()) {
+    const relPath = entry.path.split("\\").join("/");
+    const body = readFileFromBranch(ref, relPath);
+    if (body === null) continue;
+    writeRel(relPath, body);
+    keptQaPaths.push(relPath);
+    aggregatedQa[id] = { ...entry, path: relPath, originDevice: device };
+  }
+
+  if (anyQaIndexSeen) {
+    const keptQaSet = new Set(keptQaPaths);
+    const qaDir = join(REPO_ROOT, "memory", "qa");
+    if (existsSync(qaDir)) {
+      const stack = [qaDir];
+      while (stack.length) {
+        const cur = stack.pop();
+        let ents;
+        try { ents = readdirSync(cur, { withFileTypes: true }); } catch { continue; }
+        for (const d of ents) {
+          const abs = join(cur, d.name);
+          if (d.isDirectory()) { stack.push(abs); continue; }
+          if (!d.name.endsWith(".md")) continue;
+          const rel = relative(REPO_ROOT, abs).split("\\").join("/");
+          if (!keptQaSet.has(rel)) { try { unlinkSync(abs); } catch {} }
+        }
+      }
+    }
+  }
+
+  if (anyQaIndexSeen) {
+    writeRel(QA_INDEX_PATH, JSON.stringify({ version: 1, entries: aggregatedQa }, null, 2) + "\n");
+  }
+  console.log(`qa: kept ${keptQaPaths.length} entries from ${branches.length} device branch(es)`);
+
   // -------- prune --------
   pruneStale(keptChroniclePaths, keptTopicPaths, keptCardPaths, perDevice);
   pruneRawSessions(keptRawPaths);
@@ -479,6 +568,7 @@ function main() {
   if (existsSync(join(REPO_ROOT, "memory"))) addPaths.push("memory/");
   if (existsSync(join(REPO_ROOT, MEMORY_INDEX_PATH))) addPaths.push(MEMORY_INDEX_PATH);
   if (existsSync(join(REPO_ROOT, ENTITY_INDEX_PATH))) addPaths.push(ENTITY_INDEX_PATH);
+  if (existsSync(join(REPO_ROOT, QA_INDEX_PATH))) addPaths.push(QA_INDEX_PATH);
   if (addPaths.length === 0) {
     console.log("nothing to aggregate (no books, no raw_sessions)");
     return;
@@ -489,7 +579,7 @@ function main() {
     console.log("no changes to commit");
     return;
   }
-  const msg = `vibebook aggregate: ${chronicleByThread.size} chronicles, ${keptTopicPaths.length} topic-versions, ${cardByKey.size} cards, ${keptRawPaths.length} raw_sessions, +${keptMemoryPaths.length} memory, +${keptEntityPaths.length} entities across ${branches.length} device(s)`;
+  const msg = `vibebook aggregate: ${chronicleByThread.size} chronicles, ${keptTopicPaths.length} topic-versions, ${cardByKey.size} cards, ${keptRawPaths.length} raw_sessions, +${keptMemoryPaths.length} memory, +${keptEntityPaths.length} entities, +${keptQaPaths.length} qa across ${branches.length} device(s)`;
   sh("git", ["commit", "-m", JSON.stringify(msg)]);
   console.log(`committed: ${msg}`);
 }
