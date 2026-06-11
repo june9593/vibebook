@@ -76,6 +76,20 @@ interface EntitySeed {
   path?: string;
 }
 
+interface QaSeed {
+  id: string;
+  updatedAt: string;
+  question: string;
+  answerSummary: string;
+  body: string;
+  /** slug determines the filename; defaults to last segment of id */
+  slug?: string;
+  /** project/namespace under memory/qa/; defaults to "_global" */
+  project?: string;
+  /** Override the path stored in index.qa.json (for traversal tests). */
+  path?: string;
+}
+
 interface BranchSeed {
   device: string;
   /** project → chronicles[] */
@@ -90,6 +104,8 @@ interface BranchSeed {
   memories?: MemorySeed[];
   /** entity wiki pages to plant + register in .vibebook/index.entity.json */
   entities?: EntitySeed[];
+  /** qa pages to plant + register in .vibebook/index.qa.json */
+  qa?: QaSeed[];
 }
 
 let bareRemote: string;
@@ -250,6 +266,28 @@ async function setupBranch(seed: BranchSeed): Promise<void> {
       };
     }
     writeFileSync(join(dir, ".vibebook", "index.entity.json"), JSON.stringify({ version: 1, entries: entityEntries }, null, 2));
+  }
+
+  // qa: plant .md files + .vibebook/index.qa.json
+  if (seed.qa && seed.qa.length > 0) {
+    const qaEntries: Record<string, unknown> = {};
+    for (const e of seed.qa) {
+      const scope = e.project ?? "_global";
+      const slug = e.slug ?? e.id.split("/").pop()!;
+      const rel = `memory/qa/${scope}/${slug}.md`;
+      const mdContent = `---\nid: ${e.id}\nupdatedAt: ${e.updatedAt}\nquestion: ${e.question}\nanswerSummary: ${e.answerSummary}\n---\n\n${e.body}`;
+      writeFileTo(dir, rel, mdContent);
+      const indexedPath = e.path !== undefined ? e.path : rel;
+      qaEntries[e.id] = {
+        id: e.id,
+        path: indexedPath,
+        updatedAt: e.updatedAt,
+        question: e.question,
+        answerSummary: e.answerSummary,
+        originDevice: null,
+      };
+    }
+    writeFileSync(join(dir, ".vibebook", "index.qa.json"), JSON.stringify({ version: 1, entries: qaEntries }, null, 2));
   }
 
   await g.add(".");
@@ -1064,5 +1102,64 @@ describe("merge-books.mjs (v2 schema)", () => {
 
     // index.memory.json must NOT have been written (anyMemoryIndexSeen is false)
     expect(existsSync(join(workspace, ".vibebook/index.memory.json"))).toBe(false);
+  }, T);
+
+  it("aggregates memory/qa/ + index.qa.json across devices, union by id, latest wins", async () => {
+    await setupBranch({
+      device: "Mac.lan",
+      qa: [
+        { id: "qa/edge-src/how-to-build-aaaa1111", project: "edge-src", updatedAt: "2026-06-01T10:00:00.000Z",
+          question: "How do I build?", answerSummary: "old answer", body: "old full body" },
+      ],
+    });
+    await setupBranch({
+      device: "Mac-mini",
+      qa: [
+        { id: "qa/edge-src/how-to-build-aaaa1111", project: "edge-src", updatedAt: "2026-06-09T10:00:00.000Z",
+          question: "How do I build?", answerSummary: "NEW answer", body: "new full body" },
+        { id: "qa/edge-src/how-to-test-bbbb2222", project: "edge-src", updatedAt: "2026-06-09T11:00:00.000Z",
+          question: "How do I test?", answerSummary: "run vitest", body: "test body" },
+      ],
+    });
+
+    await runMerge();
+
+    const buildMd = readFileSync(join(workspace, "memory/qa/edge-src/how-to-build-aaaa1111.md"), "utf8");
+    expect(buildMd).toContain("new full body");
+    expect(existsSync(join(workspace, "memory/qa/edge-src/how-to-test-bbbb2222.md"))).toBe(true);
+
+    const idx = JSON.parse(readFileSync(join(workspace, ".vibebook/index.qa.json"), "utf8"));
+    expect(idx.version).toBe(1);
+    expect(Object.keys(idx.entries).sort()).toEqual([
+      "qa/edge-src/how-to-build-aaaa1111", "qa/edge-src/how-to-test-bbbb2222",
+    ]);
+    expect(idx.entries["qa/edge-src/how-to-build-aaaa1111"].answerSummary).toBe("NEW answer");
+    expect(idx.entries["qa/edge-src/how-to-build-aaaa1111"].originDevice).toBe("Mac-mini");
+  }, T);
+
+  it("qa prune is SKIPPED when no device has a qa index (no-index-no-prune)", async () => {
+    await setupBranch({
+      device: "Mac.lan",
+      chronicles: { "edge-src": [{
+        threadId: "t-no-qa", title: "No qa index",
+        updatedAt: "2026-06-01T00:00:00.000Z", body: "# chronicle only\n",
+      }] },
+    });
+
+    await simpleGit().clone(bareRemote, workspace);
+    const g = simpleGit(workspace);
+    await g.addConfig("user.email", "bot@example.com");
+    await g.addConfig("user.name", "vibebook-bot");
+    await g.checkout("main");
+
+    const prePlanted = join(workspace, "memory/qa/edge-src/pre-existing.md");
+    mkdirSync(dirname(prePlanted), { recursive: true });
+    writeFileSync(prePlanted, "# pre-existing qa page\n");
+
+    execSync(`node ${SCRIPT_PATH}`, { cwd: workspace, stdio: "pipe", env: process.env });
+
+    expect(existsSync(prePlanted)).toBe(true);
+    expect(readFileSync(prePlanted, "utf8")).toContain("pre-existing");
+    expect(existsSync(join(workspace, ".vibebook/index.qa.json"))).toBe(false);
   }, T);
 });
