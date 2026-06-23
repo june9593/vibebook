@@ -69,10 +69,6 @@ export interface IndexEntry {
   sourcePath: string;       // original source file (for change detection)
   sourceMtimeMs: number;
   sourceSha256: string;
-  /** When this entry was created by `vibebook resume <id>` on this device,
-   *  the source device's sessionId. Set on next `vibebook sync` from the
-   *  fork registry at ~/.vibebook/resume-forks.json. */
-  originSessionId?: string;
 }
 
 export interface IndexFile {
