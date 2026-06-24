@@ -295,10 +295,7 @@ function main() {
   // P7 (0.8.0): cross-device raw_sessions aggregation. Devices push only their
   // own raw_sessions/ to their device branch; main holds the union so any
   // device can `vibebook resume <id>` against any other device's session.
-  // Pure copy of the (potentially encrypted) blob — CI doesn't have the
-  // git-crypt smudge filter installed, so `git show` yields ciphertext as-is,
-  // and we write ciphertext to main. Decryption happens on each device's
-  // local checkout via the smudge filter wired in `vibebook crypt init`.
+  // Pure plaintext blob copy — `git show` yields the session md as-is.
   const rawByKey = new Map(); // "tool:sessionId" -> { ref, device, entry }
   // 0.8.3: iterate `branches` (ALL device branches) instead of `perDevice`
   // (only those with v2 BookIndex). raw_sessions doesn't require book/ to

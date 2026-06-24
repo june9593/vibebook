@@ -65,43 +65,23 @@ describe("applyWizardAnswers", () => {
     vi.resetModules();
   });
 
-  it("clones the repo, writes config, and writes passphrase when encrypt=true", async () => {
+  it("clones the repo and writes config", async () => {
     const localPath = join(tmpHome, "checkout");
     const m = await import("../../src/commands/init-wizard.js");
     await m.applyWizardAnswers({
       repoUrl: originUrl,
       localPath,
-      encrypt: true,
-      passphraseEntered: "secret",
       enableAggregateCI: true,
       deviceBranch: "test-device",
     });
-    const { existsSync, readFileSync, statSync } = await import("node:fs");
+    const { existsSync, readFileSync } = await import("node:fs");
     expect(existsSync(join(localPath, ".git"))).toBe(true);
     const cfg = JSON.parse(readFileSync(join(tmpHome, ".vibebook", "config.json"), "utf8"));
     expect(cfg.repoUrl).toBe(originUrl);
     expect(cfg.repoPath).toBe(localPath);
-    expect(cfg.encrypt).toBe(true);
     expect(cfg.runner).toBe("claude-cli");
     expect(cfg.enableAggregateCI).toBe(true);
     expect(cfg.deviceBranch).toBe("test-device");
-    const pp = readFileSync(join(tmpHome, ".vibebook", "passphrase"), "utf8").trim();
-    expect(pp).toBe("secret");
-    expect(statSync(join(tmpHome, ".vibebook", "passphrase")).mode & 0o777).toBe(0o600);
-  });
-
-  it("does NOT write passphrase when encrypt=false", async () => {
-    const localPath = join(tmpHome, "checkout");
-    const m = await import("../../src/commands/init-wizard.js");
-    await m.applyWizardAnswers({
-      repoUrl: originUrl,
-      localPath,
-      encrypt: false,
-      enableAggregateCI: false,
-      deviceBranch: "test-device",
-    });
-    const { existsSync } = await import("node:fs");
-    expect(existsSync(join(tmpHome, ".vibebook", "passphrase"))).toBe(false);
   });
 });
 
@@ -141,10 +121,6 @@ describe("runWizard end-to-end transcript", () => {
     const a = await m.runWizard();
     closePrompts();
     expect(a.repoUrl).toBe("git@github.com:you/repo.git");
-    // 0.8.2: Q3 (encrypt) + Q4 (passphrase) dropped. Encryption opt-in via
-    // `--encrypt` flag on non-interactive init, or `vibebook config --encrypt true`.
-    expect(a.encrypt).toBe(false);
-    expect(a.passphraseEntered).toBeUndefined();
     // 0.6.1: Q6 dropped — enableAggregateCI auto-set true for sync-to-remote
     expect(a.enableAggregateCI).toBe(true);
     expect(a.deviceBranch).toBe("mini2");
@@ -177,8 +153,6 @@ describe("runWizard end-to-end transcript", () => {
     const a = await m.runWizard();
     closePrompts();
     expect(a.repoUrl).toBe("");
-    expect(a.encrypt).toBe(false);
-    expect(a.passphraseEntered).toBeUndefined();
     expect(a.enableAggregateCI).toBe(false); // local-only mode → no CI
     expect(a.deviceBranch.length).toBeGreaterThan(0); // hostname() default accepted
   });

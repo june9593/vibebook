@@ -1,11 +1,10 @@
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import chalk from "chalk";
-import { prompt, promptYesNo, promptHidden, closePrompts } from "../prompts.js";
+import { prompt, promptYesNo, closePrompts } from "../prompts.js";
 import { materializeRepoAtPath, expandHome } from "../git-ops.js";
-import { writePassphraseFile } from "../passphrase-store.js";
 import {
-  freshSaltBase64, writeConfig, writeRepoSaltFile, configExists,
+  writeConfig, configExists,
   DEFAULT_THREADING_CONCURRENCY, DEFAULT_THREADING_MAX_ATTEMPTS,
   type Config,
 } from "../config.js";
@@ -14,8 +13,6 @@ import { deviceBranchFromHostname, isStableDeviceName } from "../device.js";
 export interface WizardAnswers {
   repoUrl: string;
   localPath: string;
-  encrypt: boolean;
-  passphraseEntered?: string;
   /** True if syncToRemote was chosen. Drives auto-install of the CI
    *  aggregation workflow. Local-only repos never enable CI. */
   enableAggregateCI: boolean;
@@ -51,8 +48,6 @@ export async function runWizard(): Promise<WizardAnswers> {
 
   let repoUrl = "";
   let localPath = defaultLocalPath();
-  let encrypt = false;
-  let passphraseEntered: string | undefined;
 
   if (syncToRemote) {
     // Q1: repo URL
@@ -67,31 +62,8 @@ export async function runWizard(): Promise<WizardAnswers> {
       localPath,
     );
     localPath = resolve(expandHome(rawPath));
-
-    // Q3 (encrypt) and Q4 (passphrase) DROPPED in 0.8.2.
-    //
-    // Rationale: the file-body encryption was half-baked anyway — filenames
-    // (= first ~100 chars of the user's prompt) and `.vibebook/index.json`
-    // (full `displayName` per session) always leaked in plaintext to the
-    // remote, so an attacker reading the repo could already reconstruct the
-    // conversation topics. The threat model "GitHub itself or someone with
-    // repo read access sees content" wasn't actually addressed.
-    //
-    // The REAL risk — accidentally pasting an API key into a session and
-    // pushing it — is covered by GitHub's secret-scanning push protection
-    // (free, on private repos as of 2024-09): AWS keys, GitHub PATs, OpenAI
-    // `sk-*`, Anthropic `sk-ant-*`, and ~40 other partner patterns get
-    // rejected at push time with GH013. The body-encryption layer didn't
-    // help with that either.
-    //
-    // Power users who want encryption can still pass `--encrypt` on the
-    // non-interactive `vibebook init` path, or flip
-    // `~/.vibebook/config.json`'s `encrypt: true` and re-run sync. To turn
-    // off encryption on an existing encrypted repo, use
-    // `vibebook config --encrypt false`.
-    encrypt = false;
   } else {
-    console.log(chalk.gray("  local-only mode: no remote URL, no encryption, no push."));
+    console.log(chalk.gray("  local-only mode: no remote URL, no push."));
   }
 
   // Q5 / Q6 / Q7 dropped in 0.6.1:
@@ -121,7 +93,7 @@ export async function runWizard(): Promise<WizardAnswers> {
     hostnameDefault,
   )).trim() || hostnameDefault;
 
-  return { repoUrl, localPath, encrypt, passphraseEntered, enableAggregateCI, deviceBranch };
+  return { repoUrl, localPath, enableAggregateCI, deviceBranch };
 }
 
 /** Strip common macOS-volatile suffixes from a hostname-derived branch name.
@@ -139,8 +111,8 @@ export function stripVolatileSuffixes(name: string): string {
 }
 
 /**
- * Materialize repo + write config + (optionally) save passphrase. Pure I/O,
- * separated so wizard logic stays unit-testable.
+ * Materialize repo + write config. Pure I/O, separated so wizard logic stays
+ * unit-testable.
  */
 export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
   if (a.repoUrl) {
@@ -195,15 +167,9 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
       console.log(chalk.gray(`  using existing repo at ${a.localPath}`));
     }
   }
-  if (a.encrypt && a.passphraseEntered) {
-    writePassphraseFile(a.passphraseEntered);
-    console.log(chalk.gray(`  passphrase saved to ~/.vibebook/passphrase (mode 0600)`));
-  }
   const cfg: Config = {
     repoPath: a.localPath,
     repoUrl: a.repoUrl,
-    encrypt: a.encrypt,
-    salt: freshSaltBase64(),
     deviceBranch: a.deviceBranch,
     runner: "claude-cli",
     enableAggregateCI: a.enableAggregateCI,
@@ -221,17 +187,6 @@ export async function applyWizardAnswers(a: WizardAnswers): Promise<void> {
     bookLocale: "en",
   };
   writeConfig(cfg);
-  if (cfg.encrypt) {
-    writeRepoSaltFile(cfg.repoPath, cfg.salt);
-    console.log(chalk.gray(`  repo salt written to ${a.localPath}/.vibebook/repo-salt.json`));
-    try {
-      const { ensureCryptFilter } = await import("./crypt.js");
-      const r = ensureCryptFilter(cfg.repoPath);
-      if (r.wired) console.log(chalk.gray(`  wired git crypt filter (working tree always plaintext; encrypted on push)`));
-    } catch (err) {
-      console.log(chalk.yellow(`  warning: could not wire git crypt filter: ${(err as Error).message}`));
-    }
-  }
 
   console.log(chalk.green("\n✓ vibebook configured."));
   console.log(chalk.gray(`  Config: ~/.vibebook/config.json`));

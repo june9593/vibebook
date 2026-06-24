@@ -34,24 +34,17 @@ describe("initCmd flag mode", () => {
     vi.resetModules();
   });
 
-  it("flag mode with --encrypt + --passphrase persists config and passphrase", async () => {
+  it("flag mode persists config with digestEnabled override", async () => {
     const localPath = join(tmpHome, "checkout");
     const { initCmd } = await import("../../src/commands/init.js");
     await initCmd({
       repoUrl: originUrl,
       localPath,
-      encrypt: true,
-      passphrase: "abc",
       digestEnabled: false,
     });
     const cfg = JSON.parse(readFileSync(join(tmpHome, ".vibebook", "config.json"), "utf8"));
-    expect(cfg.encrypt).toBe(true);
     expect(cfg.digestEnabled).toBe(false);
-    expect(readFileSync(join(tmpHome, ".vibebook", "passphrase"), "utf8").trim()).toBe("abc");
-    // repo-salt.json is written into the repo so the GH Action can read it.
-    const saltFile = join(localPath, ".vibebook", "repo-salt.json");
-    expect(existsSync(saltFile)).toBe(true);
-    expect(JSON.parse(readFileSync(saltFile, "utf8")).salt).toBe(cfg.salt);
+    expect(cfg.repoPath).toBe(localPath);
   });
 
   it("flag mode default localPath is ./.vibebook/repo under cwd", async () => {
@@ -72,6 +65,6 @@ describe("initCmd flag mode", () => {
 
   it("flag mode without repoUrl throws", async () => {
     const { initCmd } = await import("../../src/commands/init.js");
-    await expect(initCmd({ encrypt: true })).rejects.toThrow(/repoUrl is required/);
+    await expect(initCmd({ device: "x" })).rejects.toThrow(/repoUrl is required/);
   });
 });

@@ -1,10 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { readPassphraseFile } from "./passphrase-store.js";
-import { dataDirAbs, repoSaltAbs } from "./repo-data-dir.js";
 
 const CONFIG_DIR = join(homedir(), ".vibebook");
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
@@ -20,8 +17,6 @@ export const DEFAULT_THREADING_MAX_ATTEMPTS = 3;
 const Schema = z.object({
   repoPath: z.string(),
   repoUrl: z.string(),
-  encrypt: z.boolean().default(false),
-  salt: z.string(),          // base64 per-repo salt for scrypt
   deviceBranch: z.string().default(""),
   runner: z.enum(["claude-cli", "anthropic-api"]).default("claude-cli"),
   /** When true, the user opted into the CI book-aggregation workflow
@@ -59,32 +54,4 @@ export function readConfig(): Config {
 export function writeConfig(cfg: Config): void {
   mkdirSync(CONFIG_DIR, { recursive: true });
   writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2) + "\n");
-}
-
-export function freshSaltBase64(): string {
-  return randomBytes(16).toString("base64");
-}
-
-/**
- * Write `<repoPath>/.vibebook/repo-salt.json` so the GitHub Action workflow can
- * read the salt without having access to `~/.vibebook/config.json`. The salt
- * is not sensitive — security relies on the passphrase. Safe to commit.
- *
- * Legacy repos created before the data-dir rename had this file at
- * `.memvc/repo-salt.json`; `migrateLegacyDataDir` (in src/migrate.ts) renames
- * the directory on first sync/digest run.
- */
-export function writeRepoSaltFile(repoPath: string, salt: string): void {
-  mkdirSync(dataDirAbs(repoPath), { recursive: true });
-  writeFileSync(repoSaltAbs(repoPath), JSON.stringify({ salt }, null, 2) + "\n");
-}
-
-export function getPassphrase(): string {
-  const env = process.env.VIBEBOOK_PASSPHRASE;
-  if (env) return env;
-  const file = readPassphraseFile();
-  if (file) return file;
-  throw new Error(
-    "encryption is on — set VIBEBOOK_PASSPHRASE env var, or save a passphrase via `vibebook init`",
-  );
 }

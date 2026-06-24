@@ -17,7 +17,6 @@ describe("workflowInitCmd (local-only mode)", () => {
     // Local-only: no repoUrl. Skips the main-push path.
     writeFileSync(join(tmpHome, ".vibebook", "config.json"), JSON.stringify({
       repoPath, repoUrl: "",
-      encrypt: false, salt: "x",
       deviceBranch: "test-device",
       runner: "claude-cli",
       enableAggregateCI: true,
@@ -93,7 +92,6 @@ describe("workflowInitCmd (remote mode → writes to main via temp worktree)", (
     mkdirSync(join(tmpHome, ".vibebook"), { recursive: true });
     writeFileSync(join(tmpHome, ".vibebook", "config.json"), JSON.stringify({
       repoPath: workRepo, repoUrl: bareRemote,
-      encrypt: false, salt: "x",
       deviceBranch: "test-device",
       runner: "claude-cli",
       enableAggregateCI: true,

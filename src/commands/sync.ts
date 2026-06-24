@@ -7,21 +7,16 @@ import type { SourceAdapter } from "../sources/base.js";
 import { loadIndex, saveIndex, hasUnchanged, upsertEntry } from "../index-store.js";
 import type { IndexEntry } from "../types.js";
 import { writeSession } from "../writer.js";
-import { readConfig, writeConfig, writeRepoSaltFile, type Config } from "../config.js";
+import { readConfig, writeConfig, type Config } from "../config.js";
 import { deviceBranchFromHostname } from "../device.js";
 import { ensureRepo, commitAndPush, ensureDeviceBranch, fastForwardBranch } from "../git-ops.js";
 import { migrateLegacyMainToDevice, migrateLegacyDataDir, migratedDataDirPaths } from "../migrate.js";
-import { INDEX_REL, REPO_SALT_REL, LEGACY_REPO_DATA_DIR } from "../repo-data-dir.js";
-import { ensureCryptFilter } from "./crypt.js";
+import { INDEX_REL, LEGACY_REPO_DATA_DIR } from "../repo-data-dir.js";
 
 /**
  * `vibebook sync` — extract jsonl from local sources (Claude Code + VS Code
  * Copilot Chat), write per-session raw + md to the user's git repo as
  * **plaintext**, then commit + push to the device branch.
- *
- * Encryption (when enabled) happens transparently via the git clean filter
- * wired up by `vibebook crypt init`. The working tree is always plaintext;
- * only git's object database (and therefore the remote) holds ciphertext.
  *
  * vibebook v0.2 explicitly does NOT call any LLM here. The book-writing
  * pipeline is the in-session `/vibebook` slash command driven by skills/
@@ -31,10 +26,6 @@ export interface SyncOptions {
   repoPath: string;
   claudeRoot?: string;
   vscodeRoot?: string;
-  /** Whether the configured repo wants encryption. Drives whether we wire
-   *  the git filter; never used to encrypt files in-process. */
-  encrypt: boolean;
-  saltB64?: string;
   push?: boolean;
   repoUrl?: string;
   deviceBranch?: string;
@@ -57,19 +48,6 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
   const dataDirMig = await migrateLegacyDataDir(opts.repoPath);
   if (dataDirMig.migrated) {
     console.log(chalk.cyan(`Migrating: renamed legacy ${LEGACY_REPO_DATA_DIR}/ → .vibebook/ ${dataDirMig.viaGit ? "(via git mv; staged for next commit)" : "(non-git mode)"}`));
-  }
-
-  // Wire the git crypt filter idempotently. On a fresh clone, this is also
-  // what re-checks-out raw_sessions/ as plaintext via smudge.
-  if (opts.encrypt && existsSync(join(opts.repoPath, ".git"))) {
-    try {
-      const r = ensureCryptFilter(opts.repoPath);
-      if (r.wired && r.wroteAttrs) {
-        console.log(chalk.cyan(`+ wired git filter \`vibebook\` (also wrote .gitattributes)`));
-      }
-    } catch (err) {
-      console.log(chalk.yellow(`! could not wire git crypt filter: ${(err as Error).message}`));
-    }
   }
 
   const adapters: SourceAdapter[] = [
@@ -104,9 +82,6 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
         continue;
       }
       const rel = writeSession(opts.repoPath, s, { includeReasoning: opts.includeReasoning });
-
-      // Working tree is always plaintext now; the clean filter handles
-      // encryption on `git add` if enabled.
       pathsWritten.push(rel.md);
 
       const entry: IndexEntry = {
@@ -149,21 +124,6 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
 
   saveIndex(opts.repoPath, idx);
 
-  // Self-heal: encryption is on but the repo is missing .vibebook/repo-salt.json
-  // (legacy repo or someone git-rm'd it). Salt is not sensitive — security
-  // relies on the passphrase. Always restage the path on encrypted-mode sync;
-  // git no-ops if there's nothing new.
-  const saltRelPath = REPO_SALT_REL;
-  let saltStaged = false;
-  if (opts.encrypt && opts.saltB64) {
-    const saltAbs = join(opts.repoPath, saltRelPath);
-    if (!existsSync(saltAbs)) {
-      writeRepoSaltFile(opts.repoPath, opts.saltB64);
-      console.log(chalk.cyan(`+ wrote missing ${saltRelPath} (needed by GitHub Action workflow)`));
-    }
-    saltStaged = true;
-  }
-
   let committed = false, pushed = false;
   if (opts.push && opts.repoUrl && opts.deviceBranch) {
     console.log(chalk.gray(`\nOpening repo at ${opts.repoPath}...`));
@@ -189,8 +149,6 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
       return { newCount, skippedCount, pathsWritten, committed: false, pushed: false };
     }
     const all = [...pathsWritten, INDEX_REL];
-    if (saltStaged) all.push(saltRelPath);
-    if (opts.encrypt) all.push(".gitattributes");
     if (dataDirMig.migrated && dataDirMig.viaGit) {
       for (const p of migratedDataDirPaths(opts.repoPath)) all.push(p);
     }
@@ -227,9 +185,8 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     console.log(chalk.gray(`Staging ${all.length} paths and committing...`));
     const commitMsg = newCount > 0
       ? `vibebook sync: +${newCount} sessions${dataDirMig.migrated ? " (+ rename .memvc/→.vibebook/)" : ""}`
-      : (saltStaged ? "vibebook: backfill repo-salt.json for CI" :
-         (dataDirMig.migrated ? "vibebook: rename .memvc/ → .vibebook/" :
-          `vibebook sync: +${newCount} sessions`));
+      : (dataDirMig.migrated ? "vibebook: rename .memvc/ → .vibebook/" :
+         `vibebook sync: +${newCount} sessions`);
     const r = await commitAndPush(
       git,
       commitMsg,
@@ -244,7 +201,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
           "\n  Push blocked by GitHub secret-scanning (GH013). Your raw_sessions contain something that looks like a real secret (token, API key) — typically because past AI conversations included one verbatim.",
         ));
         console.log(chalk.cyan(
-          "  Tip: enable encryption (`encrypt: true` in ~/.vibebook/config.json) so the git filter scrubs raw_sessions before push, then re-sync.",
+          "  Fix: remove the secret from the offending raw_sessions md (or rotate it and use GitHub's unblock URL), then re-sync. A private repo + push protection is the intended guard here.",
         ));
       } else {
         console.log(chalk.yellow("Commit done, push failed or skipped."));
@@ -354,8 +311,6 @@ export async function syncCmd(): Promise<void> {
   const cfg = readConfigWithMigration();
   const r = await runSync({
     repoPath: cfg.repoPath,
-    encrypt: cfg.encrypt,
-    saltB64: cfg.salt,
     push: true,
     repoUrl: cfg.repoUrl,
     deviceBranch: cfg.deviceBranch,

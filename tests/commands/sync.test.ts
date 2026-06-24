@@ -12,8 +12,6 @@ function baseCfg(overrides: Partial<Config> = {}): Config {
   return {
     repoPath: "/tmp/x",
     repoUrl: "git@example.com:x.git",
-    encrypt: false,
-    salt: "AAAA",
     deviceBranch: "",
     runner: "claude-cli",
     
@@ -76,7 +74,7 @@ describe("runSync — extract + raw push only (v0.2: no LLM)", () => {
 
   it("extracts new sessions, writes files, updates index", async () => {
     const result = await runSync({
-      repoPath: repo, claudeRoot, vscodeRoot, encrypt: false,
+      repoPath: repo, claudeRoot, vscodeRoot,
     });
     expect(result.newCount).toBe(1);
     expect(result.skippedCount).toBe(0);
@@ -90,14 +88,14 @@ describe("runSync — extract + raw push only (v0.2: no LLM)", () => {
   });
 
   it("skips unchanged sessions on second run", async () => {
-    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
-    const result2 = await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+    await runSync({ repoPath: repo, claudeRoot, vscodeRoot });
+    const result2 = await runSync({ repoPath: repo, claudeRoot, vscodeRoot });
     expect(result2.newCount).toBe(0);
     expect(result2.skippedCount).toBe(1);
   });
 
   it("never creates book/ — that's /vibebook's job, not sync's", async () => {
-    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+    await runSync({ repoPath: repo, claudeRoot, vscodeRoot });
     expect(existsSync(join(repo, "book"))).toBe(false);
     expect(existsSync(join(repo, ".vibebook/index.book.json"))).toBe(false);
   });
@@ -121,7 +119,7 @@ describe("runSync — extract + raw push only (v0.2: no LLM)", () => {
     const { writeFileSync } = await import("node:fs");
     writeFileSync(join(emptyWs, "chatSessions", "empty-shell-cccc.jsonl"), shell);
 
-    const result = await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+    const result = await runSync({ repoPath: repo, claudeRoot, vscodeRoot });
     // 1 real claude session written, 1 empty shell skipped
     expect(result.newCount).toBe(1);
     expect(result.skippedCount).toBeGreaterThanOrEqual(1);
@@ -191,7 +189,6 @@ describe("runSync — workflow file inheritance from main (P1, 0.8.1)", () => {
   it("first push of a fresh device branch picks up .github/workflows/vibebook-aggregate.yml from main, commits and pushes it", async () => {
     await runSync({
       repoPath: workRepo, claudeRoot, vscodeRoot,
-      encrypt: false,
       push: true,
       repoUrl: bareRemote,
       deviceBranch: "mini-fresh",
@@ -218,7 +215,6 @@ describe("runSync — workflow file inheritance from main (P1, 0.8.1)", () => {
 
     await runSync({
       repoPath: workRepo, claudeRoot, vscodeRoot,
-      encrypt: false,
       push: true,
       repoUrl: bareRemote,
       deviceBranch: "mini-fresh",
@@ -254,7 +250,6 @@ describe("runSync — workflow file inheritance from main (P1, 0.8.1)", () => {
 
     await runSync({
       repoPath: freshClone, claudeRoot, vscodeRoot,
-      encrypt: false,
       push: true,
       repoUrl: freshBare,
       deviceBranch: "mini-fresh2",
@@ -331,7 +326,6 @@ describe("runSync — memory/ staging (0.8.6)", () => {
 
     await runSync({
       repoPath: workRepo, claudeRoot, vscodeRoot,
-      encrypt: false,
       push: true,
       repoUrl: bareRemote,
       deviceBranch: "memsync-device",
@@ -349,7 +343,6 @@ describe("runSync — memory/ staging (0.8.6)", () => {
     // No memory/ written — sync should still succeed without error.
     const result = await runSync({
       repoPath: workRepo, claudeRoot, vscodeRoot,
-      encrypt: false,
       push: true,
       repoUrl: bareRemote,
       deviceBranch: "memsync-device",
@@ -381,7 +374,6 @@ describe("runSync — memory/ staging (0.8.6)", () => {
 
     await runSync({
       repoPath: workRepo, claudeRoot, vscodeRoot,
-      encrypt: false,
       push: true,
       repoUrl: bareRemote,
       deviceBranch: "memsync-device",
@@ -410,7 +402,6 @@ describe("runSync — memory/ staging (0.8.6)", () => {
 
     await runSync({
       repoPath: workRepo, claudeRoot, vscodeRoot,
-      encrypt: false,
       push: true,
       repoUrl: bareRemote,
       deviceBranch: "memsync-device",
@@ -438,7 +429,7 @@ describe("runSync — orphan index prune (0.8.4)", () => {
     const proj = join(claudeRoot, "-Users-me-edge-memvc");
     mkdirSync(proj, { recursive: true });
     cpSync(join(fixturesDir, "claude", "claude-session.jsonl"), join(proj, "abc12345.jsonl"));
-    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+    await runSync({ repoPath: repo, claudeRoot, vscodeRoot });
 
     // Sanity: 1 indexed entry, 1 rendered md
     let idx = loadIndex(repo);
@@ -454,7 +445,7 @@ describe("runSync — orphan index prune (0.8.4)", () => {
     rmSync(join(repo, onlyEntry.relativePath));
 
     // Second sync: the prune pass should clean the orphan entry.
-    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+    await runSync({ repoPath: repo, claudeRoot, vscodeRoot });
 
     idx = loadIndex(repo);
     expect(Object.keys(idx.entries).length).toBe(0);
@@ -467,13 +458,13 @@ describe("runSync — orphan index prune (0.8.4)", () => {
     const proj = join(claudeRoot, "-Users-me-edge-memvc");
     mkdirSync(proj, { recursive: true });
     cpSync(join(fixturesDir, "claude", "claude-session.jsonl"), join(proj, "abc12345.jsonl"));
-    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+    await runSync({ repoPath: repo, claudeRoot, vscodeRoot });
 
     // Delete the source jsonl but KEEP the rendered md
     const { unlinkSync } = await import("node:fs");
     unlinkSync(join(proj, "abc12345.jsonl"));
 
-    await runSync({ repoPath: repo, claudeRoot, vscodeRoot, encrypt: false });
+    await runSync({ repoPath: repo, claudeRoot, vscodeRoot });
 
     const idx = loadIndex(repo);
     expect(Object.keys(idx.entries).length).toBe(1);

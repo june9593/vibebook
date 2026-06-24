@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.10.0 — 2026-06-24
+
+### Removed: at-rest encryption (git-crypt filter)
+
+The opt-in raw-sessions encryption layer (off by default since 0.8.2) is
+**removed**. The git clean/smudge filter, `crypt` / `config --encrypt`
+commands, passphrase store, and per-repo salt are all gone. The recommended
+guard for private session data is a **private git remote** (plus GitHub
+push protection, which sync now points you at when a real secret is
+detected). Encryption added significant surface — deterministic-IV crypto,
+salt distribution to CI, two-prefix filter wiring — for a default-off
+feature almost nobody enabled.
+
+**Migration (only if you turned encryption ON — it was off by default):**
+
+> ⚠️ **Before upgrading to 0.10.0, decrypt your spool while still on
+> v0.8.x.** Run `vibebook config --encrypt false` then `vibebook sync` to
+> re-commit `raw_sessions/` as plaintext and push. Once you're on 0.10.0,
+> vibebook no longer wires the git-crypt filter, so any commits still in
+> ciphertext become unreadable on checkout.
+
+After upgrading, `~/.vibebook/passphrase` and `.vibebook/repo-salt.json`
+are inert — vibebook never reads them again. You can delete them manually;
+0.10.0 leaves them untouched so a downgrade stays possible. Configs carrying
+the old `encrypt` / `salt` keys still load — the schema ignores unknown keys.
+
 ## 0.8.6 — 2026-06-10
 
 ### Cross-device typed memory (vibebook Memory OS v1)

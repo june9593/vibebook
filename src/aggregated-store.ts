@@ -13,8 +13,7 @@ import type { IndexFile, IndexEntry } from "./types.js";
  *  unreachable until you manually checked out the other device branch.
  *
  *  Layout: `<HOME>/.vibebook/aggregated/` — sibling to `session-repo/`.
- *  Both worktrees share the same `.git` database so encryption (git-crypt
- *  smudge/clean filters) is wired identically. */
+ *  Both worktrees share the same `.git` database. */
 export function aggregatedPath(): string {
   return join(homedir(), ".vibebook", "aggregated");
 }

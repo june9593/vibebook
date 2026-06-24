@@ -18,7 +18,7 @@ describe("resumeCmd (0.6 — context-as-prompt)", () => {
       join(fakeHome, ".vibebook/config.json"),
       JSON.stringify({
         repoPath,
-        repoUrl: "", encrypt: false, salt: "",
+        repoUrl: "",
         deviceBranch: "test-device",
         runner: "claude-cli",
         enableAggregateCI: false,
