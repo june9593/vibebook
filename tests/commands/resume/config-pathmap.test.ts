@@ -15,7 +15,7 @@ describe("setMapPath", () => {
       join(fakeHome, ".vibebook/config.json"),
       JSON.stringify({
         repoPath: join(fakeHome, ".vibebook/session-repo"),
-        repoUrl: "", encrypt: false, salt: "",
+        repoUrl: "",
         deviceBranch: "test", runner: "claude-cli",
         enableAggregateCI: false, includeReasoning: true,
         threadingConcurrency: 4, threadingMaxAttempts: 3,
@@ -78,7 +78,7 @@ describe("setDeviceBranch", () => {
       join(fakeHome, ".vibebook/config.json"),
       JSON.stringify({
         repoPath: join(fakeHome, ".vibebook/session-repo"),
-        repoUrl: "", encrypt: false, salt: "",
+        repoUrl: "",
         deviceBranch: "Mac-mini-2.local", runner: "claude-cli",
         enableAggregateCI: false, includeReasoning: true,
         threadingConcurrency: 4, threadingMaxAttempts: 3,

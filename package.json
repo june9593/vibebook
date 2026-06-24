@@ -1,6 +1,6 @@
 {
   "name": "vibebook",
-  "version": "0.8.8",
+  "version": "0.10.0",
   "description": "Cross-device sync + resume for AI coding sessions (Claude Code + Copilot Chat). Companion to the vibebook Claude Code plugin which provides digest + recall.",
   "type": "module",
   "license": "MIT",

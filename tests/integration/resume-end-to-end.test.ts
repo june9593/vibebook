@@ -18,7 +18,7 @@ describe("resume end-to-end (0.6)", () => {
       join(fakeHome, ".vibebook/config.json"),
       JSON.stringify({
         repoPath,
-        repoUrl: "", encrypt: false, salt: "",
+        repoUrl: "",
         deviceBranch: "dev", runner: "claude-cli",
         enableAggregateCI: false,
         includeReasoning: true,

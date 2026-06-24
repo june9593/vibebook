@@ -19,7 +19,7 @@ beforeEach(() => {
   writeFileSync(
     join(tmpHome, ".vibebook", "config.json"),
     JSON.stringify({
-      repoPath: repo, repoUrl: "", encrypt: false, salt: "x",
+      repoPath: repo, repoUrl: "",
       deviceBranch: "test", runner: "claude-cli",
     }),
   );

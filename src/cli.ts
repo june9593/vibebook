@@ -30,22 +30,18 @@ export async function run(argv: string[]) {
     .command("init [repoUrl]")
     .description("Initialize vibebook. Run with no arguments for the interactive wizard, or pass a repoUrl + flags for non-interactive setup.")
     .option("--local-path <path>", "local checkout path (default ./.vibebook/repo)")
-    .option("--encrypt", "encrypt raw files before commit")
     .option("--no-digest", "skip the digest pipeline (raw push only)")
     .option("--device <name>", "device branch name (default: sanitized os.hostname())")
-    .option("--passphrase <pp>", "save passphrase to ~/.vibebook/passphrase (only with --encrypt)")
     .action(async (
       repoUrl: string | undefined,
-      opts: { localPath?: string; encrypt?: boolean; digest?: boolean; device?: string; passphrase?: string },
+      opts: { localPath?: string; digest?: boolean; device?: string },
     ) => {
       const { initCmd } = await import("./commands/init.js");
       await initCmd({
         repoUrl,
         localPath: opts.localPath,
-        encrypt: opts.encrypt,
         digestEnabled: opts.digest !== false,
         device: opts.device,
-        passphrase: opts.passphrase,
       });
     });
   program
@@ -65,7 +61,7 @@ export async function run(argv: string[]) {
     });
   program
     .command("doctor")
-    .description("Health check: CLI version on PATH, npm latest, Claude plugin manifest + install entry, ~/.vibebook/config presence, git crypt filter (when encrypt=true), memex availability. Read-only and offline-tolerant.")
+    .description("Health check: CLI version on PATH, npm latest, Claude plugin manifest + install entry, ~/.vibebook/config presence, memex availability. Read-only and offline-tolerant.")
     .action(async () => {
       const { doctorCmd } = await import("./commands/doctor.js");
       await doctorCmd();
@@ -120,17 +116,10 @@ export async function run(argv: string[]) {
     });
   program
     .command("cat <path>")
-    .description("Print a repo file to stdout, auto-decrypting `.enc` files. Path is absolute or relative to the configured repoPath. Used by the /vibebook skill to read encrypted session md.")
+    .description("Print a repo file to stdout. Path is absolute or relative to the configured repoPath. Used by the /vibebook skill to read session md.")
     .action(async (path: string) => {
       const { catCmd } = await import("./commands/cat.js");
       await catCmd(path);
-    });
-  program
-    .command("crypt <action>")
-    .description("Manage the git clean/smudge filter that encrypts raw_sessions/ on push and decrypts on checkout. Actions: init | status | clean | smudge. (`clean` and `smudge` are invoked by git itself, not by you.)")
-    .action(async (action: string) => {
-      const { cryptCmd } = await import("./commands/crypt.js");
-      await cryptCmd(action);
     });
   program
     .command("list-sessions")
@@ -173,8 +162,7 @@ export async function run(argv: string[]) {
     .description("Inspect or modify ~/.vibebook/config.json.")
     .option("--map-path <FROM=TO>", "add a cross-device path mapping (e.g. /Users/yueA=/Users/yueB) for `vibebook resume`")
     .option("--device <name>", "set a stable device branch name (e.g. 'mini2') — overrides the volatile hostname() default")
-    .option("--encrypt <bool>", "enable or disable raw_sessions encryption (deinit git crypt filter when 'false'). Use 'true' or 'false'.")
-    .action(async (opts: { mapPath?: string; device?: string; encrypt?: string }) => {
+    .action(async (opts: { mapPath?: string; device?: string }) => {
       if (opts.mapPath) {
         const { setMapPath } = await import("./commands/resume/config-pathmap.js");
         setMapPath(opts.mapPath);
@@ -194,11 +182,6 @@ export async function run(argv: string[]) {
             `  git push origin --delete '${previous}' 2>/dev/null`,
           );
         }
-        return;
-      }
-      if (opts.encrypt !== undefined) {
-        const { setEncryptMode } = await import("./commands/config-encrypt.js");
-        await setEncryptMode(opts.encrypt);
         return;
       }
       // No flags: print current config

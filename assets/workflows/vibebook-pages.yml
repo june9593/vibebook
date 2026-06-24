@@ -48,8 +48,6 @@ jobs:
           {
             "repoPath": "${GITHUB_WORKSPACE}",
             "repoUrl": "",
-            "encrypt": false,
-            "salt": "ci",
             "deviceBranch": "ci",
             "runner": "claude-cli",
             "enableAggregateCI": false,

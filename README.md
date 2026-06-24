@@ -29,10 +29,11 @@ The wizard walks you through:
 
 1. **Sync to a remote git repo?** (yes/no — local-only is also valid)
 2. **Repo URL** + local checkout path
-3. **Encrypt raw sessions before commit?** (git-crypt filter, transparent)
-4. **Passphrase** (saved at `~/.vibebook/passphrase` mode 0600)
-5. **Enable CI cross-device aggregation?** (GitHub Actions merges device branches into main)
-6. **Include assistant reasoning in synced markdown?** (recommended ON for ≥400K-context models)
+3. **Stable device name** for this machine's git branch (defaults to a
+   cleaned hostname; pick a physical label like `mini2` if it drifts)
+
+CI cross-device aggregation is auto-enabled when you sync to a remote, and
+assistant reasoning is always included in synced markdown.
 
 After init, push your sessions:
 
@@ -79,7 +80,6 @@ digest tooling can later reason about same-source threads.
 | `vibebook config [--map-path FROM=TO]` | Read or modify `~/.vibebook/config.json`. |
 | `vibebook upgrade` | `npm install -g vibebook@latest`. |
 | `vibebook doctor` | Health check: CLI, config, spool state, plugin install status. |
-| `vibebook crypt <init\|verify>` | Wire up the git-crypt filter for encrypted raw sessions. |
 | `vibebook workflow <init\|...>` | Install GitHub Actions for cross-device aggregation. |
 | `vibebook list` | List sessions in spool (simple table). |
 | `vibebook show <ref>` | Print one session's markdown to stdout. |
@@ -88,15 +88,14 @@ digest tooling can later reason about same-source threads.
 ## Files written
 
 - `~/.vibebook/config.json` — your settings (`mode 0600`)
-- `~/.vibebook/passphrase` — git-crypt passphrase if encryption enabled (`mode 0600`)
 - `~/.vibebook/session-repo/` — git working tree of your private memory repo
   - `raw_sessions/<tool>/<project>/<date>/*.{md,raw.json,jsonl}` — sync-rendered session copies plus the original jsonl (preserved for resume)
   - `.vibebook/index.json` — spool index (co-owned with the plugin)
   - `book/` and `.vibebook/index.book.json` — written by the plugin if you have it installed
 
 The npm CLI does not touch `book/` or `.vibebook/index.book.json` — those
-are the plugin's domain. The plugin in turn does not touch `.git/`,
-`config.json`, `passphrase`, or `repo-salt.json` — those are sync's.
+are the plugin's domain. The plugin in turn does not touch `.git/` or
+`config.json` — those are sync's.
 
 ## Migration from v0.4.x
 

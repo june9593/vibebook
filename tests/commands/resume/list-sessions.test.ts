@@ -19,8 +19,6 @@ describe("listSessionsCmd", () => {
       JSON.stringify({
         repoPath,
         repoUrl: "git@example.com:me/repo.git",
-        encrypt: false,
-        salt: "",
         deviceBranch: "test-device",
         runner: "claude-cli",
         enableAggregateCI: false,

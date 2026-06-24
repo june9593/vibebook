@@ -20,8 +20,7 @@ import { isStableDeviceName } from "../device.js";
  *   4. `~/.vibebook/config.json` exists, repoPath exists + is a git repo
  *   5. 0.5.x spool residue (.raw.json + .jsonl) — vibebook 0.6 only writes .md
  *   5b. resume-forks.json residue from 0.5.1 fork-tracking
- *   6. git crypt filter wired (when config.encrypt = true)
- *   7. memex on PATH (informational; not an error if missing)
+ *   6. memex on PATH (informational; not an error if missing)
  *
  * The check is read-only and offline-tolerant — `npm view` is the only
  * step that needs network and we surface the failure inline rather
@@ -213,18 +212,6 @@ export async function doctorCmd(): Promise<void> {
         });
       }
     }
-
-    // 6. Git filter (only when encrypt = true)
-    if (config.encrypt && repoHasGit) {
-      const filterWired = isCryptFilterWired(config.repoPath);
-      checks.push({
-        name: "Git crypt filter", status: filterWired ? "ok" : "warn",
-        detail: filterWired
-          ? "vibebook clean/smudge filter wired"
-          : "encrypt=true in config but git filter not wired in this clone",
-        fix: filterWired ? undefined : `cd "${config.repoPath}" && vibebook crypt init`,
-      });
-    }
   }
 
   // 7. memex (informational)
@@ -330,7 +317,6 @@ function readNpmLatestVersion(): string | null {
 interface MinimalConfig {
   repoPath: string;
   repoUrl?: string;
-  encrypt?: boolean;
   deviceBranch?: string;
 }
 
@@ -363,15 +349,6 @@ function countResidue(repoPath: string): { rawJsonCount: number; jsonlCount: num
   };
   walk(root);
   return { rawJsonCount, jsonlCount };
-}
-
-function isCryptFilterWired(repoPath: string): boolean {
-  // git config --get returns 0 if the key is set; we check the smudge half
-  // since clean+smudge are wired together.
-  const r = spawnSync("git", ["-C", repoPath, "config", "--get", "filter.vibebook.smudge"], {
-    encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
-  });
-  return r.status === 0 && r.stdout.trim().length > 0;
 }
 
 function readMemexVersion(): string | null {
