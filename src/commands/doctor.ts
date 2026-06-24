@@ -214,7 +214,7 @@ export async function doctorCmd(): Promise<void> {
     }
   }
 
-  // 7. memex (informational)
+  // 6. memex (informational)
   const memexVersion = readMemexVersion();
   if (memexVersion) {
     checks.push({
