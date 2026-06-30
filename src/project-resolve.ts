@@ -1,18 +1,20 @@
 import { loadIndex } from "./index-store.js";
 import { projectSlugFromPath } from "./slug.js";
+import { resolveProjectIdSync } from "./project-identity.js";
 import type { IndexEntry } from "./types.js";
 
 /**
  * Reverse-lookup a project slug from an absolute cwd.
  *
- *   1. Try the path-derived slug (`projectSlugFromPath`) and check the index
- *      has at least one synced session for it. This is the authoritative
- *      path because the sync adapters compute project slugs the same way.
- *   2. Fall back to scanning index entries for one whose `projectRaw` ===
- *      cwd. Handles cases where the user's cwd was reached through a
- *      symlink that has a different basename than the recorded session cwd.
+ *   1. Resolve the stable project identity (git remote → slug; path slug when
+ *      no remote — `resolveProjectIdSync`) and check the index has a session
+ *      for it. The sync adapters compute the project the same way, so this is
+ *      authoritative.
+ *   2. Also try the legacy path slug, so a repo whose data was written before
+ *      the remote-identity switch (or a non-git project) still resolves.
+ *   3. Fall back to scanning index entries for one whose `projectRaw` === cwd.
  *
- * Returns null if neither matches — caller decides how to error.
+ * Returns null if none match — caller decides how to error.
  */
 export function resolveProjectFromCwd(cwd: string, repoPath: string): string | null {
   const indexFile = loadIndex(repoPath);
@@ -24,9 +26,18 @@ export function resolveProjectFromCwdWithIndex(
   cwd: string,
   entries: Record<string, IndexEntry>,
 ): string | null {
-  const slug = projectSlugFromPath(cwd);
-  for (const e of Object.values(entries)) {
-    if (e.project === slug) return slug;
+  // Prefer the stable (remote-based) slug; fall back to the legacy path slug so
+  // un-migrated / non-git projects still resolve during the transition.
+  const candidates: string[] = [];
+  const remoteSlug = resolveProjectIdSync(cwd).slug;
+  candidates.push(remoteSlug);
+  const pathSlug = projectSlugFromPath(cwd);
+  if (pathSlug !== remoteSlug) candidates.push(pathSlug);
+
+  for (const cand of candidates) {
+    for (const e of Object.values(entries)) {
+      if (e.project === cand) return cand;
+    }
   }
   for (const e of Object.values(entries)) {
     if (e.projectRaw === cwd) return e.project;

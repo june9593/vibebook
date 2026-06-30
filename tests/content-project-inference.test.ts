@@ -9,8 +9,8 @@ import {
 import type { SessionMessage } from "../src/types.js";
 
 const KNOWN_ROOTS = [
-  { path: "/Users/u/edge/vibebook", slug: "edge-vibebook" },
-  { path: "/Users/u/chromium/src", slug: "chromium-src" },
+  { path: "/Users/u/edge/vibebook" },
+  { path: "/Users/u/chromium/src" },
 ].sort((a, b) => b.path.length - a.path.length);
 
 function toolUseMsg(blocks: { name: string; input: Record<string, unknown> }[]): SessionMessage {
