@@ -14,8 +14,8 @@ import {
 
 // Cached at module scope: listing ~/.claude/projects/ on every parse is
 // fine but redundant when sync touches hundreds of jsonls in one run.
-let cachedRoots: { path: string; slug: string }[] | null = null;
-function getRoots(): { path: string; slug: string }[] {
+let cachedRoots: { path: string }[] | null = null;
+function getRoots(): { path: string }[] {
   if (cachedRoots === null) cachedRoots = listKnownProjectRoots();
   return cachedRoots;
 }

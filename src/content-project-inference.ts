@@ -57,44 +57,42 @@ function decodeProjectDirName(name: string): string {
 
 /**
  * Build the list of "known project roots" by listing `~/.claude/projects/`.
- * Each entry is `{ path, slug }`. Sorted longest-prefix-first so a path
- * like `/Users/u/edge/memvc/.claude/worktrees/foo` matches the worktree
- * subdir before falling back to the parent project.
+ * Returns just the `{ path }`s, sorted longest-prefix-first so a path like
+ * `/Users/u/edge/memvc/.claude/worktrees/foo` matches the worktree subdir
+ * before falling back to the parent project. The (remote-based) slug is
+ * resolved lazily — only for the root a path actually matches — so listing
+ * roots never spawns `git` for projects the session didn't touch (#41 review).
  */
 export function listKnownProjectRoots(
   projectsDir: string = join(homedir(), ".claude", "projects"),
-): { path: string; slug: string }[] {
+): { path: string }[] {
   let entries: string[];
   try {
     entries = readdirSync(projectsDir);
   } catch {
     return [];
   }
-  const out = entries.map((name) => {
-    const path = decodeProjectDirName(name);
-    // Stable (remote-based) slug per known project root; falls back to the path
-    // slug for non-git roots. The unknown-path fallback below stays path-based.
-    return { path, slug: cachedProjectSlug(path) };
-  });
+  const out = entries.map((name) => ({ path: decodeProjectDirName(name) }));
   out.sort((a, b) => b.path.length - a.path.length);
   return out;
 }
 
 /**
  * Match an absolute path to a known project root, or fall back to
- * deriving a slug from the path's parent component.
+ * deriving a slug from the path's parent component. The slug is the stable
+ * remote-based identity (cached); a path slug only when there's no git remote.
  *
- *   "/Users/me/edge/memvc/src/foo.ts"  →  "edge-memvc"  (matched)
- *   "/Users/me/edge/random/file.ts"    →  "edge-random" (no match, slug from parent)
- *   "/etc/hosts"                       →  "etc-hosts"   (still slug; caller can ignore)
+ *   "/Users/me/edge/memvc/src/foo.ts"  →  "github.com-..."/"edge-memvc"  (matched)
+ *   "/Users/me/edge/random/file.ts"    →  slug from parent (no root match)
+ *   "/etc/hosts"                       →  null (non-project)
  */
 export function pathToProjectSlug(
   absPath: string,
-  roots: { path: string; slug: string }[],
+  roots: { path: string }[],
 ): string | null {
   if (!absPath || !absPath.startsWith("/")) return null;
   for (const r of roots) {
-    if (absPath === r.path || absPath.startsWith(r.path + "/")) return r.slug;
+    if (absPath === r.path || absPath.startsWith(r.path + "/")) return cachedProjectSlug(r.path);
   }
   // Fallback: derive a slug from the directory the touched file lives in.
   const lastSlash = absPath.lastIndexOf("/");
@@ -166,7 +164,7 @@ export function extractPathsFromMessages(messages: SessionMessage[]): string[] {
  */
 export function inferProjectFromContent(
   messages: SessionMessage[],
-  roots: { path: string; slug: string }[] = listKnownProjectRoots(),
+  roots: { path: string }[] = listKnownProjectRoots(),
 ): InferenceResult {
   const paths = extractPathsFromMessages(messages);
   const counts: Record<string, number> = {};
