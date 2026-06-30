@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.11.0 — 2026-06-30
+
+### Project identity from the git remote (P0a)
+
+The project a session/memory belongs to was keyed on `projectSlugFromPath` —
+the **last two path segments** of the cwd (`~/edge/memvc` → `edge-memvc`). The
+same repo at a different path per machine (`~/work/memvc`, `~/projects/memvc`)
+split into different projects, so raw_sessions folders, memory ids, and book
+never aggregated across devices. This is the foundation for cross-device
+aggregate/recall.
+
+Project identity is now the normalized git **`origin` remote** (identical on
+every clone), with the legacy path slug as fallback for non-git / no-remote
+projects:
+
+- `src/project-identity.ts`: `canonicalProjectId()` collapses ssh-scp /
+  `https` / `ssh://` / `git://` / credentialed remote forms to one `host/path`
+  id; `resolveProjectId` (async) + `resolveProjectIdSync` + memoized
+  `cachedProjectSlug` turn a cwd into a filesystem-safe slug
+  (`github.com-june9593-vibebook`), remote-first with path fallback.
+- **Read** chokepoint (`project-resolve.ts resolveProjectFromCwd[WithIndex]`)
+  prefers the remote slug and falls back to the path slug, so existing
+  path-slug data still resolves during the transition (sync, no async ripple).
+- **Write** sites (`sources/claude-code.ts`, `sources/vscode-copilot.ts`,
+  `content-project-inference.ts` known roots) assign the remote slug; the
+  unknown-path inference fallback stays path-based.
+
+Migration of existing path-slug data is **not** shipped — wipe + re-digest
+locally, or let new data accumulate under the remote slug. +29 tests.
+
 ## 0.10.0 — 2026-06-24
 
 ### Removed: at-rest encryption (git-crypt filter)
