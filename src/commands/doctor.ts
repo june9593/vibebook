@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import chalk from "chalk";
 import { isStableDeviceName } from "../device.js";
+import { aggregatedPath } from "../aggregated-store.js";
 
 /**
  * `vibebook doctor` — opinionated health check. Prints a one-line status
@@ -211,6 +212,36 @@ export async function doctorCmd(): Promise<void> {
           fix: `cd "${config.repoPath}" && git rm -r .github/workflows scripts 2>/dev/null; git commit -m "remove workflow residue (lives on main since 0.5.3)" && git push`,
         });
       }
+
+      // 5d. Cross-device overlay freshness (P1). The plugin's recall/primer read
+      //     ~/.vibebook/aggregated (a read-only worktree of origin/main) for
+      //     sibling-device memory (P0b, plugin 0.12). If it's missing or behind
+      //     origin/main, cross-device recall silently misses sibling memory.
+      if (repoHasGit && config.repoUrl) {
+        const aggPath = aggregatedPath();
+        if (!existsSync(aggPath)) {
+          checks.push({
+            name: "Cross-device overlay", status: "warn",
+            detail: "~/.vibebook/aggregated not set up — recall/primer see only this device's memory",
+            fix: "vibebook sync   # creates + refreshes the cross-device overlay",
+          });
+        } else {
+          const overlayHead = gitRevParse(aggPath, "HEAD");
+          const originMain = gitRevParse(config.repoPath, "origin/main");
+          if (overlayHead && originMain && overlayHead !== originMain) {
+            checks.push({
+              name: "Cross-device overlay", status: "warn",
+              detail: "overlay is behind origin/main — cross-device recall may miss recent sibling-device memory",
+              fix: "vibebook sync   # refresh the overlay",
+            });
+          } else {
+            checks.push({
+              name: "Cross-device overlay", status: "ok",
+              detail: overlayHead ? "present + in sync with origin/main" : "present",
+            });
+          }
+        }
+      }
     }
   }
 
@@ -357,4 +388,15 @@ function readMemexVersion(): string | null {
   });
   if (r.status !== 0) return null;
   return r.stdout.trim() || null;
+}
+
+/** Resolve a git ref to a commit sha in `dir` (which shares .git with the
+ *  session repo). Null when the ref doesn't resolve / not a repo. Offline-safe:
+ *  reads local refs only, no network. */
+function gitRevParse(dir: string, ref: string): string | null {
+  const r = spawnSync("git", ["-C", dir, "rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
+    encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 3000,
+  });
+  if (r.status !== 0) return null;
+  return (r.stdout ?? "").trim() || null;
 }
