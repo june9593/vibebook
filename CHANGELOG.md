@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.0 — 2026-07-01
+
+### `doctor`: cross-device overlay freshness (P1)
+
+`vibebook doctor` now checks the cross-device overlay (`~/.vibebook/aggregated`,
+the read-only worktree of `origin/main` that the plugin's recall/primer read for
+sibling-device memory — plugin 0.12 / P0b). It warns when the overlay is missing
+("recall sees only this device's memory") or behind `origin/main` ("may miss
+recent sibling-device memory"), with `vibebook sync` as the fix. Offline-safe —
+compares local refs only, no network. Only runs when a remote is configured.
+
 ## 0.11.0 — 2026-06-30
 
 ### Project identity from the git remote (P0a)
