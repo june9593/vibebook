@@ -2,7 +2,6 @@ import { readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { SessionMessage } from "./types.js";
-import { projectSlugFromPath } from "./slug.js";
 import { cachedProjectSlug } from "./project-identity.js";
 
 /**
@@ -97,20 +96,21 @@ export function pathToProjectSlug(
   for (const r of roots) {
     if (absPath === r.path || absPath.startsWith(r.path + "/")) return r.slug;
   }
-  // Fallback: derive slug from the directory two levels up (matching the
-  // `parent-basename` rule in projectSlugFromPath). Treat the immediate
-  // file as the leaf and chop it off so we get a directory-ish slug.
+  // Fallback: derive a slug from the directory the touched file lives in.
   const lastSlash = absPath.lastIndexOf("/");
   if (lastSlash <= 0) return null;
   const dir = absPath.slice(0, lastSlash);
-  const slug = projectSlugFromPath(dir);
-  // Reject obvious non-project paths so they don't drown out real signal.
+  // Reject obvious non-project dirs BEFORE resolving identity (skip the git spawn).
   if (
-    slug === "home" || slug === "root" ||
     dir.startsWith("/tmp/") || dir.startsWith("/private/tmp/") ||
     dir.startsWith("/etc") || dir.startsWith("/usr") || dir.startsWith("/var") ||
     dir.startsWith("/System") || dir.startsWith("/opt")
   ) return null;
+  // Resolve through the SAME remote-first identity as known roots (#41 review):
+  // an inferred-override target that's a git repo gets its stable remote slug,
+  // not a path slug from a different namespace that would re-split the project.
+  const slug = cachedProjectSlug(dir);
+  if (slug === "home" || slug === "root") return null;
   return slug;
 }
 

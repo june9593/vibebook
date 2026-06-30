@@ -106,8 +106,9 @@ async function defaultGetRemote(dir: string): Promise<string | null> {
 }
 
 /** Synchronous remote read via `git config` — for sync call sites (the read
- *  chokepoint) where an async ripple isn't worth it. Mirrors doctor.ts's
- *  spawnSync("git", ["config", ...]) usage. */
+ *  chokepoint) where an async ripple isn't worth it. A short-timeout
+ *  `spawnSync` shelling out to a CLI, the same pattern doctor.ts uses for its
+ *  `--version` probes. */
 function defaultGetRemoteSync(dir: string): string | null {
   const r = spawnSync("git", ["-C", dir, "config", "--get", "remote.origin.url"], {
     encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 3000,
