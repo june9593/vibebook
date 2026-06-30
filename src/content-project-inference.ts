@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { SessionMessage } from "./types.js";
 import { projectSlugFromPath } from "./slug.js";
+import { cachedProjectSlug } from "./project-identity.js";
 
 /**
  * Content-based project inference.
@@ -72,7 +73,9 @@ export function listKnownProjectRoots(
   }
   const out = entries.map((name) => {
     const path = decodeProjectDirName(name);
-    return { path, slug: projectSlugFromPath(path) };
+    // Stable (remote-based) slug per known project root; falls back to the path
+    // slug for non-git roots. The unknown-path fallback below stays path-based.
+    return { path, slug: cachedProjectSlug(path) };
   });
   out.sort((a, b) => b.path.length - a.path.length);
   return out;

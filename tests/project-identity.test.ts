@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canonicalProjectId, projectSlugFromRemote, resolveProjectId } from "../src/project-identity.js";
+import { canonicalProjectId, projectSlugFromRemote, resolveProjectId, resolveProjectIdSync, cachedProjectSlug } from "../src/project-identity.js";
 
 describe("canonicalProjectId — collapses every remote form to host/path", () => {
   const cases: [string, string | null][] = [
@@ -115,6 +116,41 @@ describe("resolveProjectId — remote first, path fallback", () => {
       expect(r.source).toBe("path");
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("resolveProjectIdSync + cachedProjectSlug", () => {
+  it("sync variant: remote first, path fallback (injected getRemote)", () => {
+    expect(resolveProjectIdSync("/a/b/memvc", () => "git@github.com:june9593/memvc.git").slug)
+      .toBe("github.com-june9593-memvc");
+    expect(resolveProjectIdSync("/a/b/memvc", () => null).slug).toBe("b-memvc");
+    expect(resolveProjectIdSync("/a/b/memvc", () => { throw new Error("x"); }).slug).toBe("b-memvc");
+  });
+
+  it("real git fixture via the default sync resolver", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vb-projid-sync-"));
+    try {
+      const repo = join(dir, "memvc");
+      mkdirSync(repo);
+      execFileSync("git", ["-C", repo, "init"], { stdio: "ignore" });
+      execFileSync("git", ["-C", repo, "remote", "add", "origin", "https://github.com/june9593/memvc.git"], { stdio: "ignore" });
+      const r = resolveProjectIdSync(repo);
+      expect(r.source).toBe("remote");
+      expect(r.slug).toBe("github.com-june9593-memvc");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("cachedProjectSlug memoizes (same dir → stable result)", () => {
+    const d = mkdtempSync(join(tmpdir(), "vb-projid-cache-"));
+    try {
+      const s1 = cachedProjectSlug(d);
+      const s2 = cachedProjectSlug(d);
+      expect(s1).toBe(s2);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
     }
   });
 });

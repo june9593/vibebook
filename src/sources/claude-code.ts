@@ -4,7 +4,8 @@ import { homedir } from "node:os";
 import { join, basename } from "node:path";
 import type { SourceAdapter, DiscoveredSession } from "./base.js";
 import type { NormalizedSession, SessionMessage, ContentBlock } from "../types.js";
-import { deriveSlug, projectSlugFromPath } from "../slug.js";
+import { deriveSlug } from "../slug.js";
+import { cachedProjectSlug } from "../project-identity.js";
 import {
   inferProjectFromContent,
   listKnownProjectRoots,
@@ -132,7 +133,7 @@ function parseClaudeJsonl(sourcePath: string, content: string): NormalizedSessio
   // Default project from cwd; override only if content inference is
   // confident AND disagrees with cwd. We carry the original cwd-project
   // in `cwdProject` for auditing — caller (prepare/digest) can show it.
-  const cwdProject = projectSlugFromPath(cwd);
+  const cwdProject = cachedProjectSlug(cwd);
   const inference = inferProjectFromContent(messages, getRoots());
   const useInferred =
     inference.inferredProject !== null &&

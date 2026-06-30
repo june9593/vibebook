@@ -1,4 +1,5 @@
 import { simpleGit } from "simple-git";
+import { spawnSync } from "node:child_process";
 import { projectSlugFromPath } from "./slug.js";
 
 /**
@@ -103,3 +104,40 @@ async function defaultGetRemote(dir: string): Promise<string | null> {
     return null;
   }
 }
+
+/** Synchronous remote read via `git config` — for sync call sites (the read
+ *  chokepoint) where an async ripple isn't worth it. Mirrors doctor.ts's
+ *  spawnSync("git", ["config", ...]) usage. */
+function defaultGetRemoteSync(dir: string): string | null {
+  const r = spawnSync("git", ["-C", dir, "config", "--get", "remote.origin.url"], {
+    encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 3000,
+  });
+  if (r.status !== 0) return null;
+  const v = (r.stdout ?? "").trim();
+  return v ? v : null;
+}
+
+/** Sync sibling of `resolveProjectId` — same remote-first, path-fallback logic. */
+export function resolveProjectIdSync(
+  cwdOrRoot: string,
+  getRemote: (dir: string) => string | null = defaultGetRemoteSync,
+): ProjectIdentity {
+  let remote: string | null = null;
+  try { remote = getRemote(cwdOrRoot); } catch { remote = null; }
+  const slug = projectSlugFromRemote(remote);
+  if (slug) return { slug, source: "remote", canonical: canonicalProjectId(remote) };
+  return { slug: projectSlugFromPath(cwdOrRoot), source: "path", canonical: null };
+}
+
+const _slugCache = new Map<string, string>();
+/** `resolveProjectIdSync(dir).slug`, memoized per dir for one process. A sync
+ *  run resolves the same project roots repeatedly (per session / per tool-use
+ *  path); without this each call re-spawns `git config`. */
+export function cachedProjectSlug(dir: string): string {
+  const hit = _slugCache.get(dir);
+  if (hit !== undefined) return hit;
+  const slug = resolveProjectIdSync(dir).slug;
+  _slugCache.set(dir, slug);
+  return slug;
+}
+
